@@ -186,9 +186,11 @@ class RoadPath:
         #: those is left as it was.
         self.on_ground: np.ndarray = np.array(
             [op not in CARRIED for op in self.ops], dtype=bool)
-        #: A segment is reshaped only if both its ends are, so the ground stops
-        #: being disturbed at the abutment rather than half a segment past it.
-        self.segment_on_ground = self.on_ground[:-1] & self.on_ground[1:]
+        #: A segment is reshaped if *either* of its ends is laid on the land.
+        #: The last stretch before a portal is on the ground and the ground has
+        #: to come down to meet it; stopping one segment short leaves a lip of
+        #: hillside across the road at the place a car arrives at speed.
+        self.segment_on_ground = self.on_ground[:-1] | self.on_ground[1:]
         self._start = line[:-1]
         self._delta = line[1:] - line[:-1]
         lengths = np.einsum('ij,ij->i', self._delta[:, [0, 2]], self._delta[:, [0, 2]])
@@ -790,9 +792,15 @@ class RoadLayer:
         A game cannot find a road in a pile of triangles, and needs it to put a
         car on the track, time a lap and drive an opponent round. So the road
         travels with the world it is baked into: its centreline, how wide it is,
-        whether it closes into a circuit, and where along it the structures are
-        -- which is how a game knows the car is on a bridge without asking the
-        geometry.
+        whether it closes into a circuit, its cross-section, and where along it
+        the structures are -- which is how a game knows the car is on a bridge
+        without asking the geometry.
+
+        The cross-section is there because a game may have to build the
+        carriageway itself: tile geometry is level-of-detail geometry and
+        changes resolution as a car drives, and a collider whose surface steps
+        under the wheels is a wall in the middle of an open road. See
+        :class:`OpenGLContext.physics.road.RoadColliders`.
 
         The line is written at ``metadata_spacing`` rather than at its full
         density -- a course is a shape, and a game re-samples it for whatever it
@@ -805,6 +813,7 @@ class RoadLayer:
             'closed': closed,
             'carriagewayWidth': self.path.profile.carriageway_width,
             'totalWidth': self.path.profile.total_width,
+            'profile': _profile_json(self.path.profile),
             'length': self.path.length,
             'centreline': [[round(float(v), 3) for v in point] for point in line],
             'structures': [{'kind': str(kind),
@@ -877,6 +886,17 @@ class RoadLayer:
             out.extend(SceneNode(mesh=mesh, name='%s-%s' % (kind, part))
                        for part, mesh in parts.items())
         return out
+
+
+def _profile_json(profile: RoadProfile) -> dict[str, Any]:
+    """A road's cross-section as a baked world carries it."""
+    return {'laneWidth': profile.lane_width, 'lanes': profile.lanes,
+            'shoulderWidth': profile.shoulder_width,
+            'shoulderDrop': profile.shoulder_drop,
+            'vergeWidth': profile.verge_width,
+            'vergeDrop': profile.verge_drop,
+            'crossfall': profile.crossfall,
+            'textureLength': profile.texture_length}
 
 
 def _op_runs(ops: np.ndarray) -> list[tuple[Op, int, int]]:

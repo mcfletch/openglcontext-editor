@@ -39,19 +39,56 @@ class TestBakingFromTheCommandLine:
         assert (tmp_path / 'world' / 'tileset.json').read_text() == first
 
     def test_tree_density_reaches_the_world(self, tmp_path) -> None:
-        with_trees = _bytes_of_tiles(tmp_path, '--quiet')
-        without = _bytes_of_tiles(tmp_path, '--quiet', '--force',
-                                  '--tree-density', '0.0')
-        assert without < with_trees
+        import json
+        _run(tmp_path, '--quiet')
+        dense = json.load(open(tmp_path / 'world' / 'tileset.json'))
+        _run(tmp_path, '--quiet', '--force', '--tree-density', '0.0002')
+        sparse = json.load(open(tmp_path / 'world' / 'tileset.json'))
+        assert sparse['extras']['vegetation']['count'] \
+            < dense['extras']['vegetation']['count']
+
+    def test_a_world_with_no_trees_at_all_still_bakes(self, tmp_path) -> None:
+        import json
+        assert _run(tmp_path, '--quiet', '--tree-density', '0.0') == 0
+        document = json.load(open(tmp_path / 'world' / 'tileset.json'))
+        assert document['extras']['vegetation']['count'] == 0
 
     def test_the_road_surface_is_written_once_beside_the_tileset(
             self, tmp_path) -> None:
         """Embedded in every tile it would outweigh all the geometry."""
         _run(tmp_path, '--quiet')
         world = tmp_path / 'world'
-        assert (world / 'road-surface.png').exists()
+        surface = world / 'road-surface.png'
+        assert surface.exists()
         tiles = [entry for entry in os.listdir(world) if entry.endswith('.glb')]
-        assert max(os.path.getsize(world / entry) for entry in tiles) < 200 * 1024
+        biggest = max(os.path.getsize(world / entry) for entry in tiles)
+        assert biggest < 4 * os.path.getsize(surface)
+        assert _bytes_of_tiles(tmp_path, '--quiet', '--force') \
+            < len(tiles) * os.path.getsize(surface)
+
+    def test_the_trees_are_written_once_beside_it_too(self, tmp_path) -> None:
+        _run(tmp_path, '--quiet')
+        world = tmp_path / 'world'
+        assert (world / 'trees.npz').exists()
+        assert (world / 'trees' / 'fir.npz').exists()
+
+    def test_a_tile_forest_puts_them_in_the_tiles_instead(self, tmp_path) -> None:
+        import json
+        _run(tmp_path, '--quiet', '--forest', 'tiles')
+        document = json.load(open(tmp_path / 'world' / 'tileset.json'))
+        assert 'vegetation' not in document['extras']
+        assert not (tmp_path / 'world' / 'trees.npz').exists()
+
+    def test_a_tiled_ground_puts_the_landscape_in_the_tiles(self, tmp_path) -> None:
+        import json
+        _run(tmp_path, '--quiet', '--ground', 'tiles')
+        document = json.load(open(tmp_path / 'world' / 'tileset.json'))
+        assert 'terrain' not in document['extras']
+
+    def test_the_trees_it_used_are_credited(self, tmp_path) -> None:
+        """They are CC-BY, and the attribution travels with the world."""
+        _run(tmp_path, '--quiet')
+        assert 'CC-BY' in (tmp_path / 'world' / 'CREDITS.txt').read_text()
 
     def test_an_instance_cap_reaches_the_world(self, tmp_path) -> None:
         assert _run(tmp_path, '--quiet', '--max-instances', '4') == 0

@@ -19,6 +19,7 @@ from OpenGLContext_editor.world.structures import (
     CUTTING_LIMIT,
     EMBANKMENT_LIMIT,
     MINIMUM_SPAN,
+    MINIMUM_APPROACH,
     MINIMUM_TUNNEL,
     Op,
     Structure,
@@ -317,3 +318,52 @@ class TestARealAlignment:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestStructuresThatMeet:
+    """A deck that ends ten metres before a portal leaves ten metres of
+    embankment between them, which is an island of made ground inside an
+    untouched hillside -- a wall across the road. Real practice lands the deck
+    on the portal."""
+
+    def test_a_short_gap_between_two_structures_is_absorbed(self) -> None:
+        line, natural = _line(_flat(10) + _flat(20, 40.0) + _flat(1)
+                              + _flat(20, -40.0) + _flat(10))
+        found = _kinds(choose_structures(line, natural))
+        assert Op.DIRT not in found[1:-1]
+
+    def test_the_stretch_belongs_to_the_structure_before_it(self) -> None:
+        line, natural = _line(_flat(10) + _flat(20, 40.0) + _flat(1)
+                              + _flat(20, -40.0) + _flat(10))
+        bridge = next(s for s in choose_structures(line, natural)
+                      if s.kind is Op.BRIDGE)
+        tunnel = next(s for s in choose_structures(line, natural)
+                      if s.kind is Op.TUNNEL)
+        assert bridge.last + 1 == tunnel.first
+
+    def test_a_long_gap_is_left_as_the_road_it_is(self) -> None:
+        long_run = int(MINIMUM_APPROACH / SPACING) + 6
+        line, natural = _line(_flat(10) + _flat(20, 40.0) + _flat(long_run)
+                              + _flat(20, -40.0) + _flat(10))
+        assert Op.DIRT in _kinds(choose_structures(line, natural))[1:-1]
+
+    def test_two_of_a_kind_with_a_short_gap_become_one(self) -> None:
+        line, natural = _line(_flat(10) + _flat(20, 40.0) + _flat(1)
+                              + _flat(20, 40.0) + _flat(10))
+        assert _kinds(choose_structures(line, natural)).count(Op.BRIDGE) == 1
+
+    def test_the_road_still_arrives_and_leaves_on_dirt(self) -> None:
+        line, natural = _line(_flat(10) + _flat(20, 40.0) + _flat(1)
+                              + _flat(20, -40.0) + _flat(10))
+        kinds = _kinds(choose_structures(line, natural))
+        assert kinds[0] is Op.DIRT and kinds[-1] is Op.DIRT
+
+    def test_the_shipped_circuit_has_no_islands_of_made_ground(self) -> None:
+        from OpenGLContext.loaders.tiles3d.procedural import terrain_height
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        world = ProceduralWorld(structures=False)
+        line = world.circuit().points
+        natural = np.asarray(terrain_height(line[:, 0], line[:, 2]), dtype='d')
+        for run in choose_structures(line, natural, closed=True):
+            if run.kind is Op.DIRT:
+                assert run.length(line) >= MINIMUM_APPROACH - 1.0

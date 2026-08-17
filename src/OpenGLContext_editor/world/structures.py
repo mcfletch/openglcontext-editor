@@ -33,6 +33,7 @@ __all__ = [
     'Op', 'Structure', 'choose_structures',
     'CUTTING_LIMIT', 'EMBANKMENT_LIMIT', 'MINIMUM_TUNNEL', 'MINIMUM_SPAN',
     'APPROACH_LIMIT', 'ABUTMENT_HEIGHT', 'PORTAL_COVER', 'MINIMUM_CAUSEWAY',
+    'MINIMUM_APPROACH',
 ]
 
 #: How deep a cutting is worth digging, in metres. Below this the road is bored
@@ -66,6 +67,12 @@ PORTAL_COVER = 2.0
 #: How long a road has to run over drowned ground before the fill carrying it
 #: is called a causeway rather than an embankment, in metres.
 MINIMUM_CAUSEWAY = 40.0
+
+#: The shortest stretch of ordinary road worth building between two structures,
+#: in metres. Less than this is an island of made ground inside a hillside that
+#: was otherwise left alone -- which is a wall across the road, and is not how
+#: anything is built: a deck lands on the portal it runs into.
+MINIMUM_APPROACH = 60.0
 
 
 class Op(Enum):
@@ -168,6 +175,7 @@ def choose_structures(line: Any, natural: Any, *,
                departure > ABUTMENT_HEIGHT, closed)
     _reach_out(kinds, station, departure, Op.TUNNEL, approach_limit,
                departure < -PORTAL_COVER, closed)
+    _close_gaps(kinds, station, closed)
     if waterline is not None:
         _mark_causeways(kinds, station, ground, departure, waterline, closed)
     for first, last, op in overrides:
@@ -252,6 +260,27 @@ def _reach_out(kinds: np.ndarray, station: np.ndarray, departure: np.ndarray,
                 at = nxt
                 if at == end:                    # pragma: no cover - ring closed
                     break
+
+
+def _close_gaps(kinds: np.ndarray, station: np.ndarray, closed: bool) -> None:
+    """Give a short stretch of road between two structures to the first of them.
+
+    A deck that stops ten metres short of a portal leaves ten metres of
+    embankment standing inside a hillside nothing else disturbed, which is a
+    wall across the road and is not how anything is built. The stretch goes to
+    the structure before it, so the deck lands on the portal.
+    """
+    count = len(kinds)
+    for first, last in _runs_of(kinds == Op.DIRT):
+        if _run_length(station, first, last, False) >= MINIMUM_APPROACH:
+            continue
+        before = kinds[first - 1] if first > 0 else (
+            kinds[-1] if closed else Op.DIRT)
+        after = kinds[last + 1] if last + 1 < count else (
+            kinds[0] if closed else Op.DIRT)
+        if before is Op.DIRT or after is Op.DIRT:
+            continue
+        kinds[first:last + 1] = before
 
 
 def _mark_causeways(kinds: np.ndarray, station: np.ndarray, ground: np.ndarray,

@@ -20,7 +20,7 @@ import sys
 from collections.abc import Callable, Sequence
 
 from OpenGLContext_editor.bake.driver import bake_summary, bake_world
-from OpenGLContext_editor.world.procedural import CREDITS, ProceduralWorld
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 
 #: Where a bake goes when the command line does not say.
 DEFAULT_OUTPUT = os.path.join('.', 'baked-world')
@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help='trees per square metre (default: the world\'s own)')
     parser.add_argument('--max-instances', type=int, default=None,
                         help='cap on instances written into any one tile')
+    parser.add_argument('--ground', choices=('field', 'tiles'), default='field',
+                        help="how the landscape is carried: one splat terrain "
+                             "beside the tileset, or meshed into the tiles")
+    parser.add_argument('--forest', choices=('field', 'tiles'), default='field',
+                        help="how the trees are carried: one table beside the "
+                             "tileset, or instanced into the tiles")
     parser.add_argument('--seed', type=int, default=11,
                         help='the world is the same every bake for a given seed '
                              '(default: %(default)s)')
@@ -64,7 +70,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     _prepare_output(options.output, force=options.force)
 
     world = ProceduralWorld(extent=options.extent, resolution=options.resolution,
-                            seed=options.seed)
+                            seed=options.seed, ground=options.ground,
+                            forest=options.forest)
     if options.tree_density is not None:
         world.tree_density = options.tree_density
 
@@ -74,7 +81,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     # vertical extent would prune every cell the ground does not pass exactly
     # through.
     result = bake_world(world.layers(), options.output, depth=options.depth,
-                        credits=CREDITS, max_instances=options.max_instances,
+                        credits=world.credits(),
+                        max_instances=options.max_instances,
                         progress=progress)
     if options.quiet:
         print(result.tileset)

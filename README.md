@@ -13,8 +13,11 @@ identically, and no shipped *game* wants them in its dependency tree.
 - **The tile baker.** Spatial partition of an authored world into an octree,
   a level of detail per node, and the tileset written out through the engine's
   glTF and 3D Tiles writers.
-- **World generation.** Road and water geometry, DEM to splat control map,
-  refinement driven by distance to a road.
+- **World generation.** Road geometry and the alignment behind it — a drawn line
+  slid onto ground a road can follow, settled for grade and cornering speed, and
+  built as carriageway, causeway, viaduct or bore according to what the land
+  under it will take. Water, DEM to splat control map, and refinement driven by
+  distance to a road.
 - **The editor UI toolkit.** Tool modes, menus, gizmos and a top-down ortho map,
   built on `OpenGLContext.ui`.
 
@@ -24,13 +27,22 @@ A game imports `OpenGLContext`. An editor imports both.
 
 ```bash
 pip install OpenGLContext-editor
-oglc-bake --output /tmp/world      # hills, a canyon, a lake, a conifer forest
+oglc-bake --output /tmp/world      # hill country, a canyon, a lake, a forest
 oglc-view /tmp/world/tileset.json  # walk around in it
 ```
 
 `oglc-bake --view` runs both steps. `--extent`, `--depth` and `--resolution`
 set how big the world is, how deep the tile tree refines and how many ground
 samples each tile spends; `oglc-bake --help` lists the rest.
+
+**How the ground and the trees are carried** is the choice that decides what a
+world costs to draw. `--ground field` writes the landscape once beside the
+tileset as a height image and a splat control map, which a viewer draws as one
+mesh with detail materials blended per pixel; `--ground tiles` meshes it into
+the tile tree instead, which is what a world too large to hold at once needs.
+`--forest field` writes the trees as one table and lets the runtime choose what
+to draw from how far each is from the camera; `--forest tiles` puts them in the
+tiles. Both default to `field`, which is what the shipped world wants.
 
 ## Describe a world of your own
 

@@ -252,7 +252,7 @@ class TestTheShippedWorld:
             self, world) -> None:
         """What the structures are for: the earthworks left over are the size
         of earthworks."""
-        from OpenGLContext.loaders.tiles3d.procedural import terrain_height
+        terrain_height = world.natural()
         circuit = world.circuit()
         conformed = world.height_fn()
         line = circuit.points
@@ -268,9 +268,92 @@ class TestTheShippedWorld:
         beside = right + offset
         moved = np.abs(np.asarray(conformed(beside[:, 0], beside[:, 1]))
                        - np.asarray(terrain_height(beside[:, 0], beside[:, 1])))
-        assert float(np.percentile(moved, 99)) < 60.0
-        assert float(np.abs(line[:, 1] - natural).max()) > 100.0
+        assert float(np.percentile(moved, 99)) < 40.0
+        # And there was something worth building a structure for.
+        assert float(np.abs(line[:, 1] - natural).max()) > 40.0
 
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestWhereAStructureMeetsTheGround:
+    """The last stretch of road before a portal is on the ground, and the ground
+    has to come down to meet it. Reshaping only where *both* ends of a segment
+    are laid leaves the approach untouched -- a lip of hillside across the road
+    at the very place a car arrives at speed."""
+
+    def _approach(self):
+        """Road running level into a hill, with a bore through it."""
+        line = _line(height=0.0, count=41)
+        path = RoadPath(line, ops=_spanning(Op.TUNNEL, 20, 40))
+
+        def hill(x, z):
+            return np.clip((np.asarray(x, 'd') - 150.0) * 0.4, 0.0, 60.0)
+        return path, conform_terrain(hill, path), hill
+
+    def test_the_ground_meets_the_road_right_up_to_the_portal(self) -> None:
+        path, conformed, _hill = self._approach()
+        # Beside the carriageway, a step before the bore begins.
+        at = path.points[19]
+        beside = float(conformed(np.array([at[0]]), np.array([at[2] + 4.0]))[0])
+        assert beside < at[1] + 0.5
+
+    def test_the_hill_over_the_bore_is_still_there(self) -> None:
+        path, conformed, hill = self._approach()
+        at = path.points[30]
+        over = float(conformed(np.array([at[0]]), np.array([at[2]]))[0])
+        assert over == pytest.approx(float(hill(at[0], at[2])), abs=0.01)
+
+    def test_a_road_all_on_the_ground_is_unchanged(self) -> None:
+        path = RoadPath(_line(height=6.0))
+        conformed = conform_terrain(_ground(0.0), path)
+        assert float(conformed(np.array([200.0]), np.array([0.0]))[0]) \
+            == pytest.approx(6.0, abs=0.3)
+
+
+class TestTheRoadsOwnSectionTravelsWithIt:
+    """A game that builds its own collider for the carriageway -- because tile
+    geometry changes resolution under a car and the surface must not -- needs
+    the cut, not just how wide it is."""
+
+    def _profile(self):
+        layer = RoadLayer(RoadPath(_line()))
+        return layer.metadata()['roads'][0]['profile']
+
+    def test_the_cut_is_written_out(self) -> None:
+        assert self._profile()
+
+    def test_it_says_what_the_carriageway_is_made_of(self) -> None:
+        found = self._profile()
+        assert found['laneWidth'] == pytest.approx(RoadProfile().lane_width)
+        assert found['lanes'] == RoadProfile().lanes
+
+    def test_it_says_what_is_beside_it(self) -> None:
+        found = self._profile()
+        default = RoadProfile()
+        assert found['shoulderWidth'] == pytest.approx(default.shoulder_width)
+        assert found['vergeWidth'] == pytest.approx(default.verge_width)
+        assert found['vergeDrop'] == pytest.approx(default.verge_drop)
+
+    def test_it_rebuilds_the_profile_it_came_from(self) -> None:
+        line = _line()
+        mine = RoadProfile(lane_width=3.2, lanes=2, shoulder_width=0.6,
+                           verge_width=0.9, verge_drop=0.4, crossfall=0.03,
+                           texture_length=18.0)
+        found = RoadLayer(RoadPath(line, profile=mine)).metadata()['roads'][0]
+        import numpy as np
+        rebuilt = RoadProfile(
+            lane_width=found['profile']['laneWidth'],
+            lanes=found['profile']['lanes'],
+            shoulder_width=found['profile']['shoulderWidth'],
+            shoulder_drop=found['profile']['shoulderDrop'],
+            verge_width=found['profile']['vergeWidth'],
+            verge_drop=found['profile']['vergeDrop'],
+            crossfall=found['profile']['crossfall'],
+            texture_length=found['profile']['textureLength'])
+        assert np.allclose(rebuilt.section(), mine.section())
+
+    def test_it_is_plain_json(self) -> None:
+        import json
+        assert json.loads(json.dumps(self._profile()))

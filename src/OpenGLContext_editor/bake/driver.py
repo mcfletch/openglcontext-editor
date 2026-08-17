@@ -95,12 +95,19 @@ def bake_world(layers: Sequence[Layer], directory: str,
     state = _BakeState(directory=directory, prefix=prefix,
                        total=len(list(root_cell.iter_nodes())), progress=progress)
     root_tile = _bake_node(root_cell, layers, error, leaf_error, state)
-    if root_tile is None:
-        raise ValueError("nothing to bake: no layer produced content anywhere in %r"
-                         % (region,))
     extras: dict[str, Any] = {'bakedBy': 'OpenGLContext-editor'}
     for layer in layers:
         extras.update(getattr(layer, 'metadata', dict)() or {})
+    if root_tile is None:
+        if not shared and len(extras) == 1:
+            raise ValueError(
+                "nothing to bake: no layer produced content anywhere in %r"
+                % (region,))
+        # A world whose ground is a field rather than tiles has geometry in no
+        # tile at all, and is still a world: the landscape is written beside the
+        # tileset and named from its extras. The root covers the region so a
+        # viewer knows where the world is.
+        root_tile = BakedTile(bounds=region, geometric_error=error)
     path = write_tileset(root_tile, directory, name=name, credits=credits,
                          extras=extras)
     return BakeResult(tileset=path, directory=directory,
@@ -115,11 +122,16 @@ def _write_assets(layers: Sequence[Layer], directory: str) -> list[str]:
 
     A road surface, a decal atlas, a splat map: one file beside the tileset that
     every tile names, rather than a copy embedded in each of a thousand tiles.
+    A name may be a relative path, so a layer with a set of files of its own --
+    a forest's species -- keeps them in a directory rather than strewn beside
+    the tileset.
     """
     written: list[str] = []
     for layer in layers:
         for name, data in (getattr(layer, 'assets', dict)() or {}).items():
-            with open(os.path.join(directory, name), 'wb') as handle:
+            path = os.path.join(directory, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as handle:
                 handle.write(data)
             written.append(name)
     return written
