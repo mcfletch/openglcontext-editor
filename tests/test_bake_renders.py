@@ -53,13 +53,19 @@ def rendered(tmp_path_factory):
     directory = tmp_path_factory.mktemp('rendered')
     world = ProceduralWorld(extent=EXTENT, resolution=17, seed=11)
     result = bake_world(world.layers(), str(directory), depth=DEPTH)
+    # Stand on the circuit and look along it, rather than at a pose written
+    # down here: what the world looks like is the world's business, and a fixed
+    # camera silently stops meaning anything the moment the terrain changes.
+    line = world.circuit().points
+    eye = line[40] + np.array([0.0, 1.6, 0.0])
+    aim = line[(40 + 25) % len(line)] + np.array([0.0, 1.2, 0.0])
     capture = os.path.join(str(directory), 'view.png')
     environment = dict(os.environ, OPENGLCONTEXT_HIDDEN='1',
                        OPENGLCONTEXT_NO_VSYNC='1')
     completed = subprocess.run(
         [VIEWER, result.tileset, '--capture', capture, '--capture-delay', '4',
          '--frames', '90', '--size', '640x360',
-         '--eye', '0,95,60', '--look-at', '60,80,-120'],
+         '--eye', '%f,%f,%f' % tuple(eye), '--look-at', '%f,%f,%f' % tuple(aim)],
         env=environment, capture_output=True, text=True, timeout=300, check=False)
     assert completed.returncode == 0, completed.stderr[-2000:]
     assert os.path.exists(capture), completed.stdout[-2000:]
@@ -77,10 +83,18 @@ class TestTheFrameThatComesBack:
         assert rendered.std() > 0.02, "the frame is a flat colour"
 
     def test_the_sky_is_above_and_the_ground_below(self, rendered) -> None:
-        sky = _rows(rendered, 0.0, 0.15).reshape(-1, 3).mean(axis=0)
-        ground = _rows(rendered, 0.7, 1.0).reshape(-1, 3).mean(axis=0)
+        sky = _rows(rendered, 0.0, 0.08).reshape(-1, 3).mean(axis=0)
+        ground = _rows(rendered, 0.85, 1.0).reshape(-1, 3).mean(axis=0)
         assert sky[2] > sky[0], "the top of the frame is not sky-blue"
-        assert ground[1] >= ground[2], "the bottom of the frame is not ground"
+        assert ground[2] < sky[2], "the bottom of the frame is as blue as the sky"
+
+    def test_the_road_is_underfoot(self, rendered) -> None:
+        """Standing on the circuit, the bottom of the frame is tarmac: dark,
+        and grey rather than green."""
+        underfoot = _rows(rendered, 0.9, 1.0).reshape(-1, 3)
+        assert underfoot.mean() < 0.35
+        greenness = underfoot[:, 1] - np.maximum(underfoot[:, 0], underfoot[:, 2])
+        assert abs(float(greenness.mean())) < 0.05
 
     def test_the_ground_is_not_a_silhouette(self, rendered) -> None:
         """Lit geometry, not a flat unlit fill: the ground half varies."""

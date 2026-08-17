@@ -51,6 +51,7 @@ class BakeResult:
     root_error: float
     bounds: BoundingBox | None
     layers: dict[str, int] = field(default_factory=dict)
+    assets: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         """One line a command-line bake can print."""
@@ -85,12 +86,13 @@ def bake_world(layers: Sequence[Layer], directory: str,
             if hasattr(layer, 'max_instances'):
                 layer.max_instances = max_instances
     root_cell = _partition(region, depth, tuple(split_axes))
+    os.makedirs(directory, exist_ok=True)
+    shared = _write_assets(layers, directory)
     error = (root_error if root_error is not None
              else _default_root_error(region, layers))
 
     state = _BakeState(directory=directory, prefix=prefix,
                        total=len(list(root_cell.iter_nodes())), progress=progress)
-    os.makedirs(directory, exist_ok=True)
     root_tile = _bake_node(root_cell, layers, error, leaf_error, state)
     if root_tile is None:
         raise ValueError("nothing to bake: no layer produced content anywhere in %r"
@@ -101,7 +103,22 @@ def bake_world(layers: Sequence[Layer], directory: str,
                       tiles=len(list(root_tile.iter_tiles())),
                       contents=state.contents, bytes_written=state.bytes_written,
                       root_error=error, bounds=root_tile.bounds,
-                      layers=dict(state.layer_counts))
+                      layers=dict(state.layer_counts), assets=shared)
+
+
+def _write_assets(layers: Sequence[Layer], directory: str) -> list[str]:
+    """Write the files layers share between tiles; return their names.
+
+    A road surface, a decal atlas, a splat map: one file beside the tileset that
+    every tile names, rather than a copy embedded in each of a thousand tiles.
+    """
+    written: list[str] = []
+    for layer in layers:
+        for name, data in (getattr(layer, 'assets', dict)() or {}).items():
+            with open(os.path.join(directory, name), 'wb') as handle:
+                handle.write(data)
+            written.append(name)
+    return written
 
 
 @dataclass

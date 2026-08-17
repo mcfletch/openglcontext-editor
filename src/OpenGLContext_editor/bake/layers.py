@@ -59,6 +59,14 @@ class Layer(Protocol):
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
         """This layer's contribution to one tile, at that tile's error."""
 
+    def assets(self) -> dict[str, bytes]:
+        """Files this layer's content refers to, by name relative to the tileset.
+
+        A texture every tile uses is written once beside the tileset and named
+        by each of them, rather than embedded in every one. Optional: a layer
+        with nothing to share need not have this at all.
+        """
+
 
 # --- the ground ---------------------------------------------------------------
 
@@ -74,11 +82,20 @@ class HeightfieldLayer:
     ``skirt`` drops a vertical curtain around each patch, measured in vertex
     spacings, so the seam between a coarse tile and the finer ones beside it
     shows no gap. ``water_level`` clamps the surface flat at that height.
+
+    ``height_fn_at`` is for ground whose shape depends on how finely it is
+    sampled. A road cut into a hillside is the case that needs it: a cutting
+    narrower than a coarse tile's vertex spacing is stepped straight over, and
+    the road inside it disappears under the ground. Given
+    ``height_fn_at(spacing) -> height function``, each tile asks for the ground
+    at its own spacing and gets an earthwork it can actually represent. When it
+    is set, ``height_fn`` is still what the layer reports its *bounds* from.
     """
 
     height_fn: HeightFn
     extent: BoundingBox
     resolution: int = DEFAULT_RESOLUTION
+    height_fn_at: Callable[[float], HeightFn] | None = None
     color_fn: ColorFn | None = None
     water_level: float | None = None
     material: PBRMaterial | None = None
@@ -104,11 +121,21 @@ class HeightfieldLayer:
         positions, normals, colors, indices = terrain_patch(
             float(footprint.minimum[0]), float(footprint.maximum[0]),
             float(footprint.minimum[2]), float(footprint.maximum[2]),
-            self.resolution, height_fn=self.height_fn, skirt_depth=depth,
-            water_level=self.water_level, color_fn=self.color_fn)
+            self.resolution, height_fn=self._height_fn_for(footprint),
+            skirt_depth=depth, water_level=self.water_level,
+            color_fn=self.color_fn)
         mesh = PBRMesh(positions=positions, normals=normals, colors=colors,
                        indices=indices, material=self.material or _ground_material())
         return [SceneNode(mesh=mesh, name='%s_%d' % (self.name, self.resolution))]
+
+    def sample_spacing(self, footprint: BoundingBox) -> float:
+        """How far apart this tile's ground samples are, in metres."""
+        return float(max(footprint.size[0], footprint.size[2])) / self.resolution
+
+    def _height_fn_for(self, footprint: BoundingBox) -> HeightFn:
+        if self.height_fn_at is None:
+            return self.height_fn
+        return self.height_fn_at(self.sample_spacing(footprint))
 
     def _footprint(self, region: BoundingBox) -> BoundingBox | None:
         """The region's XZ overlap with the extent, or None if they miss."""

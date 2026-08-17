@@ -40,16 +40,29 @@ class TestBakingFromTheCommandLine:
         assert (tmp_path / 'world' / 'tileset.json').read_text() == first
 
     def test_tree_density_reaches_the_world(self, tmp_path) -> None:
-        _run(tmp_path, '--quiet', '--tree-density', '0.0')
-        document = json.loads((tmp_path / 'world' / 'tileset.json').read_text())
-        # With no trees the tiles hold ground alone, so each is smaller.
-        sizes = [os.path.getsize(tmp_path / 'world' / entry)
-                 for entry in os.listdir(tmp_path / 'world') if entry.endswith('.glb')]
-        assert document['root']['content']
-        assert max(sizes) < 60 * 1024
+        with_trees = _bytes_of_tiles(tmp_path, '--quiet')
+        without = _bytes_of_tiles(tmp_path, '--quiet', '--force',
+                                  '--tree-density', '0.0')
+        assert without < with_trees
+
+    def test_the_road_surface_is_written_once_beside_the_tileset(
+            self, tmp_path) -> None:
+        """Embedded in every tile it would outweigh all the geometry."""
+        _run(tmp_path, '--quiet')
+        world = tmp_path / 'world'
+        assert (world / 'road-surface.png').exists()
+        tiles = [entry for entry in os.listdir(world) if entry.endswith('.glb')]
+        assert max(os.path.getsize(world / entry) for entry in tiles) < 200 * 1024
 
     def test_an_instance_cap_reaches_the_world(self, tmp_path) -> None:
         assert _run(tmp_path, '--quiet', '--max-instances', '4') == 0
+
+
+def _bytes_of_tiles(tmp_path, *arguments):
+    _run(tmp_path, *arguments)
+    world = tmp_path / 'world'
+    return sum(os.path.getsize(world / entry) for entry in os.listdir(world)
+               if entry.endswith('.glb'))
 
 
 class TestWhatItRefuses:
