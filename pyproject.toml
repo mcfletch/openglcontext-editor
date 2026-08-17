@@ -1,0 +1,114 @@
+[build-system]
+# setuptools >= 77 is required for the PEP 639 SPDX `license` expression below.
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OpenGLContext-editor"
+dynamic = ["version"]
+description = "World-authoring toolkit for OpenGLContext: 3D Tiles octree baker, world generation and editor UI"
+readme = "README.md"
+license = "BSD-3-Clause"
+# The licence file is lowercase, so it does not match setuptools' case-sensitive
+# default LICEN[CS]E* glob; name it explicitly so PEP 639 packaging carries it.
+license-files = ["license.txt"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Mike C. Fletcher", email = "mcfletch@vrplumber.com" }
+]
+keywords = [
+    "OpenGLContext", "OpenGL", "3D Tiles", "glTF", "tileset", "baker", "octree",
+    "terrain", "roads", "editor", "level design", "3D",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# The engine supplies the glTF/tileset writers a bake emits through and the
+# scenegraph an editor session drives; numpy is the whole geometry pipeline.
+dependencies = [
+    "OpenGLContext>=3.0.0a1",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
+
+[project.urls]
+Homepage = "http://pyopengl.sourceforge.net/context/"
+Repository = "https://github.com/mcfletch/openglcontext-editor"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "OpenGLContext_editor.__version__" }
+
+[tool.setuptools.package-data]
+OpenGLContext_editor = ["py.typed"]
+
+# The engine's E/W/F/B base, plus import-order, pyupgrade and blind-except.
+# Nothing here predates the stricter set, so it is adopted from the first commit
+# rather than left as drift to clean up later.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "B",    # flake8-bugbear
+    "I",    # import ordering
+    "UP",   # pyupgrade (f-strings, modern typing)
+    "BLE",  # no blind except (broad catches must be justified)
+    "S110", # no silent try/except/pass
+]
+ignore = [
+    "E501",  # line too long -- kept readable by hand, not hard-wrapped (as in the engine)
+    "E741",  # ambiguous name -- x/y/z read naturally as coordinates here
+]
+
+[tool.mypy]
+# Matches the interpreter the stack is developed and tested against. The shipped
+# numpy stubs use syntax that only parses under 3.12, so a lower value here does
+# not check an older Python -- it aborts on numpy's own stub before checking
+# anything at all.
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+# A greenfield package, so the annotation bar the workspace asks of new code is
+# enforced by the checker rather than by review.
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+# Backstop so a single hung bake or GL smoke test cannot wedge a session.
+timeout = 300
+
+[tool.tox]
+env_list = ["py310", "py311", "py312", "py313", "py314"]
+
+[tool.tox.env_run_base]
+extras = ["dev"]
+# OpenGLContext and its stack publish pre-release versions, which uv/pip skip by
+# default; without this the resolver reports them "not available".
+pip_pre = true
+commands = [["pytest", { replace = "posargs", extend = true }]]
