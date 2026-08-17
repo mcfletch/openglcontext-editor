@@ -1,6 +1,5 @@
 """``oglc-bake`` from the outside: what the command line does and refuses."""
 
-import json
 import os
 
 import pytest

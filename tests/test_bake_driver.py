@@ -170,9 +170,8 @@ class TestTheContentItProduces:
             for uri in _uris(entry):
                 scene = gltf.load_gltf(os.path.join(result.directory, uri))
                 for node in _flatten(scene.group):
-                    translation = getattr(node, 'translation', None)
-                    if translation is not None and getattr(node, 'children', None):
-                        placed.add(tuple(round(float(v), 2) for v in translation))
+                    for matrix in _placements(node):
+                        placed.add(tuple(round(float(v), 2) for v in matrix[3, :3]))
         expected = {tuple(round(float(v), 2) for v in row) for row in trees.positions}
         assert placed >= expected
 
@@ -202,27 +201,22 @@ def _box_of(entry):
 def _points(path):
     """Every vertex of a tile, in world coordinates.
 
-    Instanced content arrives as one shared mesh under a Transform per
-    placement, so the walk carries the translation and scale down with it.
+    Through the engine's own scenegraph walk, so instanced content is measured
+    at every placement it is drawn at rather than at whatever this test would
+    have guessed.
     """
-    out = []
-    _collect(gltf.load_gltf(path).group, np.zeros(3), np.ones(3), out)
-    assert out, path
-    return np.vstack(out)
+    from OpenGLContext.physics.gltf_world import extract_trimesh
+    extracted = extract_trimesh(gltf.load_gltf(path).group)
+    assert extracted is not None, path
+    return extracted[0]
 
 
-def _collect(node, offset, scale, out):
-    translation = getattr(node, 'translation', None)
-    if translation is not None:
-        offset = offset + np.asarray(translation, 'd') * scale
-    node_scale = getattr(node, 'scale', None)
-    if node_scale is not None:
-        scale = scale * np.asarray(node_scale, 'd')
-    geometry = getattr(node, 'geometry', None)
-    if geometry is not None and getattr(geometry, 'positions', None) is not None:
-        out.append(np.asarray(geometry.positions, 'd') * scale + offset)
-    for child in getattr(node, 'children', None) or []:
-        _collect(child, offset, scale, out)
+def _placements(node):
+    """Where a node puts its geometry: its placements, or nothing."""
+    instance = getattr(node, 'instancePlacements', None)
+    if instance is None:
+        return ()
+    return instance() if instance() is not None else ()
 
 
 def _flatten(node, out=None):

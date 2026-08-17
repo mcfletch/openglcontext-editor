@@ -49,7 +49,24 @@ VERTICAL_TOLERANCE = 1e-3
 
 @runtime_checkable
 class Layer(Protocol):
-    """What the bake driver asks of anything it bakes."""
+    """What the bake driver asks of anything it bakes.
+
+    Two further methods are asked for *if a layer has them* -- they say nothing
+    about the common case, so requiring them of every layer would make the
+    simplest layer the one with the most to write:
+
+    ``assets() -> {filename: bytes}``
+        Files this layer's content refers to, by name relative to the tileset. A
+        texture every tile uses is written once beside the tileset and named by
+        each of them, rather than embedded in every one.
+
+    ``metadata() -> dict``
+        What a *game* needs to know about this layer, merged into the tileset's
+        ``extras``. A baked world is more than what it looks like: where the
+        road runs is not recoverable from a pile of triangles, but a game needs
+        it to put a car on the track, time a lap, or drive an opponent round --
+        so the layer that knows says so, once, and the world carries the answer.
+    """
 
     name: str
 
@@ -58,23 +75,6 @@ class Layer(Protocol):
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
         """This layer's contribution to one tile, at that tile's error."""
-
-    def assets(self) -> dict[str, bytes]:
-        """Files this layer's content refers to, by name relative to the tileset.
-
-        A texture every tile uses is written once beside the tileset and named
-        by each of them, rather than embedded in every one. Optional: a layer
-        with nothing to share need not have this at all.
-        """
-
-    def metadata(self) -> dict[str, Any]:
-        """What a *game* needs to know about this layer, for the tileset's extras.
-
-        A baked world is more than what it looks like. Where the road runs is
-        not recoverable from a pile of triangles, but a game needs it to put a
-        car on the track, time a lap, or drive an opponent round -- so the layer
-        that knows says so, once, and the world carries the answer. Optional.
-        """
 
 
 # --- the ground ---------------------------------------------------------------
