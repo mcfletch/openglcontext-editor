@@ -871,3 +871,120 @@ class TestTheGroundSitsUnderTheRoadNotInIt:
     def test_it_is_shallow_enough_not_to_be_a_kerb(self) -> None:
         from OpenGLContext_editor.world.road import FORMATION_DEPTH
         assert 0.0 < FORMATION_DEPTH <= 0.25
+
+
+class TestAWorldCanBeGivenItsOwnRoute:
+    """The shipped world draws its own circuit. An editor draws one for it, and
+    everything else about assembling a world -- the order the ground and the
+    trees are settled in, the corridor kept clear, the credits -- is the same
+    either way, so it is the same code either way.
+    """
+
+    def _plan(self, radius=400.0, points=64):
+        angle = np.linspace(0.0, 2 * np.pi, points, endpoint=False)
+        return np.stack([radius * np.cos(angle), radius * 0.7 * np.sin(angle)],
+                        axis=-1)
+
+    def test_the_route_it_is_given_is_the_one_it_builds(self) -> None:
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        world = ProceduralWorld(extent=2048.0, resolution=17,
+                                route=self._plan(radius=400.0))
+        circuit = world.circuit()
+        radius = np.linalg.norm(circuit.points[:, [0, 2]], axis=1)
+        assert radius.max() < 460.0
+        assert radius.min() > 250.0
+
+    def test_a_different_route_makes_a_different_circuit(self) -> None:
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        small = ProceduralWorld(extent=2048.0, resolution=17,
+                                route=self._plan(radius=200.0)).circuit()
+        large = ProceduralWorld(extent=2048.0, resolution=17,
+                                route=self._plan(radius=600.0)).circuit()
+        assert large.length > small.length * 2.0
+
+    def test_without_one_it_draws_its_own(self) -> None:
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        assert ProceduralWorld(extent=2048.0, resolution=17).circuit().length > 0
+
+    def test_the_route_is_still_settled_onto_the_ground(self) -> None:
+        """A drawn route is a plan, not an alignment: it arrives with no
+        heights on it and leaves with the grade limit honoured."""
+        from OpenGLContext_editor.world.procedural import (
+            CIRCUIT_MAX_GRADE,
+            ProceduralWorld,
+        )
+        world = ProceduralWorld(extent=2048.0, resolution=17,
+                                route=self._plan(radius=500.0))
+        line = world.circuit().points
+        steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
+        grade = np.abs(np.diff(line[:, 1])) / np.where(steps > 0, steps, 1.0)
+        assert grade.max() <= CIRCUIT_MAX_GRADE + 1e-3
+
+    def test_an_open_route_is_a_road_rather_than_a_circuit(self) -> None:
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        plan = np.stack([np.linspace(-800.0, 800.0, 40), np.zeros(40)], axis=-1)
+        world = ProceduralWorld(extent=2048.0, resolution=17, route=plan,
+                                closed=False)
+        line = world.circuit().points
+        assert not np.allclose(line[0], line[-1])
+
+
+class TestFindingTheRoadQuickly:
+    """Every ground sample in a world asks the road how far away it is, and the
+    earthwork's reach is hundreds of metres, so the question is asked over a
+    long line and answered a great many times. Comparing every sample against
+    every segment is the whole cost of conforming a landscape.
+    """
+
+    def _circuit(self, points=600, radius=800.0):
+        angle = np.linspace(0.0, 2 * np.pi, points, endpoint=False)
+        line = np.stack([radius * np.cos(angle),
+                         np.zeros(points),
+                         radius * 0.7 * np.sin(angle)], axis=-1)
+        return RoadPath(np.vstack([line, line[:1]]))
+
+    def _grid(self, extent=2048.0, resolution=65):
+        axis = np.linspace(-extent / 2, extent / 2, resolution)
+        return np.meshgrid(axis, axis, indexing='ij')
+
+    def test_it_answers_what_the_plain_search_answers(self) -> None:
+        path = self._circuit()
+        x, z = self._grid(resolution=33)
+        quick = path.nearest(x, z, radius=260.0)
+        every = path.nearest(x, z, radius=None)
+        # Only where the plain search found something inside the radius: the
+        # bounded one is allowed to say "further than that" and nothing more.
+        near = quick[0] < 260.0
+        assert np.allclose(quick[0][near], every[0][near], atol=1e-9)
+        assert np.allclose(quick[1][near], every[1][near], atol=1e-9)
+
+    def test_a_sample_far_from_the_road_is_out_of_reach(self) -> None:
+        path = self._circuit()
+        distance, _height = path.nearest(np.array([0.0]), np.array([0.0]),
+                                         radius=100.0)
+        assert not np.isfinite(distance[0])
+
+    def test_it_does_not_compare_every_sample_with_every_segment(self) -> None:
+        """The measurement that matters: the work, not the clock."""
+        path = self._circuit(points=600)
+        x, z = self._grid(resolution=65)
+        compared = path.comparisons(x, z, radius=260.0)
+        assert compared < 0.2 * x.size * 600
+
+    def test_a_grid_nowhere_near_the_road_costs_almost_nothing(self) -> None:
+        path = self._circuit(radius=200.0)
+        axis = np.linspace(4000.0, 5000.0, 33)
+        x, z = np.meshgrid(axis, axis, indexing='ij')
+        assert path.comparisons(x, z, radius=100.0) == 0
+
+    def test_the_shape_of_the_answer_still_matches_the_question(self) -> None:
+        path = self._circuit()
+        x, z = self._grid(resolution=17)
+        distance, height = path.nearest(x, z, radius=260.0)
+        assert distance.shape == x.shape and height.shape == x.shape
+
+    def test_one_point_is_still_one_answer(self) -> None:
+        path = self._circuit()
+        distance, height = path.nearest(np.array([800.0]), np.array([0.0]),
+                                        radius=260.0)
+        assert distance.shape == (1,) and height.shape == (1,)

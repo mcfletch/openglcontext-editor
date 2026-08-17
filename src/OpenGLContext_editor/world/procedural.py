@@ -89,6 +89,12 @@ class ProceduralWorld:
     ``extent`` is the side of the square it covers, in metres, centred on the
     origin. ``resolution`` is how many ground samples across each tile gets --
     the vertex budget that, divided by the tile's size, sets the detail.
+
+    ``route`` is the circuit's plan as an (N,2) array of XZ points -- what a
+    designer drew. Left out, the world draws its own. Either way it is a
+    *plan*: it arrives with no heights on it, and everything else about
+    assembling the world is the same, which is the point of it being one
+    argument rather than a second class.
     """
 
     extent: float = 4096.0
@@ -97,6 +103,10 @@ class ProceduralWorld:
     tree_height: float = 9.0
     seed: int = 11
     road: bool = True
+    #: The circuit's plan, (N,2) XZ; None for the world's own.
+    route: Any = None
+    #: Whether the route returns to where it started.
+    closed: bool = True
     wetness: float = 0.0
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
 
@@ -133,13 +143,14 @@ class ProceduralWorld:
     def circuit(self) -> RoadPath:
         """The race circuit, laid out on the natural ground and smoothed."""
         if self._circuit is None:
-            plan = circuit_plan(self.extent * 0.36, self.extent * 0.28)
+            plan = (np.asarray(self.route, dtype='d') if self.route is not None
+                    else circuit_plan(self.extent * 0.36, self.extent * 0.28))
             line = follow_terrain(plan, terrain_height, spacing=6.0,
                                   smoothing=CIRCUIT_SMOOTHING,
                                   maximum_grade=CIRCUIT_MAX_GRADE,
                                   design_speed=CIRCUIT_DESIGN_SPEED,
                                   minimum_height=WATER_LEVEL + CAUSEWAY_FREEBOARD,
-                                  closed=True)
+                                  closed=self.closed)
             self._circuit = RoadPath(line)
         return self._circuit
 

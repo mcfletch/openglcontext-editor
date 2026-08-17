@@ -43,6 +43,15 @@ from OpenGLContext_editor.bake.bounds import BoundingBox
 
 HeightFn = Callable[[Any, Any], Any]
 
+#: Below this many samples a query is answered in one go: grouping them by
+#: cell costs a sort, and a handful of points is not worth sorting.
+INDEX_THRESHOLD = 256
+
+#: How big a cell of the query index is, as a fraction of the reach being
+#: asked about. Smaller cells look at less road each and cost more passes to
+#: do it; half a reach is where the two stop paying for each other.
+INDEX_CELL = 0.5
+
 #: How steeply an earthwork may fall away from the road, as a fraction: about
 #: one in one and two-thirds, near the steepest earth stands at unheld. It is
 #: what decides how wide an embankment or a cutting is, since the batter runs
@@ -167,32 +176,74 @@ class RoadPath:
             np.broadcast_to(z, shape).ravel()
         distance = np.full(flat_x.shape, np.inf)
         height = np.zeros(flat_x.shape)
-
-        segments = self._candidates(flat_x, flat_z, radius)
-        if len(segments):
-            start = self._start[segments]
-            delta = self._delta[segments]
-            length2 = self._length2[segments]
-            # Project each query onto each candidate segment, clamped to it.
-            offset_x = flat_x[:, None] - start[None, :, 0]
-            offset_z = flat_z[:, None] - start[None, :, 2]
-            t = np.clip((offset_x * delta[None, :, 0] + offset_z * delta[None, :, 2])
-                        / length2[None, :], 0.0, 1.0)
-            near_x = start[None, :, 0] + t * delta[None, :, 0]
-            near_z = start[None, :, 2] + t * delta[None, :, 2]
-            gaps = np.hypot(flat_x[:, None] - near_x, flat_z[:, None] - near_z)
-            best = gaps.argmin(axis=1)
-            rows = np.arange(len(flat_x))
-            distance = gaps[rows, best]
-            height = start[best, 1] + t[rows, best] * delta[best, 1]
+        for rows, segments in self._batches(flat_x, flat_z, radius):
+            distance[rows], height[rows] = self._measure(
+                flat_x[rows], flat_z[rows], segments)
         return distance.reshape(shape), height.reshape(shape)
 
-    def _candidates(self, x: np.ndarray, z: np.ndarray,
-                    radius: float | None) -> np.ndarray:
-        """Segment indices whose box could hold the nearest point to any query."""
+    def comparisons(self, x: Any, z: Any, radius: float | None = None) -> int:
+        """How many sample-against-segment comparisons a query would cost.
+
+        The work, rather than the clock: what the index is for is that a whole
+        landscape does not compare every ground sample against every segment of
+        a four-kilometre road, and that is a thing to be able to measure.
+        """
+        x = np.asarray(x, dtype='d')
+        z = np.asarray(z, dtype='d')
+        shape = np.broadcast_shapes(x.shape, z.shape)
+        flat_x, flat_z = np.broadcast_to(x, shape).ravel(), \
+            np.broadcast_to(z, shape).ravel()
+        return sum(len(rows) * len(segments)
+                   for rows, segments in self._batches(flat_x, flat_z, radius))
+
+    def _measure(self, x: np.ndarray, z: np.ndarray, segments: np.ndarray
+                 ) -> tuple[np.ndarray, np.ndarray]:
+        """Distance and road height for a batch, against these segments."""
+        start = self._start[segments]
+        delta = self._delta[segments]
+        length2 = self._length2[segments]
+        # Project each query onto each candidate segment, clamped to it.
+        offset_x = x[:, None] - start[None, :, 0]
+        offset_z = z[:, None] - start[None, :, 2]
+        t = np.clip((offset_x * delta[None, :, 0] + offset_z * delta[None, :, 2])
+                    / length2[None, :], 0.0, 1.0)
+        near_x = start[None, :, 0] + t * delta[None, :, 0]
+        near_z = start[None, :, 2] + t * delta[None, :, 2]
+        gaps = np.hypot(x[:, None] - near_x, z[:, None] - near_z)
+        best = gaps.argmin(axis=1)
+        rows = np.arange(len(x))
+        return gaps[rows, best], start[best, 1] + t[rows, best] * delta[best, 1]
+
+    def _batches(self, x: np.ndarray, z: np.ndarray, radius: float | None
+                 ) -> list[tuple[np.ndarray, np.ndarray]]:
+        """``(query rows, segment indices)`` pairs covering the whole question.
+
+        Queries are grouped by which cell of a coarse grid they fall in, and
+        each cell is answered against the segments that come within ``radius``
+        of it. A landscape's samples arrive in a grid, so the grouping costs one
+        pass and the saving is the whole of the road it does not look at; a cell
+        the road comes nowhere near is answered with nothing at all.
+        """
         if not len(x):                           # pragma: no cover - empty query
-            return np.zeros(0, dtype=np.intp)
+            return []
         reach = float(radius) if radius is not None else np.inf
+        if not np.isfinite(reach) or len(x) < INDEX_THRESHOLD:
+            segments = self._near(x, z, reach)
+            return [(np.arange(len(x)), segments)] if len(segments) else []
+        cell = max(reach * INDEX_CELL, 1e-6)
+        keys = (np.floor(x / cell).astype(np.int64) << 32) \
+            + np.floor(z / cell).astype(np.int64)
+        order = np.argsort(keys, kind='stable')
+        edges = np.flatnonzero(np.diff(keys[order])) + 1
+        batches = []
+        for rows in np.split(order, edges):
+            segments = self._near(x[rows], z[rows], reach)
+            if len(segments):
+                batches.append((rows, segments))
+        return batches
+
+    def _near(self, x: np.ndarray, z: np.ndarray, reach: float) -> np.ndarray:
+        """Segment indices whose box comes within ``reach`` of these queries."""
         if not np.isfinite(reach):
             return np.arange(len(self._start))
         inside = ((self._low[:, 0] - reach <= x.max())
