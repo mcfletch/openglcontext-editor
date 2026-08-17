@@ -12,7 +12,7 @@ The engine sweeps a cross-section along a centreline
     actually drive
 :func:`conform_terrain`
     a height function that meets the road: the ground takes the road's own
-    cross-section out to the verge and blends back to natural beyond it
+    cross-section out to the verge and runs an earthwork out to meet the land
 :class:`RoadLayer`
     the road as a bake layer, re-sampled coarser for distant tiles and clipped
     to each tile it crosses
@@ -43,10 +43,23 @@ from OpenGLContext_editor.bake.bounds import BoundingBox
 
 HeightFn = Callable[[Any, Any], Any]
 
-#: How far the ground takes to return to its natural shape beyond the verge, in
-#: metres. Short enough that a road does not flatten the landscape around it,
-#: long enough that the join is not a step.
-DEFAULT_BLEND = 12.0
+#: How steeply an earthwork may fall away from the road, as a fraction: about
+#: one in one and two-thirds, near the steepest earth stands at unheld. It is
+#: what decides how wide an embankment or a cutting is, since the batter runs
+#: from the shoulder until it meets the land.
+EARTHWORK_SLOPE = 0.6
+
+#: How far out from the verge the machine will go, in metres. A departure from
+#: the ground the batter cannot close within this is left alone -- that is where
+#: a bridge or a tunnel belongs.
+MAXIMUM_EARTHWORK = 250.0
+
+#: How far below the road's surface the ground under it sits, in metres. A road
+#: is built on a formation and surfaced on top of it, so the ground beneath is
+#: not the tarmac; and two surfaces at exactly the same height fight over which
+#: one is drawn, which shows as the ground flickering through the carriageway
+#: along the grid the terrain is sampled on.
+FORMATION_DEPTH = 0.12
 
 #: Centreline spacing at the finest tile, in metres, and how much coarser it
 #: gets per metre of a tile's geometric error. A distant tile spends a fraction
@@ -459,42 +472,53 @@ def _ramp_up_to_grade(line: np.ndarray, maximum: float,
 
 
 def conform_terrain(height_fn: HeightFn, path: RoadPath,
-                    blend: float = DEFAULT_BLEND,
+                    earthwork_slope: float = EARTHWORK_SLOPE,
+                    maximum_earthwork: float = MAXIMUM_EARTHWORK,
+                    formation: float = FORMATION_DEPTH,
                     widening: float = 0.0) -> HeightFn:
     """A height function whose ground meets the road.
 
     Out to the edge of the verge the ground *is* the road's cross-section, so
     the two surfaces coincide instead of one poking through the other. Beyond
-    that the ground returns to its natural shape over ``blend`` metres, on a
-    smoothstep, so there is no ridge where the earthwork ends.
+    it the ground is an *earthwork*: fill runs down from the shoulder to where
+    it meets the land, a cutting runs up to it, and how far out that is depends
+    on how far the road is from the ground and on nothing else. A road already
+    on the ground disturbs almost nothing; one carried forty metres over a
+    valley builds an embankment as wide as it needs.
+
+    ``formation`` is how far below the road's surface the ground under it is
+    set: a road is built on a formation and surfaced on top of it, and two
+    surfaces at the same height fight over which one is drawn.
+
+    ``earthwork_slope`` is how steeply that batter may fall, as a fraction:
+    0.6 is about one in one and two-thirds, near the steepest earth stands at
+    unheld. ``maximum_earthwork`` is how far out the machine will go; a
+    departure it cannot reach the ground within is left as it is, because that
+    is where a bridge or a tunnel belongs and moving a mountain would only hide
+    the fact.
 
     ``widening`` is how far apart the samples are that will read this function.
     A ground mesh only knows the surface at its vertices and draws straight
     lines between them, so a cutting narrower than that spacing is stepped over
-    and the road inside it is buried by the ground it was cut into. Widening the
-    earthwork by the spacing puts a sample inside the corridor whatever the
-    resolution, which is why a coarse tile shows a broader, shallower cutting
-    rather than none at all. Zero gives the earthwork as designed, which is what
-    a collider, a scatter or a car asking where the ground is should use.
+    and the road inside it is buried by the ground it was cut into. Holding a
+    shelf at the verge for that spacing before the batter starts puts a sample
+    inside the corridor whatever the resolution, which is why a coarse tile
+    shows a broader, shallower cutting rather than none at all. Zero gives the
+    earthwork as designed, which is what a collider, a scatter or a car asking
+    where the ground is should use.
 
     The result is an ordinary height function: everything that samples terrain
     picks up the road's earthworks by being pointed at this instead.
     """
     half = path.profile.total_width / 2.0
-    reach = half + blend + widening
+    reach = half + widening + maximum_earthwork
 
     def conformed(x: Any, z: Any) -> np.ndarray:
         natural = np.asarray(height_fn(x, z), dtype='d')
         distance, road_height = path.nearest(x, z, radius=reach)
         distance = distance.reshape(natural.shape)
-        # Widening pushes the *blend* outwards without touching the road's own
-        # cross-section: ground beyond the verge is brought down to the verge's
-        # level, never up to the crown's, or it would bury the shoulder it is
-        # supposed to meet.
-        outside = distance > half
-        distance = np.where(outside, np.maximum(distance - widening, half), distance)
         road_height = road_height.reshape(natural.shape)
-        near = distance < half + blend
+        near = distance < reach
         if not np.any(near):
             return natural
         # Beside a climbing road, the ground has to sit low enough that the
@@ -502,18 +526,24 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
         # carriageway between them. The most the road can rise over one spacing
         # is its steepest grade, so that is how much further down the earthwork
         # goes at that resolution.
+        outside = distance > half
         sag = np.where(outside, widening * path.max_grade, 0.0)
-        edge = road_height + path.section_offset(distance) - sag
-        away = np.clip((distance - half) / blend, 0.0, 1.0)
-        weight = away * away * (3.0 - 2.0 * away)      # smoothstep
-        blended = edge * (1.0 - weight) + natural * weight
-        return np.where(near, blended, natural)
+        section = (road_height + path.section_offset(np.minimum(distance, half))
+                   - sag - formation)
+        # Out to the widening the ground is held at the verge; past that the
+        # batter falls away at its slope until it reaches the land.
+        beyond = np.clip(distance - half - widening, 0.0, maximum_earthwork)
+        room = earthwork_slope * beyond
+        earthwork = np.clip(natural, section - room, section + room)
+        return np.where(near, np.where(outside, earthwork, section), natural)
 
     return conformed
 
 
 def conform_terrain_at(height_fn: HeightFn, path: RoadPath,
-                       blend: float = DEFAULT_BLEND
+                       earthwork_slope: float = EARTHWORK_SLOPE,
+                       maximum_earthwork: float = MAXIMUM_EARTHWORK,
+                       formation: float = FORMATION_DEPTH,
                        ) -> Callable[[float], HeightFn]:
     """The conformed ground as a function of the spacing it will be sampled at.
 
@@ -523,7 +553,9 @@ def conform_terrain_at(height_fn: HeightFn, path: RoadPath,
     only at the finest.
     """
     def at(spacing: float) -> HeightFn:
-        return conform_terrain(height_fn, path, blend=blend, widening=spacing)
+        return conform_terrain(height_fn, path, earthwork_slope=earthwork_slope,
+                               maximum_earthwork=maximum_earthwork,
+                               formation=formation, widening=spacing)
     return at
 
 

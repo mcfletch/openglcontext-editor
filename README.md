@@ -96,9 +96,17 @@ print(bake_world([terrain, RoadLayer(path=path)], '/tmp/world', depth=4).summary
 - **lifted onto a causeway** where it would otherwise run below
   `minimum_height`, with its approaches raised to meet it.
 
-`conform_terrain_at` returns the ground *with the road cut into it*, at whatever
-sample spacing the tile being baked uses -- a cut narrower than that spacing
-falls between two vertices and never appears in the mesh.
+`conform_terrain_at` returns the ground *with the road built into it*, at
+whatever sample spacing the tile being baked uses -- a cut narrower than that
+spacing falls between two vertices and never appears in the mesh.
+
+An alignment that is not on the ground is on an **earthwork**: fill runs down
+from the shoulder to where it meets the land, a cutting runs up to it, and how
+far out that is depends on how far the road is from the ground and on nothing
+else. A road already on the land disturbs almost nothing; one carried forty
+metres over a valley builds an embankment as wide as it needs. Under the
+carriageway the ground sits a hand's breadth below the surface, because a road
+is built on a formation and surfaced on top of it.
 
 ## Install for development
 

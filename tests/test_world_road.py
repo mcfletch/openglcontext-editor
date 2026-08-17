@@ -145,25 +145,27 @@ class TestConformingTheGround:
         return path, conform_terrain(_bumpy, path, **kwargs)
 
     def test_the_ground_under_the_road_is_the_road(self) -> None:
-        path, ground = self._conformed()
+        """Less the formation the road is built on -- see
+        :class:`TestTheGroundSitsUnderTheRoadNotInIt`."""
+        path, ground = self._conformed(formation=0.0)
         height = float(ground(np.array([0.0]), np.array([-100.0]))[0])
         assert height == pytest.approx(5.0, abs=1e-6)
 
     def test_the_ground_takes_the_road_s_cross_section(self) -> None:
         """At the verge the ground is as far below the crown as the road is."""
-        path, ground = self._conformed()
+        path, ground = self._conformed(formation=0.0)
         edge = path.profile.total_width / 2.0
         height = float(ground(np.array([edge]), np.array([-100.0]))[0])
         expected = 5.0 + float(path.section_offset(edge))
         assert height == pytest.approx(expected, abs=1e-6)
 
     def test_far_from_the_road_the_ground_is_untouched(self) -> None:
-        _, ground = self._conformed(blend=10.0)
+        _, ground = self._conformed()
         x, z = np.array([200.0]), np.array([-100.0])
         assert float(ground(x, z)[0]) == pytest.approx(float(_bumpy(x, z)[0]))
 
     def test_the_earthwork_has_no_step_in_it(self) -> None:
-        path, ground = self._conformed(blend=12.0)
+        path, ground = self._conformed()
         x = np.linspace(0.0, 60.0, 400)
         z = np.full_like(x, -100.0)
         heights = ground(x, z)
@@ -280,7 +282,7 @@ class TestCarvingForACoarseTile:
         assert float(wide(x, z)[0]) < float(narrow(x, z)[0])
 
     def test_the_road_itself_is_still_at_road_level(self) -> None:
-        wide = conform_terrain(_flat, self._path(), widening=20.0)
+        wide = conform_terrain(_flat, self._path(), widening=20.0, formation=0.0)
         assert float(wide(np.array([0.0]), np.array([-100.0]))[0]) == pytest.approx(-10.0)
 
     def test_a_coarse_sample_beside_the_road_is_pulled_into_the_cutting(self) -> None:
@@ -743,3 +745,129 @@ class TestTheShippedCircuitIsDrivable:
     def test_it_is_still_a_circuit_through_hills(self) -> None:
         heights = self._circuit().points[:, 1]
         assert heights.max() - heights.min() > 20.0
+
+
+class TestTheEarthworkMeetsTheGroundOnASlope:
+    """A road that is not on the ground is on an earthwork, and an earthwork is
+    a slope: fill runs down from the shoulder to where it meets the land, and a
+    cutting runs up from it. How far out that is depends on how far the road is
+    from the ground, and on nothing else.
+
+    Returning to natural over a fixed distance instead leaves a road on a narrow
+    shelf with the land falling away beside it -- correct at the road, a cliff
+    two vehicle-widths out, and nothing a machine could have built.
+    """
+
+    def _across(self, ground, offsets, at=-100.0):
+        x = np.asarray(offsets, 'd')
+        return np.asarray(ground(x, np.full_like(x, at)), 'd')
+
+    def _on_fill(self, height=40.0, **kwargs):
+        """A road held well above flat ground: an embankment."""
+        path = RoadPath(_straight(400.0, count=41, height=height), RoadProfile())
+        return path, conform_terrain(_flat, path, **kwargs)
+
+    def _in_cutting(self, depth=40.0, **kwargs):
+        path = RoadPath(_straight(400.0, count=41, height=-depth), RoadProfile())
+        return path, conform_terrain(_flat, path, **kwargs)
+
+    def test_fill_runs_out_as_far_as_it_is_high(self) -> None:
+        path, ground = self._on_fill(height=40.0, earthwork_slope=0.5)
+        half = path.profile.total_width / 2.0
+        # 40 m up at one in two is 80 m of batter; the ground is still raised
+        # most of the way out and level again beyond.
+        assert self._across(ground, [half + 40.0])[0] > 15.0
+        assert self._across(ground, [half + 90.0])[0] == pytest.approx(0.0)
+
+    def test_a_shallower_batter_reaches_further(self) -> None:
+        _path, steep = self._on_fill(height=40.0, earthwork_slope=1.0)
+        _path, shallow = self._on_fill(height=40.0, earthwork_slope=0.25)
+        at = 60.0
+        assert self._across(shallow, [at])[0] > self._across(steep, [at])[0]
+
+    def test_the_batter_never_exceeds_its_slope(self) -> None:
+        _path, ground = self._on_fill(height=40.0, earthwork_slope=0.5)
+        x = np.linspace(0.0, 140.0, 1401)
+        heights = self._across(ground, x)
+        fall = np.abs(np.diff(heights)) / np.diff(x)
+        assert fall.max() <= 0.5 + 1e-6
+
+    def test_a_cutting_runs_up_the_same_way(self) -> None:
+        path, ground = self._in_cutting(depth=40.0, earthwork_slope=0.5)
+        half = path.profile.total_width / 2.0
+        assert self._across(ground, [half + 40.0])[0] < -15.0
+        assert self._across(ground, [half + 90.0])[0] == pytest.approx(0.0)
+
+    def test_a_road_on_the_ground_disturbs_almost_nothing(self) -> None:
+        """The common case: the alignment is already where the land is."""
+        path = RoadPath(_straight(400.0, count=41, height=0.0), RoadProfile())
+        ground = conform_terrain(_flat, path, earthwork_slope=0.5)
+        half = path.profile.total_width / 2.0
+        assert self._across(ground, [half + 5.0])[0] == pytest.approx(0.0, abs=0.1)
+
+    def test_the_road_s_own_cross_section_is_unchanged(self) -> None:
+        path, ground = self._on_fill(height=40.0, earthwork_slope=0.5,
+                                     formation=0.0)
+        half = path.profile.total_width / 2.0
+        x = np.linspace(-half, half, 41)
+        expected = 40.0 + np.asarray(path.section_offset(np.abs(x)), 'd')
+        assert np.allclose(self._across(ground, x), expected, atol=1e-6)
+
+    def test_an_earthwork_too_big_to_build_stops_at_its_limit(self) -> None:
+        """A departure the batter cannot reach the ground within is left as it
+        is: that is where a bridge or a tunnel belongs, and pretending
+        otherwise would move a mountain to hide the fact."""
+        path, ground = self._on_fill(height=400.0, earthwork_slope=0.5,
+                                     maximum_earthwork=60.0)
+        half = path.profile.total_width / 2.0
+        assert self._across(ground, [half + 70.0])[0] == pytest.approx(0.0)
+
+    def test_widening_still_holds_a_shelf_at_the_verge(self) -> None:
+        """The coarse-tile carve: a flat shelf a sample wide before the batter."""
+        path, ground = self._in_cutting(depth=20.0, earthwork_slope=0.5,
+                                        widening=16.0)
+        half = path.profile.total_width / 2.0
+        verge = -20.0 + float(path.section_offset(half))
+        x = np.linspace(half, half + 16.0, 40)
+        assert np.all(self._across(ground, x) <= verge + 1e-6)
+
+
+class TestTheGroundSitsUnderTheRoadNotInIt:
+    """A road is built on a formation and surfaced on top of it, so the ground
+    beneath is not the tarmac. Two surfaces at exactly the same height also
+    fight over which one is drawn, which shows as the ground flickering through
+    the carriageway in a sawtooth along the grid the terrain is sampled on.
+    """
+
+    def _ground(self, **kwargs):
+        path = RoadPath(_straight(200.0, height=5.0), RoadProfile())
+        return path, conform_terrain(_flat, path, **kwargs)
+
+    def test_the_ground_is_below_the_carriageway(self) -> None:
+        path, ground = self._ground()
+        x = np.linspace(-4.0, 4.0, 17)
+        heights = np.asarray(ground(x, np.full_like(x, -100.0)), 'd')
+        road = 5.0 + np.asarray(path.section_offset(np.abs(x)), 'd')
+        assert np.all(heights < road - 1e-6)
+
+    def test_it_is_below_by_the_formation_depth(self) -> None:
+        path, ground = self._ground(formation=0.4)
+        height = float(ground(np.array([0.0]), np.array([-100.0]))[0])
+        assert height == pytest.approx(5.0 - 0.4, abs=1e-6)
+
+    def test_it_is_below_at_the_verge_too(self) -> None:
+        """Or the ground would poke through where the batter starts."""
+        path, ground = self._ground(formation=0.4)
+        half = path.profile.total_width / 2.0
+        height = float(ground(np.array([half]), np.array([-100.0]))[0])
+        expected = 5.0 + float(path.section_offset(half)) - 0.4
+        assert height == pytest.approx(expected, abs=1e-6)
+
+    def test_the_earthwork_still_reaches_the_land(self) -> None:
+        path, ground = self._ground(formation=0.4, earthwork_slope=0.5)
+        assert float(ground(np.array([90.0]), np.array([-100.0]))[0]) \
+            == pytest.approx(0.0)
+
+    def test_it_is_shallow_enough_not_to_be_a_kerb(self) -> None:
+        from OpenGLContext_editor.world.road import FORMATION_DEPTH
+        assert 0.0 < FORMATION_DEPTH <= 0.25
