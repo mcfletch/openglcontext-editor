@@ -45,8 +45,11 @@ from OpenGLContext.scenegraph.road import (
 )
 from OpenGLContext.scenegraph.roadworks import (
     BridgeProfile,
+    CausewayProfile,
     TunnelProfile,
     bridge_meshes,
+    barrier_material,
+    causeway_meshes,
     concrete_material,
     tunnel_meshes,
 )
@@ -58,7 +61,7 @@ HeightFn = Callable[[Any, Any], Any]
 
 #: The operations under which the road does not stand on the land, so the
 #: terrain beneath (or above) it is left as it was found.
-CARRIED = frozenset((Op.BRIDGE, Op.TUNNEL))
+CARRIED = frozenset((Op.BRIDGE, Op.CAUSEWAY, Op.TUNNEL))
 
 
 class RoadSample(NamedTuple):
@@ -746,12 +749,21 @@ class RoadLayer:
     tile carries the same road at a fraction of the vertices, and clipped to the
     tile with an overlap so consecutive tiles join without a gap.
 
-    Where the road is on a bridge or in a tunnel the layer writes the structure
-    into the tile as well, and the carriageway over it takes the road's
+    Where the road is on a bridge or a causeway or in a tunnel the layer writes
+    the structure into the tile as well, and the carriageway over it takes the road's
     on-structure cut -- tapered onto it over ``transition``, so the verge
     flattens onto the deck across a few metres rather than stepping onto it.
     ``ground`` is the undisturbed terrain, which is where a bridge's piers stop;
     without it a deck is written with no piers under it.
+
+    ``shade(x, z) -> sun`` is how much of the sun reaches each place, in [0, 1],
+    written into the surface's vertex colours. A road through a wood carries the
+    wood's shade rather than being a lit strip laid across it.
+
+    ``structure_material`` is what a deck, a bore and a causeway's fill are
+    built from, and ``barrier`` the wall standing on the edge of one -- a
+    different thing, and darker, because it is the object closest to the driver
+    for the whole length of a crossing.
     """
 
     path: RoadPath
@@ -764,18 +776,23 @@ class RoadLayer:
     metadata_spacing: float = 8.0
     name: str = 'road'
     ground: HeightFn | None = None
+    shade: HeightFn | None = None
     bridge: BridgeProfile | None = None
+    causeway: CausewayProfile | None = None
     tunnel: TunnelProfile | None = None
     structure_material: PBRMaterial | None = None
+    barrier: PBRMaterial | None = None
     transition: float = TRANSITION_LENGTH
     _material: PBRMaterial = field(init=False, repr=False)
     _surface: Any = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
         self.bridge = self.bridge or BridgeProfile()
+        self.causeway = self.causeway or CausewayProfile()
         self.tunnel = self.tunnel or TunnelProfile()
         self.structure_material = (self.structure_material
                                    or concrete_material())
+        self.barrier = self.barrier or barrier_material()
         if self.material is not None:
             self._material = self.material
             return
@@ -858,10 +875,17 @@ class RoadLayer:
             found.append(SceneNode(
                 mesh=road_mesh(line[rows], self.path.profile,
                                material=self._material,
-                               sections=sections[rows]),
+                               sections=sections[rows],
+                               shade=(None if self.shade is None
+                                      else self._shade_of)),
                 name=self.name))
             found.extend(self._structures(line, ops, rows))
         return found
+
+    def _shade_of(self, points: np.ndarray) -> Any:
+        """How much of the sun reaches each written point of the surface."""
+        assert self.shade is not None
+        return np.asarray(self.shade(points[:, 0], points[:, 2]), dtype='d')
 
     def _structures(self, line: np.ndarray, ops: np.ndarray,
                     rows: np.ndarray) -> list[SceneNode]:
@@ -879,7 +903,12 @@ class RoadLayer:
             run = line[rows[first:last + 1]]
             if kind is Op.BRIDGE:
                 parts = bridge_meshes(run, self.path.profile, self.ground,
-                                      self.bridge, self.structure_material)
+                                      self.bridge, self.structure_material,
+                                      self.barrier)
+            elif kind is Op.CAUSEWAY:
+                parts = causeway_meshes(run, self.path.profile, self.ground,
+                                        self.causeway, self.structure_material,
+                                        self.barrier)
             else:
                 parts = tunnel_meshes(run, self.path.profile, self.tunnel,
                                       self.structure_material)

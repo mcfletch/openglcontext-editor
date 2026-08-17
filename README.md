@@ -44,6 +44,15 @@ the tile tree instead, which is what a world too large to hold at once needs.
 to draw from how far each is from the camera; `--forest tiles` puts them in the
 tiles. Both default to `field`, which is what the shipped world wants.
 
+A `field` forest carries three more things with it. The trees' own **ground
+cover** travels as a recipe rather than a scatter — a clump, a card, how dense,
+and which of the splat map's layers it grows on — because there is far too much
+ground to write a blade of grass for every square metre of it. The **canopy's
+shade** is worked out from the trunks and read by the ground, the trees, the
+grass and the road alike, so a clearing and a forest floor differ for all of
+them at once. And the **road's own shade** is written into its surface, because
+the trees do not move and neither does the sun.
+
 ## Describe a world of your own
 
 A world is a list of *layers*, and a layer answers one question: what is in this
@@ -112,7 +121,14 @@ print(bake_world([terrain, RoadLayer(path=path)], '/tmp/world', depth=4).summary
 whatever sample spacing the tile being baked uses -- a cut narrower than that
 spacing falls between two vertices and never appears in the mesh.
 
-An alignment that is not on the ground is on an **earthwork**: fill runs down
+Where the alignment is a few metres over low ground the road is instead carried
+on a **causeway**: fill retained at the width of the road, walled at each edge,
+with the ground either side left where it was found. The wall is low enough for
+a seated driver to see over &mdash; a causeway is built to cross something worth
+seeing.
+
+An alignment that is not on the ground and not on a causeway is on an
+**earthwork**: fill runs down
 from the shoulder to where it meets the land, a cutting runs up to it, and how
 far out that is depends on how far the road is from the ground and on nothing
 else. A road already on the land disturbs almost nothing; one carried forty
@@ -144,11 +160,12 @@ pytest
 
 ## Status
 
-The baker works: a world of terrain, instanced vegetation and roads bakes to a
+The baker works: a world of terrain, forest, ground cover and roads bakes to a
 3D Tiles octree the engine streams, and [glisteel](https://github.com/mcfletch/glisteel)
-drives a lap of it. Roads generate for a route that follows the ground or is
-carried over a low area on a causeway; bridges, tunnels, water and the editor UI
-toolkit are designed in
+drives a lap of it. A road follows the ground, rides a walled causeway over low
+ground, spans a valley on a viaduct or runs through a bore, and carries the
+shade of the wood it runs through. Water and the editor UI toolkit are designed
+in
 [GLISTEEL-WORLD-AUTHORING.md](https://github.com/mcfletch/openglcontext/blob/main/plans/GLISTEEL-WORLD-AUTHORING.md),
 which also records the division of labour between this package and the engine.
 

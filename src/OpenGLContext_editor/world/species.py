@@ -10,7 +10,12 @@ What is here is the *shipped example* world's answer, which is the forest demo's
 species set. It is used when that package is installed, and
 :func:`shipped_species` says plainly what to do when it is not.
 
-**These assets are CC-BY 4.0** and their attributions travel with any world
+The ground *cover* between the trees comes from the same place:
+:func:`shipped_cover` is the demo's grass clump and its card. The clump and the
+card baked from it are the toolkit's own work and carry no attribution
+requirement of their own.
+
+**The tree assets are CC-BY 4.0** and their attributions travel with any world
 baked from them: :func:`shipped_credits` returns them, and the bake writes them
 into the tileset's copyright and its ``CREDITS.txt``. Baking a world with them
 and shipping it without the credit is a licence breach, which is why the two are
@@ -21,10 +26,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
 from OpenGLContext.scenegraph.vegetation.field import TreeSpecies
 
 __all__ = ['shipped_species', 'shipped_credits', 'species_directory',
-           'SHIPPED', 'CREDITS']
+           'shipped_cover', 'SHIPPED', 'CREDITS', 'COVER']
 
 #: The species the example world uses, as ``(name, files..., keys)``. Fir and
 #: Noel pine are conifers, which is what a coniferous landscape wants; the two
@@ -46,6 +52,12 @@ SHIPPED = (
          solid=('bP', 'bN', 'bU', 'bI'), foliage=('cP', 'cN', 'cU', 'cI'),
          card_width=0.72),
 )
+
+#: What the example world grows between its trees. A clump of real blades for
+#: the near field and the card it is baked into for the far one, dense enough
+#: that a driver sees ground cover rather than individual tufts.
+COVER = dict(name='grass', clump='basic-clump.glb', card='grass_clump_imp.png',
+             density=1.6, height=0.5)
 
 #: What a world baked from :data:`SHIPPED` has to say about where its trees came
 #: from. CC-BY 4.0 requires the attribution to travel with the work.
@@ -96,6 +108,21 @@ def shipped_species(directory: str | None = None) -> list[TreeSpecies]:
                     % (os.path.basename(part), species.name, where))
         found.append(species)
     return found
+
+
+def shipped_cover(directory: str | None = None) -> CoverSpecies:
+    """The example world's ground cover, with its files resolved.
+
+    ``directory`` holds the files; it defaults to :func:`species_directory`.
+    """
+    where = directory or species_directory()
+    cover = CoverSpecies(**COVER).beside(where)
+    for part in (cover.card, cover.clump):
+        if part and not os.path.exists(part):
+            raise LookupError(
+                "%s is part of the '%s' ground cover and is not in %s"
+                % (os.path.basename(part), cover.name, where))
+    return cover
 
 
 def shipped_credits() -> tuple[str, ...]:

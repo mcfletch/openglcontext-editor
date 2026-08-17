@@ -47,10 +47,12 @@ class TestAPathThatKnowsItsStructures:
         assert not path.on_ground[20]
         assert path.on_ground[0]
 
-    def test_a_causeway_still_stands_on_the_ground(self) -> None:
-        """It is fill, so the ground is what it is made of."""
+    def test_a_causeway_is_carried_too(self) -> None:
+        """Its fill is a structure the width of the road, not shaped land: the
+        terrain either side of it is left where it was found."""
         path = RoadPath(_line(), ops=_spanning(Op.CAUSEWAY, 10, 30))
-        assert bool(path.on_ground.all())
+        assert not path.on_ground[20]
+        assert path.on_ground[0]
 
     def test_the_ops_have_to_match_the_points(self) -> None:
         with pytest.raises(ValueError):

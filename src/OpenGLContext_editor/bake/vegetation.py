@@ -19,6 +19,13 @@ The scatter is still decided *here*, at bake time -- where the trees stand, how
 tall they are and which kind each is are decisions about the world, made once
 with the road's corridor kept clear, not something a runtime should be
 re-rolling.
+
+The ground *cover* between them goes the other way. There is far too much ground
+to write a blade of grass for every square metre of it, and none of those blades
+is a decision anybody made, so what travels is the recipe -- a clump, a card, how
+dense, and which of the splat map's layers it grows on -- and the runtime
+scatters it around the camera. See
+:class:`~OpenGLContext.scenegraph.vegetation.cover.GroundCover`.
 """
 from __future__ import annotations
 
@@ -30,6 +37,7 @@ from typing import Any
 
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import SceneNode
+from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
 from OpenGLContext.scenegraph.vegetation.field import TreeSpecies
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -38,6 +46,11 @@ from OpenGLContext_editor.bake.bounds import BoundingBox
 #: tileset. A directory rather than the tileset's own, because a species is
 #: half a dozen files and a world is one.
 SPECIES_DIRECTORY = 'trees'
+
+#: Which of the ground's splat layers cover grows on when the caller does not
+#: say. Grass and leaf litter are the soft ground; rock and dirt are not, and
+#: the road's corridor is painted out of all of them before the map is written.
+COVER_ON = ('grass', 'forest_floor')
 
 
 @dataclass
@@ -60,6 +73,8 @@ class VegetationLayer:
     species: Sequence[TreeSpecies]
     yaws: Any = None
     species_id: Any = None
+    cover: CoverSpecies | None = None
+    cover_on: Sequence[str] | None = None
     name: str = 'trees'
 
     def __post_init__(self) -> None:
@@ -104,11 +119,20 @@ class VegetationLayer:
 
     def metadata(self) -> dict[str, Any]:
         """Where the table is and what the trees in it are drawn from."""
-        return {'vegetation': {
+        record: dict[str, Any] = {
             'trees': self._table_name(),
             'count': self.tree_count,
             'species': [self._written(entry).to_json() for entry in self.species],
-        }}
+        }
+        if self.cover is not None:
+            grown = self.cover.to_json()
+            grown['card'] = self._under(self.cover.card)
+            grown['clump'] = (self._under(self.cover.clump)
+                              if self.cover.clump else None)
+            grown['on'] = list(self.cover_on if self.cover_on is not None
+                               else COVER_ON)
+            record['cover'] = grown
+        return {'vegetation': record}
 
     def assets(self) -> dict[str, bytes]:
         """The table, and every file the species are drawn from.
@@ -118,13 +142,17 @@ class VegetationLayer:
         sharing one bark texture -- is written once.
         """
         written: dict[str, bytes] = {self._table_name(): self._table()}
-        for entry in self.species:
-            for source in (entry.mesh, entry.solid_texture,
-                           entry.foliage_texture, entry.impostor):
-                name = os.path.join(SPECIES_DIRECTORY, os.path.basename(source))
-                if name not in written:
-                    with open(source, 'rb') as handle:
-                        written[name] = handle.read()
+        sources = [source for entry in self.species
+                   for source in (entry.mesh, entry.solid_texture,
+                                  entry.foliage_texture, entry.impostor)]
+        if self.cover is not None:
+            sources.extend(part for part in (self.cover.card, self.cover.clump)
+                           if part)
+        for source in sources:
+            name = self._under(source)
+            if name not in written:
+                with open(source, 'rb') as handle:
+                    written[name] = handle.read()
         return written
 
     def _table_name(self) -> str:

@@ -47,30 +47,33 @@ from OpenGLContext_editor.world.route import cornering_radius, ease_route
 from OpenGLContext_editor.world.scatter import scatter_on_heightfield, yaw_quaternions
 from OpenGLContext_editor.world.species import (
     biome_species,
+    shipped_cover,
     shipped_credits,
     shipped_species,
 )
 from OpenGLContext_editor.world.structures import Op, choose_structures
 
-#: Trees per square metre, before thinning. A forest, rather than an orchard:
-#: at this density a four-kilometre world scatters two million candidates, which
-#: blue-noise thinning brings down to the few hundred thousand that actually fit
-#: on the ground.
-TREE_DENSITY = 0.12
+#: Trees per square metre, before thinning. Enough candidates that the spacing
+#: below is what actually decides the forest: a scatter thin enough to leave gaps
+#: of its own reads as planting, because the eye finds the gaps.
+TREE_DENSITY = 0.5
 
 #: How much room a tree keeps to itself, in metres: a fixed part plus a share of
-#: its own height, so a mature tree holds more ground than a sapling. Without it
-#: a uniform scatter piles trees into each other and a hillside reads as soup;
-#: with too much of it a forest reads as parkland.
-TREE_SPACING = 0.9
-TREE_SPACING_PER_METRE = 0.12
+#: its own height, so a mature tree holds more ground than a sapling. This is
+#: what sets the density of the finished stand -- at these numbers a stand of
+#: fifteen-metre firs closes up at about two metres between trunks, which is a
+#: wood you cannot see through rather than trees standing on a lawn.
+TREE_SPACING = 0.55
+TREE_SPACING_PER_METRE = 0.085
 
 #: Where trees will grow: above the waterline, below the treeline, and off
 #: anything a tree would slide down. The treeline is quoted against the shipped
 #: landscape's full relief and scales with it, so a gentler world keeps the same
-#: proportion of bare tops rather than losing them.
-TREE_ELEVATION = (WATER_LEVEL + 2.0, 260.0)
-TREE_SLOPE_LIMIT = 44.0
+#: proportion of bare tops rather than losing them. Trees hold ground steeper
+#: than a road can climb, so the limit is what a root system gives up on, not
+#: what a vehicle does.
+TREE_ELEVATION = (WATER_LEVEL + 1.0, 330.0)
+TREE_SLOPE_LIMIT = 52.0
 
 #: The tile error at which a conifer becomes two crossed cards. Roughly the
 #: point at which a tree covers a few pixels, so the swap is not seen.
@@ -124,7 +127,7 @@ CAUSEWAY_FREEBOARD = 2.5
 #: metres -- the cleared corridor a road is built inside. Narrow, because the
 #: circuit is a forest road: the trees come up to the verge and the drive is
 #: through them rather than past them.
-ROAD_CLEARANCE = 1.5
+ROAD_CLEARANCE = 0.8
 
 #: The circuit's cross-section. Two lanes, a shoulder wide enough to put two
 #: wheels on and no more, and a verge that is a strip rather than a field: a
@@ -134,6 +137,12 @@ CIRCUIT_PROFILE = RoadProfile(lane_width=3.6, lanes=2,
                               shoulder_width=0.7, shoulder_drop=0.05,
                               verge_width=1.0, verge_drop=0.35,
                               texture_length=22.0)
+
+#: How many pixels across the splat control map. Over four kilometres, 2048 is
+#: two metres a pixel, which is what a twelve-metre road corridor needs to be a
+#: corridor: at eight metres a pixel the carriageway is thinner than one pixel
+#: and the ground cover grows straight over it.
+CONTROL_SIZE = 2048
 
 #: How many samples across the field terrain's height grid. 1025 over four
 #: kilometres is four-metre spacing: fine enough that a road's cutting is a
@@ -147,6 +156,11 @@ FIELD_RESOLUTION = 1025
 #: dirt is what the road's corridor is painted with, so the carriageway runs
 #: through disturbed ground rather than out of a lawn.
 GROUND_LAYERS = ('grass', 'forest_floor', 'rock', 'dirt')
+
+#: Which of those the ground cover grows on: the two soft ones. Rock will not
+#: hold it and the road's corridor is painted as dirt, so the grass stops at the
+#: verge without being told where the road is.
+COVER_ON = ('grass', 'forest_floor')
 GROUND_RULES = (
     LayerRule(),
     LayerRule(slope=(0.16, 0.55), weight=1.5),
@@ -207,7 +221,7 @@ class ProceduralWorld:
     extent: float = 4096.0
     resolution: int = 33
     tree_density: float = TREE_DENSITY
-    tree_height: float = 9.0
+    tree_height: float = 15.0
     seed: int = 11
     road: bool = True
     #: The circuit's plan, (N,2) XZ; None for the world's own.
@@ -220,6 +234,8 @@ class ProceduralWorld:
     ground: str = 'field'
     #: How many samples across the field's height grid.
     field_resolution: int = FIELD_RESOLUTION
+    #: How many pixels across the splat control map.
+    control_size: int = CONTROL_SIZE
     #: How tall the hills are, against the shipped landscape's own relief.
     relief: float = RELIEF
     #: Whether the world's *own* circuit is slid onto ground a road can follow.
@@ -232,6 +248,8 @@ class ProceduralWorld:
     species_directory: str | None = None
     wetness: float = 0.0
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
+    _terrain: Layer | None = field(default=None, init=False, repr=False)
+    _scatter: Any = field(default=None, init=False, repr=False)
 
     def natural(self) -> HeightFn:
         """The land before the road touched it, at this world's relief."""
@@ -270,6 +288,7 @@ class ProceduralWorld:
         if self.road:
             layers.append(self.circuit_layer())
         return layers
+
 
     def height_fn(self) -> Any:
         """The ground as the world finally has it, earthworks included."""
@@ -313,10 +332,15 @@ class ProceduralWorld:
 
     def circuit_layer(self) -> RoadLayer:
         return RoadLayer(self.circuit(), wetness=self.wetness,
-                         ground=self.natural())
+                         ground=self.natural(), shade=self.canopy_shade())
 
     def terrain(self) -> Layer:
         """The ground, as whichever kind of terrain layer the world asked for."""
+        if self._terrain is None:
+            self._terrain = self._build_terrain()
+        return self._terrain
+
+    def _build_terrain(self) -> Layer:
         if self.ground == 'field':
             return self.field_terrain()
         if self.ground != 'tiles':
@@ -327,11 +351,28 @@ class ProceduralWorld:
             extent=self.footprint(), resolution=self.resolution,
             color_fn=terrain_colors, water_level=WATER_LEVEL, name='terrain')
 
+    def canopy_shade(self) -> Any:
+        """How much of the sun reaches each place: ``shade(x, z)`` in [0, 1].
+
+        The hillside's own shadow with the forest's over it, worked out here so
+        that what a bake writes into the road agrees with what the viewer draws
+        the ground and the plants with -- it is the same node answering, with
+        the same trunks and the same sun. None where the world has no landscape
+        or no forest to shade it with.
+        """
+        from OpenGLContext.scenegraph.terrain.splat import SplatTerrain
+        layer = self.terrain()
+        if not isinstance(layer, FieldTerrainLayer) or self.forest != 'field':
+            return None
+        return SplatTerrain(layer.field(), list(GROUND_LAYERS), control=None,
+                            canopy=self.scatter().positions).shade
+
     def field_terrain(self) -> FieldTerrainLayer:
         """The landscape as one height field and one splat control map."""
         return FieldTerrainLayer(
             height_fn=self.height_fn(), height_fn_at=self.height_fn_at(),
             extent=self.footprint(), resolution=self.field_resolution,
+            control_size=self.control_size,
             layers=list(GROUND_LAYERS), rules=list(GROUND_RULES),
             road=self.circuit() if self.road else None,
             road_layer=GROUND_LAYERS.index('dirt'),
@@ -363,11 +404,16 @@ class ProceduralWorld:
         Thinned to blue noise afterwards, so no two trees are closer than the
         room their heights ask for and the biggest in a crowd keeps the spot.
         """
+        if self._scatter is None:
+            self._scatter = self._build_scatter()
+        return self._scatter
+
+    def _build_scatter(self) -> Any:
         from OpenGLContext.loaders.tiles3d.scatter import Scatter
         from OpenGLContext.loaders.tiles3d.vegetation import poisson_thin
         placed = scatter_on_heightfield(
             self.height_fn(), self.footprint(), density=self.tree_density,
-            seed=self.seed, scale_range=(0.75, 1.35),
+            seed=self.seed, scale_range=(0.62, 1.30),
             slope_limit=TREE_SLOPE_LIMIT, height_range=self.treeline(),
             keep=self._away_from_the_road)
         if not len(placed.positions):
@@ -410,7 +456,21 @@ class ProceduralWorld:
             species=species,
             species_id=biome_species(placed.positions, heights, slopes,
                                      seed=self.seed),
+            cover=self.ground_cover(), cover_on=list(COVER_ON),
             name='trees')
+
+    def ground_cover(self) -> Any:
+        """What grows on the ground between the trees, or None for bare ground.
+
+        A recipe rather than a scatter: see
+        :class:`~OpenGLContext.scenegraph.vegetation.cover.GroundCover`. It comes
+        from the same place the species do, so a world pointed at its own art
+        gets its own grass.
+        """
+        try:
+            return shipped_cover(self.species_directory)
+        except LookupError:
+            return None
 
     def credits(self) -> list[str]:
         """Where everything in this world came from, licences included.
