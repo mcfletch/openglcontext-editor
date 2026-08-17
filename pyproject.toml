@@ -45,6 +45,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
 
+[project.scripts]
+oglc-bake = "OpenGLContext_editor.bin.bake:main"
+
 [project.urls]
 Homepage = "http://pyopengl.sourceforge.net/context/"
 Repository = "https://github.com/mcfletch/openglcontext-editor"
