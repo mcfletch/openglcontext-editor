@@ -35,6 +35,7 @@ from OpenGLContext_editor.world.road import (
     follow_terrain,
 )
 from OpenGLContext_editor.world.scatter import scatter_on_heightfield, yaw_quaternions
+from OpenGLContext_editor.world.structures import Op, choose_structures
 
 #: Trees per square metre. A tenth of the forest demo's near-field density: this
 #: world is 4 km across, and what a baked tile carries is the *sparse* layer of
@@ -95,6 +96,11 @@ class ProceduralWorld:
     *plan*: it arrives with no heights on it, and everything else about
     assembling the world is the same, which is the point of it being one
     argument rather than a second class.
+
+    ``structures`` decides whether the alignment's large departures from the
+    land are built as bridges and tunnels. With it off the same road is carried
+    entirely on earthworks, which over a landscape of this relief means
+    embankments and cuttings the size of the hills they cross.
     """
 
     extent: float = 4096.0
@@ -107,6 +113,8 @@ class ProceduralWorld:
     route: Any = None
     #: Whether the route returns to where it started.
     closed: bool = True
+    #: Whether a deck or a bore is built where the earthworks would be huge.
+    structures: bool = True
     wetness: float = 0.0
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
 
@@ -141,7 +149,8 @@ class ProceduralWorld:
         return conform_terrain(terrain_height, self.circuit())
 
     def circuit(self) -> RoadPath:
-        """The race circuit, laid out on the natural ground and smoothed."""
+        """The race circuit: laid out on the natural ground, smoothed, and told
+        which of its stretches are carried rather than laid."""
         if self._circuit is None:
             plan = (np.asarray(self.route, dtype='d') if self.route is not None
                     else circuit_plan(self.extent * 0.36, self.extent * 0.28))
@@ -151,11 +160,24 @@ class ProceduralWorld:
                                   design_speed=CIRCUIT_DESIGN_SPEED,
                                   minimum_height=WATER_LEVEL + CAUSEWAY_FREEBOARD,
                                   closed=self.closed)
-            self._circuit = RoadPath(line)
+            self._circuit = RoadPath(line, ops=self._ops(line))
         return self._circuit
 
+    def _ops(self, line: np.ndarray) -> Any:
+        """What is built along the alignment, point by point."""
+        if not self.structures:
+            return None
+        natural = np.asarray(terrain_height(line[:, 0], line[:, 2]), dtype='d')
+        chosen = choose_structures(line, natural, waterline=WATER_LEVEL,
+                                   closed=self.closed)
+        ops = np.full(len(line), Op.DIRT, dtype=object)
+        for structure in chosen:
+            ops[structure.indices(len(line))] = structure.kind
+        return ops
+
     def circuit_layer(self) -> RoadLayer:
-        return RoadLayer(self.circuit(), wetness=self.wetness)
+        return RoadLayer(self.circuit(), wetness=self.wetness,
+                         ground=terrain_height)
 
     def terrain(self) -> HeightfieldLayer:
         return HeightfieldLayer(
@@ -217,9 +239,14 @@ def circuit_plan(radius_x: float, radius_z: float, points: int = 360,
                      radius_z * radius * np.sin(angle)], axis=-1)
 
 
-def conifer_mesh(height: float = 9.0, seed: int = 11) -> PBRMesh:
-    """The near rung: the engine's textured conifer, flattened to one mesh."""
-    return combined_mesh(meshes_from_gltf(foliage.conifer_glb(height, seed=seed)))
+def conifer_mesh(height: float = 9.0, seed: int = 11) -> list[PBRMesh]:
+    """The near rung: the engine's textured conifer.
+
+    Two meshes, not one: the trunk wears bark and the needle skirts wear an
+    alpha-masked needle card, and a tree of one material is a tree with bark
+    for foliage.
+    """
+    return meshes_from_gltf(foliage.conifer_glb(height, seed=seed))
 
 
 def impostor_mesh(height: float = 9.0, seed: int = 11) -> PBRMesh:

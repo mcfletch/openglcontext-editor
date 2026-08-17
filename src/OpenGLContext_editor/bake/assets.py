@@ -50,11 +50,20 @@ def combined_mesh(meshes: list[PBRMesh], material: Any = None) -> PBRMesh:
 
     Merging costs a draw call less per tile and, more to the point, lets a whole
     prototype ride one ``EXT_mesh_gpu_instancing`` node. The meshes must agree
-    on which vertex attributes they carry; ``material`` overrides the result's,
-    defaulting to the first mesh's.
+    on which vertex attributes they carry, and -- since the result can only wear
+    one -- on their material, unless ``material`` says which the result takes.
+    A tree's bark and its alpha-masked needles are two materials and stay two
+    meshes; combining them would paint the needles in bark.
     """
     if not meshes:
         raise ValueError("no meshes to combine")
+    if material is None:
+        wearing = {id(mesh.material) for mesh in meshes}
+        if len(wearing) > 1:
+            raise ValueError(
+                "%d meshes of %d different materials cannot be combined into "
+                "one; keep them apart, or say which material the result wears"
+                % (len(meshes), len(wearing)))
     positions, normals, texcoords, colors, indices = [], [], [], [], []
     offset = 0
     for mesh in meshes:

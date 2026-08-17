@@ -15,33 +15,65 @@ The engine sweeps a cross-section along a centreline
     cross-section out to the verge and runs an earthwork out to meet the land
 :class:`RoadLayer`
     the road as a bake layer, re-sampled coarser for distant tiles and clipped
-    to each tile it crosses
+    to each tile it crosses, with the deck or the bore where the road is on one
 
-This is the "highway on dirt" operation -- the road follows the ground and the
-ground is reshaped to meet it. Causeways, bridges and tunnels are the other
-three, and are chosen by how far the alignment departs from the terrain.
+A road that has been through
+:func:`~OpenGLContext_editor.world.structures.choose_structures` arrives here
+knowing which of its stretches stand on the land and which are carried over or
+through it. Where it stands on the land the ground is reshaped to meet it --
+the "highway on dirt" operation, with a causeway as the case where the fill
+carries it over drowned ground. Where it does not, the terrain is left as it
+was and a structure is built instead.
 """
 from __future__ import annotations
 
 import io
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.road import (
     RoadProfile,
+    morphed_sections,
     resample_polyline,
     road_mesh,
     road_texture,
     tarmac_material,
 )
+from OpenGLContext.scenegraph.roadworks import (
+    BridgeProfile,
+    TunnelProfile,
+    bridge_meshes,
+    concrete_material,
+    tunnel_meshes,
+)
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.world.structures import Op
 
 HeightFn = Callable[[Any, Any], Any]
+
+#: The operations under which the road does not stand on the land, so the
+#: terrain beneath (or above) it is left as it was found.
+CARRIED = frozenset((Op.BRIDGE, Op.TUNNEL))
+
+
+class RoadSample(NamedTuple):
+    """What a road is doing at some point on the ground beside it.
+
+    ``distance`` is how far that point is from the centreline in plan,
+    ``height`` how high the road is at the nearest place on it, and ``segment``
+    which segment of the centreline that place is on -- which is how a caller
+    finds out what is built there.
+    """
+
+    distance: np.ndarray
+    height: np.ndarray
+    segment: np.ndarray
+
 
 #: Below this many samples a query is answered in one go: grouping them by
 #: cell costs a sort, and a handful of points is not worth sorting.
@@ -109,6 +141,23 @@ CURVATURE_TOLERANCE = 1e-9
 #: than all the geometry in the world put together.
 SURFACE_IMAGE = 'road-surface.png'
 
+#: Over how many metres the carriageway's cut changes onto a structure's. Long
+#: enough that the verge flattens rather than steps, short enough that the
+#: change happens at the abutment rather than half way down the approach.
+TRANSITION_LENGTH = 24.0
+
+
+def _ops_array(ops: Any, count: int) -> np.ndarray:
+    """What is built at each centreline point, defaulting to plain dirt."""
+    if ops is None:
+        return np.full(count, Op.DIRT, dtype=object)
+    found = np.asarray(list(ops), dtype=object)
+    if len(found) != count:
+        raise ValueError(
+            "a road of %d points needs %d operations, not %d"
+            % (count, count, len(found)))
+    return found
+
 
 class RoadPath:
     """A road's centreline through the world, and what it does to the ground.
@@ -119,12 +168,27 @@ class RoadPath:
     against a four-kilometre road costs the handful of segments crossing it.
     """
 
-    def __init__(self, points: Any, profile: RoadProfile | None = None) -> None:
+    def __init__(self, points: Any, profile: RoadProfile | None = None,
+                 ops: Any = None) -> None:
         line = np.asarray(points, dtype='d').reshape(-1, 3)
         if len(line) < 2:
             raise ValueError("a road needs a centreline of at least two points")
         self.points = line
         self.profile = profile or RoadProfile()
+        #: What is built at each point of the centreline. A road that has not
+        #: been through :func:`~OpenGLContext_editor.world.structures.choose_structures`
+        #: is on dirt from end to end, which is the ordinary case and the one
+        #: everything else falls back to.
+        self.ops: np.ndarray = _ops_array(ops, len(line))
+        #: Whether the road at each point stands on the land. A causeway does --
+        #: it is fill, and the ground is what it is made of -- but a deck stands
+        #: over the land and a bore inside it, and the terrain under or above
+        #: those is left as it was.
+        self.on_ground: np.ndarray = np.array(
+            [op not in CARRIED for op in self.ops], dtype=bool)
+        #: A segment is reshaped only if both its ends are, so the ground stops
+        #: being disturbed at the abutment rather than half a segment past it.
+        self.segment_on_ground = self.on_ground[:-1] & self.on_ground[1:]
         self._start = line[:-1]
         self._delta = line[1:] - line[:-1]
         lengths = np.einsum('ij,ij->i', self._delta[:, [0, 2]], self._delta[:, [0, 2]])
@@ -136,11 +200,48 @@ class RoadPath:
         runs = np.linalg.norm(self._delta[:, [0, 2]], axis=1)
         rises = np.abs(self._delta[:, 1])
         self.max_grade = float((rises / np.where(runs > 0, runs, 1.0)).max())
+        #: Distance along the road to each of its points. Everything that has
+        #: to line up two samplings of the same road -- a coarsened centreline
+        #: against the operations chosen on the full one -- meets here.
+        self.stations = np.concatenate(
+            [[0.0], np.cumsum(np.linalg.norm(self._delta, axis=1))])
 
     @property
     def length(self) -> float:
         """How long the road is, following the ground."""
-        return float(np.linalg.norm(np.diff(self.points, axis=0), axis=1).sum())
+        return float(self.stations[-1])
+
+    def ops_at(self, stations: Any) -> np.ndarray:
+        """What is built at each of these distances along the road.
+
+        A tile carries the road at its own spacing, and the operations were
+        chosen on the full-density alignment; matching them up is a lookup by
+        distance rather than by index. Each query takes the operation of the
+        nearest point of the alignment behind it, so a structure's extent is
+        the stretch it was chosen for and not a point more.
+        """
+        wanted = np.asarray(stations, dtype='d')
+        at = np.clip(np.searchsorted(self.stations, wanted, side='right') - 1,
+                     0, len(self.ops) - 1)
+        found: np.ndarray = self.ops[at]
+        return found
+
+    def structure_runs(self) -> list[tuple[Op, float, float]]:
+        """Every stretch that is not plain dirt, as ``(op, from, to)`` metres.
+
+        The road's own summary of what is built along it: what a tileset carries
+        for a game to read, and what the bake layer places geometry from.
+        """
+        out: list[tuple[Op, float, float]] = []
+        start = 0
+        for index in range(1, len(self.ops) + 1):
+            if index < len(self.ops) and self.ops[index] is self.ops[start]:
+                continue
+            if self.ops[start] is not Op.DIRT:
+                out.append((self.ops[start], float(self.stations[start]),
+                            float(self.stations[index - 1])))
+            start = index
+        return out
 
     def bounds(self) -> BoundingBox:
         """The centreline's box, widened by the road's own half-width."""
@@ -167,6 +268,17 @@ class RoadPath:
         segment get an infinite distance and a height of zero, so a caller that
         only cares about the road's neighbourhood pays for nothing else.
         """
+        found = self.sample(x, z, radius)
+        return found.distance, found.height
+
+    def sample(self, x: Any, z: Any, radius: float | None = None
+               ) -> RoadSample:
+        """What the road is doing at each (x, z): how far, how high, and where.
+
+        :meth:`nearest` without the segment, which is what a caller needs to
+        know *which stretch* of the road answered -- and so whether that
+        stretch is standing on the land or being carried over it.
+        """
         x = np.asarray(x, dtype='d')
         z = np.asarray(z, dtype='d')
         # The answer comes back the shape of the question, so a scalar query
@@ -176,10 +288,12 @@ class RoadPath:
             np.broadcast_to(z, shape).ravel()
         distance = np.full(flat_x.shape, np.inf)
         height = np.zeros(flat_x.shape)
+        segment = np.zeros(flat_x.shape, dtype=np.intp)
         for rows, segments in self._batches(flat_x, flat_z, radius):
-            distance[rows], height[rows] = self._measure(
+            distance[rows], height[rows], segment[rows] = self._measure(
                 flat_x[rows], flat_z[rows], segments)
-        return distance.reshape(shape), height.reshape(shape)
+        return RoadSample(distance.reshape(shape), height.reshape(shape),
+                          segment.reshape(shape))
 
     def comparisons(self, x: Any, z: Any, radius: float | None = None) -> int:
         """How many sample-against-segment comparisons a query would cost.
@@ -197,8 +311,8 @@ class RoadPath:
                    for rows, segments in self._batches(flat_x, flat_z, radius))
 
     def _measure(self, x: np.ndarray, z: np.ndarray, segments: np.ndarray
-                 ) -> tuple[np.ndarray, np.ndarray]:
-        """Distance and road height for a batch, against these segments."""
+                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Distance, road height and segment for a batch, against these."""
         start = self._start[segments]
         delta = self._delta[segments]
         length2 = self._length2[segments]
@@ -212,7 +326,9 @@ class RoadPath:
         gaps = np.hypot(x[:, None] - near_x, z[:, None] - near_z)
         best = gaps.argmin(axis=1)
         rows = np.arange(len(x))
-        return gaps[rows, best], start[best, 1] + t[rows, best] * delta[best, 1]
+        return (gaps[rows, best],
+                start[best, 1] + t[rows, best] * delta[best, 1],
+                segments[best])
 
     def _batches(self, x: np.ndarray, z: np.ndarray, radius: float | None
                  ) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -548,6 +664,12 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     is where a bridge or a tunnel belongs and moving a mountain would only hide
     the fact.
 
+    Where the road is *carried* rather than laid -- a deck over a valley, a bore
+    through a hill -- the ground is left exactly as it was found: a bridge
+    stands over the land and a tunnel runs inside it, and reshaping either would
+    put the structure inside a hill of its own making. The road's ``ops`` say
+    which stretches those are.
+
     ``widening`` is how far apart the samples are that will read this function.
     A ground mesh only knows the surface at its vertices and draws straight
     lines between them, so a cutting narrower than that spacing is stepped over
@@ -564,12 +686,16 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     half = path.profile.total_width / 2.0
     reach = half + widening + maximum_earthwork
 
+    laid = path.on_ground.all()
+
     def conformed(x: Any, z: Any) -> np.ndarray:
         natural = np.asarray(height_fn(x, z), dtype='d')
-        distance, road_height = path.nearest(x, z, radius=reach)
+        distance, road_height, segment = path.sample(x, z, radius=reach)
         distance = distance.reshape(natural.shape)
         road_height = road_height.reshape(natural.shape)
         near = distance < reach
+        if not laid:
+            near = near & path.segment_on_ground[segment.reshape(natural.shape)]
         if not np.any(near):
             return natural
         # Beside a climbing road, the ground has to sit low enough that the
@@ -617,6 +743,13 @@ class RoadLayer:
     The centreline is re-sampled by the tile's geometric error, so a distant
     tile carries the same road at a fraction of the vertices, and clipped to the
     tile with an overlap so consecutive tiles join without a gap.
+
+    Where the road is on a bridge or in a tunnel the layer writes the structure
+    into the tile as well, and the carriageway over it takes the road's
+    on-structure cut -- tapered onto it over ``transition``, so the verge
+    flattens onto the deck across a few metres rather than stepping onto it.
+    ``ground`` is the undisturbed terrain, which is where a bridge's piers stop;
+    without it a deck is written with no piers under it.
     """
 
     path: RoadPath
@@ -628,10 +761,19 @@ class RoadLayer:
     seed: int = 0
     metadata_spacing: float = 8.0
     name: str = 'road'
+    ground: HeightFn | None = None
+    bridge: BridgeProfile | None = None
+    tunnel: TunnelProfile | None = None
+    structure_material: PBRMaterial | None = None
+    transition: float = TRANSITION_LENGTH
     _material: PBRMaterial = field(init=False, repr=False)
     _surface: Any = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
+        self.bridge = self.bridge or BridgeProfile()
+        self.tunnel = self.tunnel or TunnelProfile()
+        self.structure_material = (self.structure_material
+                                   or concrete_material())
         if self.material is not None:
             self._material = self.material
             return
@@ -648,11 +790,13 @@ class RoadLayer:
         A game cannot find a road in a pile of triangles, and needs it to put a
         car on the track, time a lap and drive an opponent round. So the road
         travels with the world it is baked into: its centreline, how wide it is,
-        and whether it closes into a circuit.
+        whether it closes into a circuit, and where along it the structures are
+        -- which is how a game knows the car is on a bridge without asking the
+        geometry.
 
         The line is written at ``metadata_spacing`` rather than at its full
         density -- a course is a shape, and a game re-samples it for whatever it
-        is doing.
+        is doing. Structures are given as distances along that same line.
         """
         line = self.path.resampled(self.metadata_spacing)
         closed = bool(np.allclose(self.path.points[0], self.path.points[-1]))
@@ -663,6 +807,10 @@ class RoadLayer:
             'totalWidth': self.path.profile.total_width,
             'length': self.path.length,
             'centreline': [[round(float(v), 3) for v in point] for point in line],
+            'structures': [{'kind': str(kind),
+                            'from': round(start, 3),
+                            'to': round(end, 3)}
+                           for kind, start, end in self.path.structure_runs()],
         }]}
 
     def assets(self) -> dict[str, bytes]:
@@ -684,15 +832,86 @@ class RoadLayer:
         reach = self.path.profile.total_width * TILE_REACH
         if not self.path.crosses(region, margin=reach):
             return []
-        line = self.path.resampled(self.spacing_for(error))
-        return [SceneNode(mesh=road_mesh(run, self.path.profile,
-                                         material=self._material),
-                          name=self.name)
-                for run in _runs_inside(line, region)]
+        spacing = self.spacing_for(error)
+        line = self.path.resampled(spacing)
+        stations = np.arange(len(line)) * (self.path.length / max(len(line) - 1, 1))
+        ops = self.path.ops_at(stations)
+        # The cut tapers onto a structure over `transition` metres, which is a
+        # number of points at this tile's spacing: a coarse tile with a longer
+        # spacing gets fewer of them and the same taper in the world.
+        carried = np.array([op in CARRIED for op in ops], dtype='d')
+        blend = _tapered(carried, max(int(round(self.transition / spacing)), 1))
+        sections = morphed_sections(self.path.profile,
+                                    self.path.profile.on_structure(), blend)
+
+        found: list[SceneNode] = []
+        for rows in _runs_inside(line, region):
+            found.append(SceneNode(
+                mesh=road_mesh(line[rows], self.path.profile,
+                               material=self._material,
+                               sections=sections[rows]),
+                name=self.name))
+            found.extend(self._structures(line, ops, rows))
+        return found
+
+    def _structures(self, line: np.ndarray, ops: np.ndarray,
+                    rows: np.ndarray) -> list[SceneNode]:
+        """The decks and bores along the stretch of road a tile is drawing.
+
+        A structure is split at the tile boundary the same way the carriageway
+        is, so each tile carries the part of it that is inside the tile and no
+        neighbour draws it twice.
+        """
+        out: list[SceneNode] = []
+        inside = ops[rows]
+        for kind, first, last in _op_runs(inside):
+            if kind not in CARRIED or last - first < 1:
+                continue
+            run = line[rows[first:last + 1]]
+            if kind is Op.BRIDGE:
+                parts = bridge_meshes(run, self.path.profile, self.ground,
+                                      self.bridge, self.structure_material)
+            else:
+                parts = tunnel_meshes(run, self.path.profile, self.tunnel,
+                                      self.structure_material)
+            out.extend(SceneNode(mesh=mesh, name='%s-%s' % (kind, part))
+                       for part, mesh in parts.items())
+        return out
+
+
+def _op_runs(ops: np.ndarray) -> list[tuple[Op, int, int]]:
+    """``(op, first, last)`` inclusive for each stretch of one operation."""
+    out: list[tuple[Op, int, int]] = []
+    start = 0
+    for index in range(1, len(ops) + 1):
+        if index < len(ops) and ops[index] is ops[start]:
+            continue
+        out.append((ops[start], start, index - 1))
+        start = index
+    return out
+
+
+def _tapered(carried: np.ndarray, window: int) -> np.ndarray:
+    """A 0/1 flag smoothed into a ramp over ``window`` points either side.
+
+    What turns the change of cut at an abutment into a taper. The ramp reaches
+    1 across the whole of the structure and 0 clear of it, so the carriageway
+    is exactly the on-structure section over the deck and exactly the ordinary
+    one away from it, with the change spread over the approach.
+    """
+    if window <= 1 or not len(carried):
+        return carried
+    kernel = np.ones(2 * window + 1) / float(2 * window + 1)
+    padded = np.pad(carried, window, mode='edge')
+    smoothed = np.convolve(padded, kernel, mode='same')[window:-window]
+    # Convolution rounds the corners off both ends of a run; taking the larger
+    # of the two keeps the structure's own points at 1 and only ramps outside.
+    ramp: np.ndarray = np.maximum(carried, np.clip(smoothed, 0.0, 1.0))
+    return ramp
 
 
 def _runs_inside(line: np.ndarray, region: BoundingBox) -> list[np.ndarray]:
-    """The stretches of a centreline a tile is responsible for drawing.
+    """Indices of the stretches of a centreline a tile is responsible for.
 
     A road can enter and leave one tile several times, so this returns a run per
     crossing rather than one clipped line.
@@ -731,5 +950,5 @@ def _runs_inside(line: np.ndarray, region: BoundingBox) -> list[np.ndarray]:
     for first, last in runs:
         first = max(first - 1, 0)
         if last - first >= 2:
-            out.append(line[first:last])
+            out.append(np.arange(first, last))
     return out

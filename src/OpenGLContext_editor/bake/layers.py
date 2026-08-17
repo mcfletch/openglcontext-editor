@@ -179,14 +179,26 @@ def _ground_material() -> PBRMaterial:
 
 # --- placed copies of one mesh ------------------------------------------------
 
+def _as_meshes(rung: Any) -> list[Any]:
+    """A rung of a detail ladder, as the list of meshes it is made of."""
+    if isinstance(rung, (list, tuple)):
+        return list(rung)
+    return [rung]
+
+
 @dataclass
 class InstanceLayer:
     """One mesh placed many times, written as ``EXT_mesh_gpu_instancing``.
 
-    ``lods`` is the detail ladder: pairs of (the coarsest error this mesh is good
-    enough for, the mesh), finest first. A tile picks the coarsest entry whose
+    ``lods`` is the detail ladder: pairs of (the coarsest error this rung is good
+    enough for, the rung), finest first. A tile picks the coarsest entry whose
     threshold it reaches, so distant tiles carry impostors and near ones carry
     the real geometry.
+
+    A rung is one mesh, or several when the prototype needs more than one
+    material -- a tree is a bark trunk and alpha-masked needles, and merging
+    those into one mesh would paint the needles in bark. Each mesh is written
+    as its own node over the same placements.
 
     ``max_instances`` caps what one tile writes. A coarse tile over a whole
     forest is thinned to that many by an even stride -- deterministically, so a
@@ -204,7 +216,8 @@ class InstanceLayer:
         if not self.lods:
             raise ValueError("an instance layer needs at least one level of detail")
         self.positions = np.asarray(self.positions, dtype='d').reshape(-1, 3)
-        self._ladder = sorted(((float(error), mesh) for error, mesh in self.lods),
+        self._ladder = sorted(((float(error), _as_meshes(rung))
+                               for error, rung in self.lods),
                               key=lambda entry: entry[0])
         if self.scales is not None:
             scales = np.asarray(self.scales, dtype='f')
@@ -215,12 +228,12 @@ class InstanceLayer:
     def bounds(self) -> BoundingBox | None:
         return BoundingBox.of_points(self.positions)
 
-    def mesh_for(self, error: float) -> Any:
-        """The rung of the ladder a tile of this error draws."""
+    def mesh_for(self, error: float) -> list[Any]:
+        """The meshes making up the rung a tile of this error draws."""
         chosen = self._ladder[0][1]
-        for threshold, mesh in self._ladder:
+        for threshold, meshes in self._ladder:
             if error >= threshold:
-                chosen = mesh
+                chosen = meshes
         return chosen
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
@@ -239,8 +252,8 @@ class InstanceLayer:
             rotations=(None if self.rotations is None
                        else np.asarray(self.rotations, 'f')[inside]),
             scales=None if self.scales is None else self.scales[inside])
-        return [SceneNode(mesh=self.mesh_for(error), instances=instances,
-                          name=self.name)]
+        return [SceneNode(mesh=mesh, instances=instances, name=self.name)
+                for mesh in self.mesh_for(error)]
 
 
 # --- meshes placed once -------------------------------------------------------

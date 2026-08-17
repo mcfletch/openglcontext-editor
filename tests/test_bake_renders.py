@@ -56,20 +56,39 @@ def rendered(tmp_path_factory):
     # Stand on the circuit and look along it, rather than at a pose written
     # down here: what the world looks like is the world's business, and a fixed
     # camera silently stops meaning anything the moment the terrain changes.
-    line = world.circuit().points
-    eye = line[40] + np.array([0.0, 1.6, 0.0])
-    aim = line[(40 + 25) % len(line)] + np.array([0.0, 1.2, 0.0])
+    # Somewhere the road is on the ground, since what is being looked at is the
+    # ground and the trees on it -- from inside a bore there is only lining.
+    circuit = world.circuit()
+    line = circuit.points
+    at = _on_the_ground(circuit, ahead=25)
+    eye = line[at] + np.array([0.0, 1.6, 0.0])
+    aim = line[(at + 25) % len(line)] + np.array([0.0, 1.2, 0.0])
     capture = os.path.join(str(directory), 'view.png')
     environment = dict(os.environ, OPENGLCONTEXT_HIDDEN='1',
                        OPENGLCONTEXT_NO_VSYNC='1')
     completed = subprocess.run(
         [VIEWER, result.tileset, '--capture', capture, '--capture-delay', '4',
          '--frames', '90', '--size', '640x360',
-         '--eye', '%f,%f,%f' % tuple(eye), '--look-at', '%f,%f,%f' % tuple(aim)],
+         # Joined with '=': a position west or north of the origin begins with
+         # a minus sign, which as a separate argument reads as another option.
+         '--eye=%f,%f,%f' % tuple(eye), '--look-at=%f,%f,%f' % tuple(aim)],
         env=environment, capture_output=True, text=True, timeout=300, check=False)
     assert completed.returncode == 0, completed.stderr[-2000:]
     assert os.path.exists(capture), completed.stdout[-2000:]
     return np.asarray(Image.open(capture).convert('RGB'), dtype='d') / 255.0
+
+
+def _on_the_ground(circuit, ahead):
+    """A point on the circuit with ``ahead`` points of open road in front of it.
+
+    The alignment crosses this landscape on bridges and through tunnels for a
+    good part of its length, and neither shows the ground.
+    """
+    laid = circuit.on_ground
+    for at in range(len(laid) - ahead):
+        if laid[at:at + ahead + 1].all():
+            return at
+    raise AssertionError("the circuit is on structures from end to end")
 
 
 def _rows(pixels, low, high):

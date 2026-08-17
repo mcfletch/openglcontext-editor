@@ -234,3 +234,83 @@ class TestMeasuringAPlacedNode:
                                 scales=np.array([(1, 1, 1), (3, 3, 3)], 'f'))
         box = node_bounds(SceneNode(mesh=_prototype(), instances=instances))
         assert box.maximum[0] > 3.0     # the widened radius, three times over
+
+
+class TestALadderRungOfSeveralMeshes:
+    """A tree is a bark trunk and alpha-masked needles: two materials, and so
+    two meshes. A rung of the ladder is whatever the prototype is made of."""
+
+    def _placed(self, rung):
+        from OpenGLContext_editor.bake.layers import InstanceLayer
+        return InstanceLayer(positions=np.array([(0.0, 0.0, 0.0),
+                                                 (4.0, 0.0, 4.0)]),
+                             lods=[(0.0, rung)], name='trees')
+
+    def _region(self):
+        from OpenGLContext_editor.bake.bounds import BoundingBox
+        return BoundingBox((-50.0, -50.0, -50.0), (50.0, 50.0, 50.0))
+
+    def _mesh(self, colour):
+        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+        from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+        return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
+                       indices=np.array([0, 1, 2], np.uint32),
+                       material=PBRMaterial(baseColor=colour))
+
+    def test_one_mesh_still_gives_one_node(self) -> None:
+        found = self._placed(self._mesh((1.0, 0, 0))).content(self._region(), 1.0)
+        assert len(found) == 1
+
+    def test_two_meshes_give_a_node_each(self) -> None:
+        rung = [self._mesh((1.0, 0, 0)), self._mesh((0, 1.0, 0))]
+        assert len(self._placed(rung).content(self._region(), 1.0)) == 2
+
+    def test_both_keep_their_own_material(self) -> None:
+        rung = [self._mesh((1.0, 0, 0)), self._mesh((0, 1.0, 0))]
+        found = self._placed(rung).content(self._region(), 1.0)
+        assert {tuple(round(float(v), 3) for v in node.mesh.material.baseColor)
+                for node in found} == {(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)}
+
+    def test_they_stand_in_the_same_places(self) -> None:
+        rung = [self._mesh((1.0, 0, 0)), self._mesh((0, 1.0, 0))]
+        first, second = self._placed(rung).content(self._region(), 1.0)
+        assert np.allclose(first.instances.translations,
+                           second.instances.translations)
+
+    def test_a_tile_with_nothing_in_it_gets_nothing(self) -> None:
+        from OpenGLContext_editor.bake.bounds import BoundingBox
+        rung = [self._mesh((1.0, 0, 0)), self._mesh((0, 1.0, 0))]
+        empty = BoundingBox((500.0, 0.0, 500.0), (600.0, 10.0, 600.0))
+        assert self._placed(rung).content(empty, 1.0) == []
+
+
+class TestCombiningMeshesDoesNotLoseAMaterial:
+    def _mesh(self, material):
+        from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+        return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
+                       indices=np.array([0, 1, 2], np.uint32), material=material)
+
+    def test_meshes_of_one_material_combine(self) -> None:
+        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+        from OpenGLContext_editor.bake.assets import combined_mesh
+        material = PBRMaterial(baseColor=(1.0, 0.0, 0.0))
+        combined = combined_mesh([self._mesh(material), self._mesh(material)])
+        assert combined.material is material
+
+    def test_meshes_of_different_materials_do_not(self) -> None:
+        """Silently keeping the first one paints the whole prototype in it."""
+        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+        from OpenGLContext_editor.bake.assets import combined_mesh
+        with pytest.raises(ValueError):
+            combined_mesh([self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),
+                           self._mesh(PBRMaterial(baseColor=(0.0, 1.0, 0.0)))])
+
+    def test_an_override_says_they_may(self) -> None:
+        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+        from OpenGLContext_editor.bake.assets import combined_mesh
+        wanted = PBRMaterial(baseColor=(0.0, 0.0, 1.0))
+        combined = combined_mesh(
+            [self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),
+             self._mesh(PBRMaterial(baseColor=(0.0, 1.0, 0.0)))],
+            material=wanted)
+        assert combined.material is wanted

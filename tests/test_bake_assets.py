@@ -100,9 +100,10 @@ class TestCombiningMeshes:
         merged = combined_mesh([_triangle(indices=None), _triangle()])
         assert merged.indices.tolist() == [0, 1, 2, 3, 4, 5]
 
-    def test_the_first_material_is_kept(self) -> None:
+    def test_one_shared_material_is_kept(self) -> None:
         material = PBRMaterial(baseColor=(1, 0, 0))
-        merged = combined_mesh([_triangle(material=material), _triangle()])
+        merged = combined_mesh([_triangle(material=material),
+                                _triangle(material=material)])
         assert merged.material is material
 
     def test_the_material_can_be_overridden(self) -> None:

@@ -476,7 +476,11 @@ class TestTheWholeBakedWorldKeepsItsRoad:
 
         world = ProceduralWorld(extent=1024.0, resolution=17, seed=11)
         result = bake_world(world.layers(), str(tmp_path), depth=2)
-        line = world.circuit().points
+        # Only where the road is laid on the land: over a bore the ground
+        # stands above the carriageway by the whole depth of the hill, which is
+        # what a tunnel is.
+        circuit = world.circuit()
+        line = circuit.points[circuit.on_ground]
         worst = 0.0
         for tile in _every_tile(result.tileset):
             ground = _ground_mesh(gltf.load_gltf(tile))
