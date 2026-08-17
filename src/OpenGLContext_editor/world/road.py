@@ -226,14 +226,16 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
         line[:, 1] = _smooth(line[:, 1], window=max(int(smoothing / spacing), 1),
                              closed=closed)
     if maximum_grade is not None:
-        line[:, 1] = _limit_grade(line, maximum_grade)
+        line[:, 1] = _limit_grade(line, maximum_grade, closed=closed)
     if minimum_height is not None:
         line[:, 1] = np.maximum(line[:, 1], minimum_height)
         if maximum_grade is not None:
-            line[:, 1] = _ramp_up_to_grade(line, maximum_grade)
+            line[:, 1] = _ramp_up_to_grade(line, maximum_grade, closed=closed)
     line[:, 1] += clearance
     if closed:
-        line[0] = line[-1] = (line[0] + line[-1]) * 0.5
+        # The ends are the same place, so give them the same height rather than
+        # two that differ by a rounding step.
+        line[0, 1] = line[-1, 1] = (line[0, 1] + line[-1, 1]) * 0.5
     return line
 
 
@@ -253,27 +255,62 @@ def _smooth(values: np.ndarray, window: int, closed: bool = False) -> np.ndarray
     return smoothed
 
 
-def _limit_grade(line: np.ndarray, maximum: float) -> np.ndarray:
+def _limit_grade(line: np.ndarray, maximum: float,
+                 closed: bool = False) -> np.ndarray:
     """Cap the climb between consecutive points, forwards then backwards.
 
     One pass in each direction, because a peak too high for its approach is also
     too high for its descent, and clipping only forwards would leave a cliff at
     the far side.
+
+    ``closed`` runs each pass twice round the loop rather than once along it. A
+    circuit's steepest place is as likely to be at the join as anywhere else,
+    and a limit that stopped at the ends would leave the start line at the top
+    of a cliff -- which is exactly where a car is put.
     """
     heights = line[:, 1].copy()
-    steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
-    for index in range(1, len(heights)):
-        limit = maximum * steps[index - 1]
-        heights[index] = np.clip(heights[index], heights[index - 1] - limit,
-                                 heights[index - 1] + limit)
-    for index in range(len(heights) - 2, -1, -1):
+    steps = _steps(line, closed)
+    count = len(heights)
+    for index in _forward(count, closed):
+        behind = (index - 1) % count
+        limit = maximum * steps[behind]
+        heights[index] = np.clip(heights[index], heights[behind] - limit,
+                                 heights[behind] + limit)
+    for index in _backward(count, closed):
+        ahead = (index + 1) % count
         limit = maximum * steps[index]
-        heights[index] = np.clip(heights[index], heights[index + 1] - limit,
-                                 heights[index + 1] + limit)
+        heights[index] = np.clip(heights[index], heights[ahead] - limit,
+                                 heights[ahead] + limit)
     return heights
 
 
-def _ramp_up_to_grade(line: np.ndarray, maximum: float) -> np.ndarray:
+def _steps(line: np.ndarray, closed: bool) -> np.ndarray:
+    """Ground distance between consecutive points, wrapping for a circuit."""
+    steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
+    if closed:
+        # One more entry, from the last point back to the first, so index -1
+        # reaches it and the wrap has a length to work with.
+        joining = float(np.linalg.norm(line[0, [0, 2]] - line[-1, [0, 2]]))
+        steps = np.concatenate([steps, [max(joining, 1e-6)]])
+    return steps
+
+
+def _forward(count: int, closed: bool) -> list[int]:
+    """Indices for a forward pass; twice round for a closed loop."""
+    if not closed:
+        return list(range(1, count))
+    return [index % count for index in range(1, 2 * count + 1)]
+
+
+def _backward(count: int, closed: bool) -> list[int]:
+    """Indices for a backward pass; twice round for a closed loop."""
+    if not closed:
+        return list(range(count - 2, -1, -1))
+    return [index % count for index in range(2 * count - 2, -2, -1)]
+
+
+def _ramp_up_to_grade(line: np.ndarray, maximum: float,
+                      closed: bool = False) -> np.ndarray:
     """Raise whatever is needed so no step exceeds the grade, lowering nothing.
 
     The companion to :func:`_limit_grade`, used after a floor has lifted part of
@@ -281,13 +318,16 @@ def _ramp_up_to_grade(line: np.ndarray, maximum: float) -> np.ndarray:
     section being dropped back down to them.
     """
     heights = line[:, 1].copy()
-    steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
-    for index in range(1, len(heights)):
+    steps = _steps(line, closed)
+    count = len(heights)
+    for index in _forward(count, closed):
+        behind = (index - 1) % count
         heights[index] = max(heights[index],
-                             heights[index - 1] - maximum * steps[index - 1])
-    for index in range(len(heights) - 2, -1, -1):
+                             heights[behind] - maximum * steps[behind])
+    for index in _backward(count, closed):
+        ahead = (index + 1) % count
         heights[index] = max(heights[index],
-                             heights[index + 1] - maximum * steps[index])
+                             heights[ahead] - maximum * steps[index])
     return heights
 
 
@@ -376,6 +416,7 @@ class RoadLayer:
     wetness: float = 0.0
     texture_size: int = 512
     seed: int = 0
+    metadata_spacing: float = 8.0
     name: str = 'road'
     _material: PBRMaterial = field(init=False, repr=False)
     _surface: Any = field(init=False, repr=False, default=None)
@@ -390,6 +431,29 @@ class RoadLayer:
         self._material = tarmac_material(
             wetness=self.wetness,
             image=ExternalImage(SURFACE_IMAGE, srgb=True))
+
+    def metadata(self) -> dict[str, Any]:
+        """The road itself, for the tileset's extras.
+
+        A game cannot find a road in a pile of triangles, and needs it to put a
+        car on the track, time a lap and drive an opponent round. So the road
+        travels with the world it is baked into: its centreline, how wide it is,
+        and whether it closes into a circuit.
+
+        The line is written at ``metadata_spacing`` rather than at its full
+        density -- a course is a shape, and a game re-samples it for whatever it
+        is doing.
+        """
+        line = self.path.resampled(self.metadata_spacing)
+        closed = bool(np.allclose(self.path.points[0], self.path.points[-1]))
+        return {'roads': [{
+            'name': self.name,
+            'closed': closed,
+            'carriagewayWidth': self.path.profile.carriageway_width,
+            'totalWidth': self.path.profile.total_width,
+            'length': self.path.length,
+            'centreline': [[round(float(v), 3) for v in point] for point in line],
+        }]}
 
     def assets(self) -> dict[str, bytes]:
         """The road surface, for the bake to write once beside the tileset."""

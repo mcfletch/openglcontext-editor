@@ -518,3 +518,90 @@ def _ground_mesh(scene):
             return geometry
         stack.extend(getattr(node, 'children', None) or [])
     return None
+
+
+class TestTheRoadTravelsWithTheWorld:
+    """A game cannot find a road in a pile of triangles, so the bake says."""
+
+    def _layer(self):
+        line = follow_terrain([(0, 0), (0, -400)], _bumpy, spacing=5.0)
+        return RoadLayer(RoadPath(line))
+
+    def test_the_centreline_is_in_the_metadata(self) -> None:
+        roads = self._layer().metadata()['roads']
+        assert len(roads) == 1
+        assert len(roads[0]['centreline']) > 10
+        assert len(roads[0]['centreline'][0]) == 3
+
+    def test_it_says_how_wide_the_road_is(self) -> None:
+        road = self._layer().metadata()['roads'][0]
+        assert road['carriagewayWidth'] == pytest.approx(RoadProfile().carriageway_width)
+        assert road['totalWidth'] > road['carriagewayWidth']
+
+    def test_it_says_how_long_the_road_is(self) -> None:
+        """Along the ground, so a road over hills is longer than its plan."""
+        length = self._layer().metadata()['roads'][0]['length']
+        assert 400.0 <= length < 420.0
+
+    def test_an_open_road_says_it_is_open(self) -> None:
+        assert self._layer().metadata()['roads'][0]['closed'] is False
+
+    def test_a_circuit_says_it_closes(self) -> None:
+        angle = np.linspace(0.0, 2 * np.pi, 48, endpoint=False)
+        plan = np.stack([200 * np.cos(angle), 120 * np.sin(angle)], axis=-1)
+        line = follow_terrain(plan, _bumpy, spacing=8.0, closed=True)
+        assert RoadLayer(RoadPath(line)).metadata()['roads'][0]['closed'] is True
+
+    def test_the_line_follows_the_road_it_baked(self) -> None:
+        layer = self._layer()
+        line = np.array(layer.metadata()['roads'][0]['centreline'])
+        distance, _ = layer.path.nearest(line[:, 0], line[:, 2])
+        assert float(np.max(distance)) < 0.5
+
+
+class TestACircuitIsLimitedAllTheWayRound:
+    """A circuit's steepest place is as likely to be the join as anywhere.
+
+    The start line is exactly where a car is put, and a grade limit that ran
+    from one end of the array to the other left that one point unconstrained --
+    a cliff at the start line, and a car that fell off it.
+    """
+
+    def _hilly(self, x, z):
+        x, z = np.asarray(x, 'd'), np.asarray(z, 'd')
+        return 60.0 * np.sin(x * 0.004) + 40.0 * np.cos(z * 0.005)
+
+    def _circuit(self, **kwargs):
+        angle = np.linspace(0.0, 2 * np.pi, 96, endpoint=False)
+        plan = np.stack([700 * np.cos(angle), 500 * np.sin(angle)], axis=-1)
+        return follow_terrain(plan, self._hilly, spacing=6.0, smoothing=90.0,
+                              maximum_grade=0.075, closed=True, **kwargs)
+
+    def _grades(self, line):
+        closed = np.vstack([line, line[:1]])
+        steps = np.linalg.norm(np.diff(closed[:, [0, 2]], axis=0), axis=1)
+        return np.abs(np.diff(closed[:, 1])) / np.where(steps > 0, steps, 1.0)
+
+    def test_no_step_anywhere_exceeds_the_grade(self) -> None:
+        assert self._grades(self._circuit()).max() <= 0.075 + 1e-6
+
+    def test_the_join_is_no_steeper_than_the_rest(self) -> None:
+        grades = self._grades(self._circuit())
+        assert grades[-1] <= grades.max()
+        assert grades[0] <= grades.max()
+
+    def test_it_still_follows_the_landscape(self) -> None:
+        """Limiting the grade must not flatten the circuit into a ring road."""
+        line = self._circuit()
+        assert line[:, 1].max() - line[:, 1].min() > 20.0
+
+    def test_a_water_floor_is_still_honoured_all_the_way_round(self) -> None:
+        line = self._circuit(minimum_height=30.0)
+        assert line[:, 1].min() >= 30.0 - 1e-9
+        assert self._grades(line).max() <= 0.075 + 1e-6
+
+    def test_an_open_road_is_unaffected(self) -> None:
+        line = follow_terrain([(0, 0), (0, -600)], self._hilly, spacing=6.0,
+                              maximum_grade=0.05)
+        steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
+        assert (np.abs(np.diff(line[:, 1])) / steps).max() <= 0.05 + 1e-9

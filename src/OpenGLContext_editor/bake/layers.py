@@ -67,6 +67,15 @@ class Layer(Protocol):
         with nothing to share need not have this at all.
         """
 
+    def metadata(self) -> dict[str, Any]:
+        """What a *game* needs to know about this layer, for the tileset's extras.
+
+        A baked world is more than what it looks like. Where the road runs is
+        not recoverable from a pile of triangles, but a game needs it to put a
+        car on the track, time a lap, or drive an opponent round -- so the layer
+        that knows says so, once, and the world carries the answer. Optional.
+        """
+
 
 # --- the ground ---------------------------------------------------------------
 

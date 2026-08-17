@@ -263,3 +263,41 @@ class TestTheReportItPrints:
         report = bake_summary(_bake(tmp_path, layers=[_terrain(), _trees()]))
         assert 'terrain' in report and 'trees' in report
         assert 'extent:' in report and 'tileset:' in report
+
+
+class TestWhatTheWorldCarriesForAGame:
+    def test_a_layer_s_metadata_reaches_the_tileset(self, tmp_path) -> None:
+        class Marked:
+            name = 'marked'
+
+            def bounds(self):
+                return EXTENT.with_height(-1, 1)
+
+            def content(self, region, error):
+                return []
+
+            def metadata(self):
+                return {'startLine': [1.0, 2.0, 3.0]}
+
+        result = _bake(tmp_path, layers=[_terrain(), Marked()])
+        with open(result.tileset) as handle:
+            document = json.load(handle)
+        assert document['extras']['startLine'] == [1.0, 2.0, 3.0]
+        assert document['extras']['bakedBy'] == 'OpenGLContext-editor'
+
+    def test_a_layer_s_shared_files_are_written_and_reported(self, tmp_path) -> None:
+        class Painted:
+            name = 'painted'
+
+            def bounds(self):
+                return EXTENT.with_height(-1, 1)
+
+            def content(self, region, error):
+                return []
+
+            def assets(self):
+                return {'palette.bin': b'0123'}
+
+        result = _bake(tmp_path, layers=[_terrain(), Painted()])
+        assert result.assets == ['palette.bin']
+        assert (tmp_path / 'palette.bin').read_bytes() == b'0123'

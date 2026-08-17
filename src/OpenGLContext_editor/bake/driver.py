@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import GLTFWriter, SceneNode
@@ -97,8 +98,11 @@ def bake_world(layers: Sequence[Layer], directory: str,
     if root_tile is None:
         raise ValueError("nothing to bake: no layer produced content anywhere in %r"
                          % (region,))
+    extras: dict[str, Any] = {'bakedBy': 'OpenGLContext-editor'}
+    for layer in layers:
+        extras.update(getattr(layer, 'metadata', dict)() or {})
     path = write_tileset(root_tile, directory, name=name, credits=credits,
-                         extras={'bakedBy': 'OpenGLContext-editor'})
+                         extras=extras)
     return BakeResult(tileset=path, directory=directory,
                       tiles=len(list(root_tile.iter_tiles())),
                       contents=state.contents, bytes_written=state.bytes_written,
