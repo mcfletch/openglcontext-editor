@@ -80,8 +80,11 @@ select = [
     "S110", # no silent try/except/pass
 ]
 ignore = [
-    "E501",  # line too long -- kept readable by hand, not hard-wrapped (as in the engine)
-    "E741",  # ambiguous name -- x/y/z read naturally as coordinates here
+    "E501",   # line too long -- kept readable by hand, not hard-wrapped (as in the engine)
+    "E741",   # ambiguous name -- x/y/z read naturally as coordinates here
+    "UP031",  # percent formatting -- OpenGLContext uses it throughout, and this
+              # package is read alongside it; one style across the pair is worth
+              # more than the newer syntax in this one
 ]
 
 [tool.mypy]
