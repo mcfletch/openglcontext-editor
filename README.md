@@ -74,7 +74,8 @@ from OpenGLContext_editor.world.road import (
 )
 
 course = follow_terrain(my_route, my_heights, spacing=5.0,
-                        maximum_grade=0.075, minimum_height=2.5, closed=True)
+                        maximum_grade=0.075, design_speed=47.0,
+                        minimum_height=2.5, closed=True)
 path = RoadPath(course)
 ground = conform_terrain_at(my_heights, path)   # height fn -> height fn, per tile
 
@@ -83,8 +84,18 @@ print(bake_world([terrain, RoadLayer(path=path)], '/tmp/world', depth=4).summary
 ```
 
 `follow_terrain` drapes a 2D route over the land and then makes it drivable:
-smoothed, held to a maximum grade (wrapping, for a closed circuit), and lifted
-onto a causeway where it would otherwise run below `minimum_height`.
+
+- **smoothed**, so the road carries the shape of the landscape rather than its
+  every hummock;
+- **held to `maximum_grade`**, wrapping round the join for a closed circuit;
+- **rounded off for `design_speed`** (metres per second), so no change of grade
+  is sharp enough to take the car's wheels off the road at that speed. A grade
+  limit alone permits a road that climbs at its limit and descends at its limit
+  a few metres later, and a car meeting that at speed is launched, because there
+  is nothing under it. This is the vertical curve a real road has;
+- **lifted onto a causeway** where it would otherwise run below
+  `minimum_height`, with its approaches raised to meet it.
+
 `conform_terrain_at` returns the ground *with the road cut into it*, at whatever
 sample spacing the tile being baked uses -- a cut narrower than that spacing
 falls between two vertices and never appears in the mesh.

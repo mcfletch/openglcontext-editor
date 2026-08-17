@@ -61,6 +61,12 @@ CIRCUIT_HARMONICS = ((3, 0.20), (5, 0.09))
 CIRCUIT_SMOOTHING = 90.0
 CIRCUIT_MAX_GRADE = 0.075
 
+#: How fast the circuit is meant to be driven, in metres per second (170 km/h),
+#: which is what rounds off its crests: a change of grade sharp enough to take a
+#: car's wheels off the road at this speed is spread into a vertical curve that
+#: does not.
+CIRCUIT_DESIGN_SPEED = 47.0
+
 #: The circuit stays this far above the waterline. Where the ground is lower --
 #: the lake basin, the floor of the canyon -- the road rides over it on fill and
 #: its approaches climb to meet it.
@@ -131,6 +137,7 @@ class ProceduralWorld:
             line = follow_terrain(plan, terrain_height, spacing=6.0,
                                   smoothing=CIRCUIT_SMOOTHING,
                                   maximum_grade=CIRCUIT_MAX_GRADE,
+                                  design_speed=CIRCUIT_DESIGN_SPEED,
                                   minimum_height=WATER_LEVEL + CAUSEWAY_FREEBOARD,
                                   closed=True)
             self._circuit = RoadPath(line)

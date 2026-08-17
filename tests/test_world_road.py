@@ -18,6 +18,7 @@ from OpenGLContext_editor.world.road import (
     conform_terrain,
     follow_terrain,
 )
+from OpenGLContext_editor.world.road import curvature_limit as _curvature_limit
 
 
 def _bumpy(x, z):
@@ -605,3 +606,140 @@ class TestACircuitIsLimitedAllTheWayRound:
                               maximum_grade=0.05)
         steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
         assert (np.abs(np.diff(line[:, 1])) / steps).max() <= 0.05 + 1e-9
+
+
+class TestTheRoadDoesNotLaunchACar:
+    """A grade limit says how steeply a road may climb. It says nothing about
+    how *suddenly* that may change, and a road that goes from climbing at its
+    limit to descending at its limit inside a few metres is a ramp: a car
+    arriving at speed leaves the ground, because there is nothing under it.
+
+    Real roads round a change of grade off over a vertical curve whose length
+    the design speed sets. So does this one.
+    """
+
+    def _ridge(self, x, z):
+        """A knife-edge ridge across the course: up one side, down the other."""
+        x, z = np.asarray(x, 'd'), np.asarray(z, 'd')
+        return 40.0 - 0.9 * np.abs(z + 300.0)
+
+    def _over_the_ridge(self, **kwargs):
+        plan = np.stack([np.zeros(161), np.linspace(0.0, -600.0, 161)], axis=-1)
+        return follow_terrain(plan, self._ridge, spacing=6.0, smoothing=0.0,
+                              maximum_grade=0.075, **kwargs)
+
+    def _curvature(self, line):
+        """Change of grade per metre along the alignment."""
+        steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
+        grade = np.diff(line[:, 1]) / np.where(steps > 0, steps, 1.0)
+        span = 0.5 * (steps[:-1] + steps[1:])
+        return np.abs(np.diff(grade)) / np.where(span > 0, span, 1.0)
+
+    def test_the_alignment_has_a_curvature_limit(self) -> None:
+        line = self._over_the_ridge(design_speed=40.0)
+        assert self._curvature(line).max() <= _curvature_limit(40.0) + 1e-6
+
+    def test_a_slower_design_speed_allows_a_sharper_crest(self) -> None:
+        slow = self._curvature(self._over_the_ridge(design_speed=15.0)).max()
+        fast = self._curvature(self._over_the_ridge(design_speed=45.0)).max()
+        assert slow > fast
+
+    def test_the_grade_limit_still_holds(self) -> None:
+        line = self._over_the_ridge(design_speed=40.0)
+        steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
+        grade = np.abs(np.diff(line[:, 1])) / steps
+        assert grade.max() <= 0.075 + 1e-3
+
+    def test_the_crest_is_still_a_crest(self) -> None:
+        """Rounding it off must not level the hill."""
+        line = self._over_the_ridge(design_speed=40.0)
+        assert line[:, 1].max() - line[:, 1].min() > 10.0
+
+    def test_a_car_at_the_design_speed_keeps_its_wheels_down(self) -> None:
+        """The whole point, stated as the physics it comes from: following the
+        road must not need more downward acceleration than gravity gives."""
+        speed = 40.0
+        line = self._over_the_ridge(design_speed=speed)
+        needed = self._curvature(line).max() * speed * speed
+        assert needed < 9.81
+
+    def test_it_is_off_unless_asked_for(self) -> None:
+        """A designer who wants the line they drew gets the line they drew."""
+        line = self._over_the_ridge()
+        assert self._curvature(line).max() > _curvature_limit(40.0)
+
+
+class TestACircuitIsRoundedAllTheWayRound:
+    def _hilly(self, x, z):
+        x, z = np.asarray(x, 'd'), np.asarray(z, 'd')
+        return 60.0 * np.sin(x * 0.004) + 40.0 * np.cos(z * 0.005)
+
+    def _circuit(self, **kwargs):
+        angle = np.linspace(0.0, 2 * np.pi, 96, endpoint=False)
+        plan = np.stack([700 * np.cos(angle), 500 * np.sin(angle)], axis=-1)
+        return follow_terrain(plan, self._hilly, spacing=6.0, smoothing=90.0,
+                              maximum_grade=0.075, closed=True, **kwargs)
+
+    def _curvature(self, line):
+        """Curvature all the way round, the join included.
+
+        ``follow_terrain`` closes a circuit by repeating its first point, so the
+        wrap is built from the line without that repeat.
+        """
+        loop = line[:-1] if np.allclose(line[0], line[-1]) else line
+        wrapped = np.vstack([loop, loop[:2]])
+        steps = np.linalg.norm(np.diff(wrapped[:, [0, 2]], axis=0), axis=1)
+        grade = np.diff(wrapped[:, 1]) / steps
+        span = 0.5 * (steps[:-1] + steps[1:])
+        return np.abs(np.diff(grade)) / span
+
+    def test_the_join_is_rounded_like_everywhere_else(self) -> None:
+        curvature = self._curvature(self._circuit(design_speed=40.0))
+        assert curvature.max() <= _curvature_limit(40.0) + 1e-6
+
+    def test_the_grade_limit_survives_the_rounding(self) -> None:
+        line = self._circuit(design_speed=40.0)
+        loop = line[:-1] if np.allclose(line[0], line[-1]) else line
+        wrapped = np.vstack([loop, loop[:1]])
+        steps = np.linalg.norm(np.diff(wrapped[:, [0, 2]], axis=0), axis=1)
+        grade = np.abs(np.diff(wrapped[:, 1])) / steps
+        assert grade.max() <= 0.075 + 1e-3
+
+    def test_a_water_floor_is_still_honoured(self) -> None:
+        line = self._circuit(design_speed=40.0, minimum_height=30.0)
+        assert line[:, 1].min() >= 30.0 - 1e-9
+
+
+class TestTheShippedCircuitIsDrivable:
+    """The world ``oglc-bake`` produces is the one a player drives, so the
+    question its alignment has to answer is a driver's: at the speed it is
+    built for, does the car stay on the road?
+    """
+
+    def _circuit(self):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=2048.0, resolution=17, seed=11).circuit()
+
+    def _profile(self, line):
+        loop = line[:-1] if np.allclose(line[0], line[-1]) else line
+        wrapped = np.vstack([loop, loop[:2]])
+        steps = np.linalg.norm(np.diff(wrapped[:, [0, 2]], axis=0), axis=1)
+        grade = np.diff(wrapped[:, 1]) / steps
+        span = 0.5 * (steps[:-1] + steps[1:])
+        return np.abs(grade[:-1]), np.abs(np.diff(grade)) / span
+
+    def test_no_crest_lifts_the_car_off_the_road(self) -> None:
+        from OpenGLContext_editor.world.procedural import CIRCUIT_DESIGN_SPEED
+        from OpenGLContext_editor.world.road import CREST_WEIGHT_LOSS, GRAVITY
+        _grade, curvature = self._profile(self._circuit().points)
+        lift = curvature.max() * CIRCUIT_DESIGN_SPEED ** 2 / GRAVITY
+        assert lift <= CREST_WEIGHT_LOSS + 1e-6
+
+    def test_no_climb_is_steeper_than_the_grade_limit(self) -> None:
+        from OpenGLContext_editor.world.procedural import CIRCUIT_MAX_GRADE
+        grade, _curvature = self._profile(self._circuit().points)
+        assert grade.max() <= CIRCUIT_MAX_GRADE + 1e-3
+
+    def test_it_is_still_a_circuit_through_hills(self) -> None:
+        heights = self._circuit().points[:, 1]
+        assert heights.max() - heights.min() > 20.0

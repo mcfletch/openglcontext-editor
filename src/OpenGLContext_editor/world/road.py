@@ -59,6 +59,29 @@ SPACING_PER_ERROR = 1.5
 #: A road that only clips a corner still has to be found there.
 TILE_REACH = 2.0
 
+#: Standard gravity, m/s**2 -- what a car has available to hold it down over a
+#: crest, and so what sets how sharp a crest may be.
+GRAVITY = 9.81
+
+#: How much of a car's weight a crest may take off its wheels. A car that keeps
+#: three-quarters of its weight on the road over a crest still steers and still
+#: brakes; one that keeps none of it is a car in the air.
+CREST_WEIGHT_LOSS = 0.25
+
+#: How many times the grade limit and the curvature limit are applied in turn.
+#: Each is a projection onto a set the other can leave, and both sets contain a
+#: level road, so alternating them converges on an alignment inside both; a
+#: dozen rounds settles the profiles a landscape produces.
+SETTLING_ROUNDS = 12
+
+#: How the curvature limit is relaxed: how much of each point's correction is
+#: taken per sweep, how many sweeps it may take, and the movement below which
+#: the profile counts as settled (metres). Half of the correction converges
+#: without the ringing a full step gives a run of adjacent points.
+CURVATURE_RELAXATION = 0.5
+CURVATURE_SWEEPS = 4000
+CURVATURE_TOLERANCE = 1e-9
+
 #: The road surface, written once beside the tileset. Every tile the road
 #: crosses names this file; embedding a copy in each of them would cost more
 #: than all the geometry in the world put together.
@@ -195,6 +218,7 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
                    smoothing: float = 60.0, clearance: float = 0.0,
                    maximum_grade: float | None = None,
                    minimum_height: float | None = None,
+                   design_speed: float | None = None,
                    closed: bool = False) -> np.ndarray:
     """A drawn line turned into an alignment a car can drive.
 
@@ -204,6 +228,13 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
     and would look wrong, so the grade is averaged over ``smoothing`` metres.
     ``clearance`` lifts the finished alignment, and ``maximum_grade`` (as a
     fraction, 0.08 for one in twelve) caps how steeply it may climb.
+
+    ``design_speed``, in metres per second, is how fast the road is meant to be
+    driven, and it rounds off the changes of grade: a road that goes from
+    climbing at its limit to descending at it inside a few metres is a ramp, and
+    a car meeting it at speed leaves the ground because there is nothing under
+    it. See :func:`curvature_limit` for what the speed buys. Left out, the
+    alignment keeps whatever crests the landscape and the grade limit give it.
 
     ``minimum_height`` is a floor the alignment may not go below -- a waterline,
     with freeboard. Where the ground dips under it the road is lifted onto fill
@@ -225,18 +256,114 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
     if smoothing > 0 and len(line) > 2:
         line[:, 1] = _smooth(line[:, 1], window=max(int(smoothing / spacing), 1),
                              closed=closed)
-    if maximum_grade is not None:
-        line[:, 1] = _limit_grade(line, maximum_grade, closed=closed)
+    bend = (curvature_limit(design_speed) if design_speed is not None
+            else float('inf'))
+    if maximum_grade is not None or np.isfinite(bend):
+        line[:, 1] = _settle_profile(line, maximum_grade, bend, closed)
     if minimum_height is not None:
         line[:, 1] = np.maximum(line[:, 1], minimum_height)
         if maximum_grade is not None:
             line[:, 1] = _ramp_up_to_grade(line, maximum_grade, closed=closed)
+        if np.isfinite(bend):
+            # The floor put corners back into the profile where it lifted the
+            # road; round them off again, keeping the road above the water.
+            floor = line[:, 1].copy()
+            line[:, 1] = _settle_profile(line, maximum_grade, bend, closed)
+            line[:, 1] = np.maximum(line[:, 1], floor.min() * 0.0 + minimum_height)
     line[:, 1] += clearance
     if closed:
         # The ends are the same place, so give them the same height rather than
         # two that differ by a rounding step.
         line[0, 1] = line[-1, 1] = (line[0, 1] + line[-1, 1]) * 0.5
     return line
+
+
+def curvature_limit(design_speed: float,
+                    weight_loss: float = CREST_WEIGHT_LOSS) -> float:
+    """The sharpest crest a road may have, as change of grade per metre.
+
+    A vertical curve of radius ``R`` taken at ``v`` pulls a car off the road at
+    ``v**2 / R``; keeping ``weight_loss`` of its weight or less off the wheels
+    needs ``R >= v**2 / (g * weight_loss)``. Change of grade per metre is the
+    reciprocal of that radius, which is the form the alignment is checked in.
+
+    ``design_speed`` is in metres per second. A road with no design speed has no
+    limit -- there is always some speed at which any crest launches a car, and
+    the answer to that is to say how fast the road is meant to be driven.
+    """
+    if design_speed <= 0 or weight_loss <= 0:
+        return float('inf')
+    return GRAVITY * weight_loss / (design_speed * design_speed)
+
+
+def _limit_curvature(line: np.ndarray, maximum: float,
+                     closed: bool = False) -> np.ndarray:
+    """Round off the changes of grade to ``maximum`` per metre.
+
+    Wherever three consecutive points bend more sharply than that, the middle
+    one moves towards the chord: by half of the least movement that would remove
+    the excess outright, so a run of sharp points settles together instead of
+    each overshooting for the next to undo. Repeated until nothing needs to
+    move, which spreads a kink into the vertical curve that replaces it. An open
+    road's ends stay where the designer put them.
+    """
+    heights = np.asarray(line[:, 1], dtype='d').copy()
+    count = len(heights)
+    if count < 3 or not np.isfinite(maximum):
+        return heights
+    steps = _steps(line, closed)
+    if closed:
+        forward = np.asarray(steps, dtype='d')
+        back = np.roll(forward, 1)
+    else:
+        # The end steps are never used: the ends do not move.
+        forward = np.concatenate([steps, steps[-1:]])
+        back = np.concatenate([steps[:1], steps])
+    span = 0.5 * (back + forward)
+    lever = back * forward / (back + forward)
+    for _sweep in range(CURVATURE_SWEEPS):
+        bend = ((np.roll(heights, -1) - heights) / forward
+                - (heights - np.roll(heights, 1)) / back)
+        excess = np.abs(bend) - maximum * span
+        shift = np.where(excess > 0.0,
+                         np.sign(bend) * excess * CURVATURE_RELAXATION * lever,
+                         0.0)
+        if not closed:
+            shift[0] = shift[-1] = 0.0
+        if float(np.abs(shift).max()) < CURVATURE_TOLERANCE:
+            break
+        heights += shift
+    return heights
+
+
+def _settle_profile(line: np.ndarray, maximum_grade: float | None,
+                    maximum_curvature: float, closed: bool) -> np.ndarray:
+    """Bring an alignment inside the grade *and* the curvature limit.
+
+    Rounding a crest off can steepen what leads to it, and clipping a grade puts
+    a corner back into the profile, so neither limit can be applied once and
+    left. Each is a projection onto a set of alignments -- both of them convex,
+    both of them containing a level road -- so applying them in turn converges
+    on one inside both. The curvature goes last, because a road half a percent
+    too steep is still a road and a road with a kink in it is a ramp.
+    """
+    heights = line[:, 1]
+    if not np.isfinite(maximum_curvature):
+        return (_limit_grade(line, maximum_grade, closed=closed)
+                if maximum_grade is not None else heights)
+    # A closed course arrives with its first point repeated at the end, so the
+    # two are one point with a step of nothing between them. Relaxing the bend
+    # at a zero-length step is meaningless; the loop is settled over the points
+    # it actually has, and the repeat takes the answer at the end.
+    repeated = closed and bool(np.allclose(line[0, [0, 2]], line[-1, [0, 2]]))
+    working = (line[:-1] if repeated else line).copy()
+    for _round in range(SETTLING_ROUNDS):
+        if maximum_grade is not None:
+            working[:, 1] = _limit_grade(working, maximum_grade, closed=closed)
+        working[:, 1] = _limit_curvature(working, maximum_curvature, closed=closed)
+    if repeated:
+        return np.concatenate([working[:, 1], working[:1, 1]])
+    return working[:, 1]
 
 
 def _smooth(values: np.ndarray, window: int, closed: bool = False) -> np.ndarray:
