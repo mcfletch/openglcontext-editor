@@ -1,9 +1,9 @@
-"""The distribution is installed and wired to the engine it authors for.
+"""The distribution installs, and resolves against the engine it authors for.
 
-Everything else in this package is meaningless if these fail: a baker that is
-not importable from the environment the demo and the editor app run in cannot
-bake anything, and a version the metadata and the module disagree about makes
-"which build produced this tileset" unanswerable.
+Two things rest on this. A baker is only reachable from the demo and the editor
+app if installing this package installs OpenGLContext alongside it, and "which
+build produced this tileset" is only answerable while the metadata version and
+the module version are the same number.
 """
 
 import importlib.metadata
