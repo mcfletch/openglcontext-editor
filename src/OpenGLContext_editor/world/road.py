@@ -47,8 +47,8 @@ from OpenGLContext.scenegraph.roadworks import (
     BridgeProfile,
     CausewayProfile,
     TunnelProfile,
-    bridge_meshes,
     barrier_material,
+    bridge_meshes,
     causeway_meshes,
     concrete_material,
     tunnel_meshes,
@@ -853,6 +853,23 @@ class RoadLayer:
     def spacing_for(self, error: float) -> float:
         """How far apart the centreline points are for a tile of this error."""
         return max(self.finest_spacing, float(error) * self.spacing_per_error)
+
+    def segments_in(self, region: BoundingBox, error: float) -> set[int]:
+        """Which segments of the centreline this tile is responsible for.
+
+        Indices into the line as re-sampled for a tile of this error, so
+        segment *i* runs from point *i* to point *i+1*. A tileset refines by
+        replacement, so the tiles at one level have to write each segment
+        between them exactly once: a segment nobody writes is a carriageway
+        that runs into the ground and stops the moment the viewer refines past
+        the parent that had it, and one written twice is two coplanar surfaces
+        fighting for the depth buffer.
+        """
+        line = self.path.resampled(self.spacing_for(error))
+        found: set[int] = set()
+        for rows in _runs_inside(line, region):
+            found.update(range(int(rows[0]), int(rows[-1])))
+        return found
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
         reach = self.path.profile.total_width * TILE_REACH

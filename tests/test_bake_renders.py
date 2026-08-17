@@ -91,6 +91,18 @@ def _on_the_ground(circuit, ahead):
     raise AssertionError("the circuit is on structures from end to end")
 
 
+def _cast(pixels):
+    """How green or how blue a patch of the frame is, past neutral.
+
+    Both of the things that can be overhead have a cast: sky is blue and a
+    canopy is green. Tarmac has none, which is what makes this tell which way
+    up the frame is without assuming which of the two is up there.
+    """
+    average = pixels.reshape(-1, 3).mean(axis=0)
+    return float(max(average[1] - max(average[0], average[2]),
+                     average[2] - max(average[0], average[1])))
+
+
 def _rows(pixels, low, high):
     height = pixels.shape[0]
     return pixels[int(height * low):int(height * high)]
@@ -101,11 +113,18 @@ class TestTheFrameThatComesBack:
         assert rendered.shape[:2] == (360, 640)
         assert rendered.std() > 0.02, "the frame is a flat colour"
 
-    def test_the_sky_is_above_and_the_ground_below(self, rendered) -> None:
-        sky = _rows(rendered, 0.0, 0.08).reshape(-1, 3).mean(axis=0)
-        ground = _rows(rendered, 0.85, 1.0).reshape(-1, 3).mean(axis=0)
-        assert sky[2] > sky[0], "the top of the frame is not sky-blue"
-        assert ground[2] < sky[2], "the bottom of the frame is as blue as the sky"
+    def test_the_world_is_above_and_the_road_below(self, rendered) -> None:
+        """Which way up the frame is.
+
+        Not "the top is sky": a forest road has a canopy over it, and where
+        this world is at its best the top of the frame is leaves. What is true
+        either way is that the top of the frame is *coloured* -- blue sky or
+        green canopy -- and the bottom is the neutral grey of tarmac.
+        """
+        above = _cast(_rows(rendered, 0.0, 0.08))
+        below = _cast(_rows(rendered, 0.85, 1.0))
+        assert above > 0.012, "the top of the frame is neither sky nor canopy"
+        assert below < 0.012, "the bottom of the frame is not tarmac"
 
     def test_the_road_is_underfoot(self, rendered) -> None:
         """Standing on the circuit, the bottom of the frame is tarmac: dark,

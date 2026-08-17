@@ -24,6 +24,7 @@ from OpenGLContext.loaders.tiles3d.procedural import (
 )
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.road import RoadProfile
+from OpenGLContext.scenegraph.roadsigns import SignProfile
 from OpenGLContext.scenegraph.terrain import LayerRule
 
 from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
@@ -35,6 +36,7 @@ from OpenGLContext_editor.bake.layers import (
     InstanceLayer,
     Layer,
 )
+from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
 from OpenGLContext_editor.world.road import (
     RoadLayer,
@@ -45,6 +47,7 @@ from OpenGLContext_editor.world.road import (
 )
 from OpenGLContext_editor.world.route import cornering_radius, ease_route
 from OpenGLContext_editor.world.scatter import scatter_on_heightfield, yaw_quaternions
+from OpenGLContext_editor.world.signs import sign_placements, warn_of
 from OpenGLContext_editor.world.species import (
     biome_species,
     shipped_cover,
@@ -128,6 +131,25 @@ CAUSEWAY_FREEBOARD = 2.5
 #: circuit is a forest road: the trees come up to the verge and the drive is
 #: through them rather than past them.
 ROAD_CLEARANCE = 0.8
+
+#: How far a mature crown reaches from its own trunk, in metres. Where the road
+#: is on the land a crown over the carriageway is the point -- it is what closes
+#: a forest road's canopy -- so the clearance is the corridor and no more. Where
+#: the road is *carried*, a tree beside it is rooted metres below the surface and
+#: the same reach goes through the structure instead of over the road, so it is
+#: held back by this as well.
+CROWN_RADIUS = 3.5
+
+#: How far the road has to stand above the land under a tree before that tree is
+#: growing into a structure rather than reaching over a road, in metres. Every
+#: road stands a little proud of what it is built on.
+CARRIED_ABOVE = 1.5
+
+#: How far a sign's post stands outside the road's own edge, in metres. Inside
+#: the cleared corridor, with room to spare: a forest road is cut only as wide as
+#: it has to be, and a sign put outside that strip stands in the trees where
+#: nobody sees it.
+SIGN_OFFSET = ROAD_CLEARANCE * 0.6
 
 #: The circuit's cross-section. Two lanes, a shoulder wide enough to put two
 #: wheels on and no more, and a verge that is a strip rather than a field: a
@@ -287,7 +309,28 @@ class ProceduralWorld:
         layers: list[Layer] = [self.terrain(), self.trees()]
         if self.road:
             layers.append(self.circuit_layer())
+            signs = self.sign_layer()
+            if signs is not None:
+                layers.append(signs)
         return layers
+
+    def sign_layer(self) -> SignLayer | None:
+        """The circuit's warning signs, or None for a world with no road.
+
+        Nothing here decides what they say: the alignment does, from its own
+        curvature, its own grade and the structures along it. See
+        :mod:`OpenGLContext_editor.world.signs`.
+        """
+        if not self.road:
+            return None
+        circuit = self.circuit()
+        warnings = warn_of(circuit, CIRCUIT_DESIGN_SPEED)
+        if not warnings:
+            return None
+        profile = SignProfile(offset=SIGN_OFFSET)
+        return SignLayer(sign_placements(circuit, warnings, profile=profile,
+                                         ground=self.height_fn()),
+                         profile=profile)
 
 
     def height_fn(self) -> Any:
@@ -487,14 +530,23 @@ class ProceduralWorld:
         return found
 
     def _away_from_the_road(self, points: np.ndarray) -> np.ndarray:
-        """Which placements are outside the road's cleared corridor."""
+        """Which placements are outside the road's cleared corridor.
+
+        Wider where the road is carried above the land the tree stands on: the
+        crown of a tree rooted at the foot of an embankment grows through the
+        side of it rather than over the carriageway, and a wood growing out of
+        a causeway's concrete is what that looks like from the road.
+        """
         if not self.road:
             return np.ones(len(points), dtype=bool)
         circuit = self.circuit()
         corridor = circuit.profile.total_width / 2.0 + ROAD_CLEARANCE
-        distance, _ = circuit.nearest(points[:, 0], points[:, 2],
-                                      radius=corridor * 1.5)
-        return np.asarray(distance > corridor)
+        reach = corridor + CROWN_RADIUS
+        found = circuit.sample(points[:, 0], points[:, 2], radius=reach * 1.5)
+        ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
+                            dtype='d')
+        carried = found.height - ground > CARRIED_ABOVE
+        return np.asarray(found.distance > np.where(carried, reach, corridor))
 
 
 def _slopes(height_fn: Any, positions: np.ndarray, step: float = 8.0
