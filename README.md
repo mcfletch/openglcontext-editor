@@ -62,6 +62,33 @@ detail policy, the geometric-error ladder, and the limits -- is in the engine's
 [Baking a world](https://github.com/mcfletch/openglcontext/blob/main/docs/baking.html)
 page.
 
+## Put a road through it
+
+A `RoadLayer` carries a route across the world: it cuts the ground to meet the
+shoulder, splits the road so each tile owns the length inside it, and writes the
+centreline into the tileset so a game can find the track in what it streams.
+
+```python
+from OpenGLContext_editor.world.road import (
+    RoadPath, RoadLayer, conform_terrain_at, follow_terrain,
+)
+
+course = follow_terrain(my_route, my_heights, spacing=5.0,
+                        maximum_grade=0.075, minimum_height=2.5, closed=True)
+path = RoadPath(course)
+ground = conform_terrain_at(my_heights, path)   # height fn -> height fn, per tile
+
+terrain = HeightfieldLayer(height_fn_at=ground, extent=extent, resolution=33)
+print(bake_world([terrain, RoadLayer(path=path)], '/tmp/world', depth=4).summary())
+```
+
+`follow_terrain` drapes a 2D route over the land and then makes it drivable:
+smoothed, held to a maximum grade (wrapping, for a closed circuit), and lifted
+onto a causeway where it would otherwise run below `minimum_height`.
+`conform_terrain_at` returns the ground *with the road cut into it*, at whatever
+sample spacing the tile being baked uses -- a cut narrower than that spacing
+falls between two vertices and never appears in the mesh.
+
 ## Install for development
 
 The package is developed inside the
@@ -79,16 +106,18 @@ pytest
 | Path | Holds |
 |---|---|
 | `src/OpenGLContext_editor/bake/` | the tile baker: bounds, the octree, layers, the tileset writer, the bake driver |
-| `src/OpenGLContext_editor/world/` | world generation: scatter, and the example world |
+| `src/OpenGLContext_editor/world/` | world generation: scatter, roads, and the example world |
 | `src/OpenGLContext_editor/bin/` | `oglc-bake` |
 | `tests/` | the suite; `pytest` runs it |
 | `specs/` | format and interoperability facts the code cites, and the [clean-room procedure](specs/CLEAN-ROOM.md) that governs how they are gathered |
 
 ## Status
 
-The baker works: a world of terrain and instanced vegetation bakes to a
-3D Tiles octree the engine streams. Roads, water, and the editor UI toolkit are
-designed in
+The baker works: a world of terrain, instanced vegetation and roads bakes to a
+3D Tiles octree the engine streams, and [glisteel](https://github.com/mcfletch/glisteel)
+drives a lap of it. Roads generate for a route that follows the ground or is
+carried over a low area on a causeway; bridges, tunnels, water and the editor UI
+toolkit are designed in
 [GLISTEEL-WORLD-AUTHORING.md](https://github.com/mcfletch/openglcontext/blob/main/plans/GLISTEEL-WORLD-AUTHORING.md),
 which also records the division of labour between this package and the engine.
 
