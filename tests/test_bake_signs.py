@@ -12,7 +12,10 @@ import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
-from OpenGLContext_editor.bake.signs import SIGN_DIRECTORY, SignLayer
+from OpenGLContext_editor.bake.signs import (
+    ATLAS_IMAGE,
+    SignLayer,
+)
 from OpenGLContext_editor.world.signs import Placement
 
 PROFILE = RoadProfile(lane_width=3.6, lanes=2)
@@ -30,20 +33,6 @@ def _layer(**named):
 
 
 class TestWhatItWrites:
-    def test_one_node_per_kind_per_part(self) -> None:
-        """A post and a plate for each kind: two materials, two nodes."""
-        found = _layer().content(REGION, error=1.0)
-        assert len(found) == 4
-
-    def test_a_kind_with_no_signs_is_not_written(self) -> None:
-        found = _layer(placements=_placed(kinds=('dip',))).content(REGION, 1.0)
-        assert len(found) == 2
-
-    def test_every_sign_is_placed(self) -> None:
-        counted = sum(len(node.instances.translations)
-                      for node in _layer().content(REGION, 1.0))
-        assert counted == 8            # four signs, a post and a plate each
-
     def test_a_tile_holding_none_writes_nothing(self) -> None:
         far = BoundingBox((5000.0, -50.0, 5000.0), (6000.0, 50.0, 6000.0))
         assert _layer().content(far, 1.0) == []
@@ -63,23 +52,12 @@ class TestWhatItWrites:
 
 
 class TestThePictures:
-    def test_each_kind_writes_its_plate_once(self) -> None:
-        assets = _layer().assets()
-        assert sorted(assets) == ['%s/bend-left.png' % SIGN_DIRECTORY,
-                                  '%s/dip.png' % SIGN_DIRECTORY]
-
     def test_they_are_real_images(self) -> None:
         import io
 
         from PIL import Image
         for data in _layer().assets().values():
             assert Image.open(io.BytesIO(data)).size[0] > 32
-
-    def test_a_tile_names_the_file_rather_than_carrying_it(self) -> None:
-        for node in _layer().content(REGION, 1.0):
-            texture = node.mesh.material.texture('baseColor')
-            if texture is not None:
-                assert texture.uri.startswith(SIGN_DIRECTORY + '/')
 
     def test_the_world_says_where_its_signs_are(self) -> None:
         found = _layer().metadata()['signs']
@@ -150,3 +128,51 @@ class TestASignStandsWhereItCanBeSeen:
             gap = np.hypot(trees[:, 0] - placed.position[0],
                            trees[:, 2] - placed.position[2])
             assert float(gap.min()) > 0.5
+
+
+class TestOneDrawForAllOfThem:
+    """Seven kinds, each a post and a plate, is up to fourteen nodes in a tile
+    that holds four signs -- fourteen render records, fourteen bounding volumes,
+    fourteen frustum tests and fourteen entries in every shadow cascade, for a
+    metre of painted metal apiece.
+
+    Reading out of one atlas makes every sign one material, and a world's signs
+    are then one mesh and one draw a tile."""
+
+    def test_a_tile_writes_one_node_however_many_kinds_it_holds(self) -> None:
+        found = _layer().content(REGION, error=1.0)
+        assert len(found) == 1
+
+    def test_and_that_node_holds_all_of_them(self) -> None:
+        node = _layer().content(REGION, 1.0)[0]
+        alone = SignLayer(placements=_placed(count=1)).content(REGION, 1.0)[0]
+        assert len(node.mesh.positions) == 4 * len(alone.mesh.positions)
+
+    def test_the_signs_are_where_they_were_put(self) -> None:
+        node = _layer().content(REGION, 1.0)[0]
+        feet = node.mesh.positions[node.mesh.positions[:, 1] < 0.01]
+        assert float(feet[:, 0].max()) == pytest.approx(90.0, abs=0.5)
+
+    def test_and_each_faces_the_way_it_was_turned(self) -> None:
+        straight = SignLayer(placements=[Placement(position=np.zeros(3), yaw=0.0,
+                                                   kind='dip')])
+        turned = SignLayer(placements=[Placement(position=np.zeros(3),
+                                                 yaw=np.pi / 2, kind='dip')])
+        assert not np.allclose(straight.content(REGION, 1.0)[0].mesh.positions,
+                               turned.content(REGION, 1.0)[0].mesh.positions)
+
+    def test_one_picture_holds_every_kind(self) -> None:
+        assert list(_layer().assets()) == [ATLAS_IMAGE]
+
+    def test_and_the_tile_names_it_rather_than_carrying_it(self) -> None:
+        node = _layer().content(REGION, 1.0)[0]
+        assert node.mesh.material.texture('baseColor').uri == ATLAS_IMAGE
+
+    def test_two_kinds_read_different_corners_of_it(self) -> None:
+        both = SignLayer(placements=[
+            Placement(position=np.array([0.0, 0.0, 0.0]), yaw=0.0, kind='dip'),
+            Placement(position=np.array([9.0, 0.0, 0.0]), yaw=0.0,
+                      kind='crest')])
+        found = np.asarray(both.content(REGION, 1.0)[0].mesh.texcoords)
+        half = len(found) // 2
+        assert not np.allclose(found[:half], found[half:])
