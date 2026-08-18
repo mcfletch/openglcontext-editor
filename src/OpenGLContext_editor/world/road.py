@@ -202,6 +202,9 @@ class RoadPath:
         self._length2 = np.where(lengths > 0, lengths, 1.0)
         self._low = np.minimum(self._start, line[1:])
         self._high = np.maximum(self._start, line[1:])
+        #: Which cells of the query index the road can reach, by (cell, reach).
+        #: A bake asks the same question of millions of points in a row.
+        self._occupancy: dict[tuple[float, float], np.ndarray] = {}
         runs = np.linalg.norm(self._delta[:, [0, 2]], axis=1)
         rises = np.abs(self._delta[:, 1])
         self.max_grade = float((rises / np.where(runs > 0, runs, 1.0)).max())
@@ -300,6 +303,19 @@ class RoadPath:
         return RoadSample(distance.reshape(shape), height.reshape(shape),
                           segment.reshape(shape))
 
+    def index_cells(self, x: Any, z: Any, radius: float | None = None) -> int:
+        """How many groups the index splits a query into.
+
+        The Python-level cost of asking, which the comparison count does not
+        show: a cell the road comes nowhere near contributes no comparisons and
+        still costs an iteration if it is visited at all.
+        """
+        x = np.asarray(x, dtype='d')
+        z = np.asarray(z, dtype='d')
+        shape = np.broadcast_shapes(x.shape, z.shape)
+        return len(self._batches(np.broadcast_to(x, shape).ravel(),
+                                 np.broadcast_to(z, shape).ravel(), radius))
+
     def comparisons(self, x: Any, z: Any, radius: float | None = None) -> int:
         """How many sample-against-segment comparisons a query would cost.
 
@@ -352,16 +368,46 @@ class RoadPath:
             segments = self._near(x, z, reach)
             return [(np.arange(len(x)), segments)] if len(segments) else []
         cell = max(reach * INDEX_CELL, 1e-6)
-        keys = (np.floor(x / cell).astype(np.int64) << 32) \
-            + np.floor(z / cell).astype(np.int64)
-        order = np.argsort(keys, kind='stable')
-        edges = np.flatnonzero(np.diff(keys[order])) + 1
+        keys = _cell_keys(x, z, cell)
+        # Everything the road comes nowhere near, dropped in one pass. Grouping
+        # by cell makes each comparison cheap; it does not make an *empty* cell
+        # cheap, and a two-thousand-pixel map at a five-metre cell is most of a
+        # million of them. Iterating over those costs more than the comparisons
+        # the index saved.
+        near = np.isin(keys, self._occupied(cell, reach))
+        if not near.any():
+            return []
+        rows_near = np.nonzero(near)[0]
+        keys = keys[rows_near]
+        order = rows_near[np.argsort(keys, kind='stable')]
+        edges = np.flatnonzero(np.diff(np.sort(keys))) + 1
         batches = []
         for rows in np.split(order, edges):
             segments = self._near(x[rows], z[rows], reach)
             if len(segments):
                 batches.append((rows, segments))
         return batches
+
+    def _occupied(self, cell: float, reach: float) -> np.ndarray:
+        """The keys of every cell the road can reach, sorted.
+
+        A segment's box grown by ``reach`` covers a block of cells; the union of
+        those blocks is where an answer can be anything but "nowhere near".
+        Cached per (cell, reach), because a bake asks the same question of
+        millions of points in a row.
+        """
+        found = self._occupancy.get((cell, reach))
+        if found is None:
+            spread = int(np.ceil(reach / cell)) + 1
+            steps = np.arange(-spread, spread + 1)
+            block_x, block_z = np.meshgrid(steps, steps)
+            base_x = np.floor(self.points[:, 0] / cell).astype(np.int64)
+            base_z = np.floor(self.points[:, 2] / cell).astype(np.int64)
+            keys = ((base_x[:, None] + block_x.ravel()[None, :]) << 32) \
+                + (base_z[:, None] + block_z.ravel()[None, :])
+            found = np.unique(keys.ravel())
+            self._occupancy[(cell, reach)] = found
+        return found
 
     def _near(self, x: np.ndarray, z: np.ndarray, reach: float) -> np.ndarray:
         """Segment indices whose box comes within ``reach`` of these queries."""
@@ -932,6 +978,12 @@ class RoadLayer:
             out.extend(SceneNode(mesh=mesh, name='%s-%s' % (kind, part))
                        for part, mesh in parts.items())
         return out
+
+
+def _cell_keys(x: np.ndarray, z: np.ndarray, cell: float) -> np.ndarray:
+    """Which cell of a coarse grid each query falls in, as one integer."""
+    return (np.floor(x / cell).astype(np.int64) << 32) \
+        + np.floor(z / cell).astype(np.int64)
 
 
 def _profile_json(profile: RoadProfile) -> dict[str, Any]:

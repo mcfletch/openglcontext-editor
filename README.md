@@ -68,7 +68,7 @@ ground = BoundingBox((-2048, 0, -2048), (2048, 0, 2048))
 terrain = HeightfieldLayer(height_fn=my_heights, extent=ground, resolution=33,
                            color_fn=my_colours, water_level=0.0)
 
-trees = scatter_on_heightfield(my_heights, ground, density=0.004, seed=11,
+trees = scatter_on_heightfield(my_heights, ground, spacing=2.6, seed=11,
                                slope_limit=38.0, height_range=(2.0, 130.0))
 forest = InstanceLayer(positions=trees.positions,
                        rotations=yaw_quaternions(trees.yaws),
@@ -135,6 +135,28 @@ else. A road already on the land disturbs almost nothing; one carried forty
 metres over a valley builds an embankment as wide as it needs. Under the
 carriageway the ground sits a hand's breadth below the surface, because a road
 is built on a formation and surfaced on top of it.
+
+## Baking is meant to be iterated
+
+Baking the shipped four-kilometre world -- half a million trees, its roads and
+their structures, its signs and its boulders -- takes about **25 seconds**. That
+is the number that matters: a world nobody can re-bake is a world nobody
+revises, and everything in this package exists so that a designer can change a
+route and drive it.
+
+Nearly all of it used to be the tree scatter, and nearly all of *that* was
+questions asked about ground the answer did not depend on. Three things fixed
+it, and each is a rule worth following in a layer of your own:
+
+- **Ask for a spacing, not a density,** for anything that will be thinned to a
+  minimum separation afterwards. Random candidates have to be several times too
+  dense before the thinning saturates, and each one is paid for.
+- **Run the filters cheapest-first, each on what the last one left.** An
+  elevation band is free once the height is known; a slope is four more height
+  lookups apiece.
+- **Do not ask the road about ground it never reaches.** `RoadPath`'s index
+  drops whole cells of a query in one pass rather than iterating over the
+  hundreds of thousands a fine grid makes.
 
 ## Install for development
 

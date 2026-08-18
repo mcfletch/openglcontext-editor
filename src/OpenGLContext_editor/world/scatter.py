@@ -12,6 +12,13 @@ it produces into the quaternions an instance set carries.
 Density is per square metre of *plan* area, not of surface area: a hillside
 holds the same number of trees seen from above as the flat ground beside it,
 which is how forestry measures it and how a designer thinks about it.
+
+**Ask for a spacing rather than a density where you can.** Uniform random
+candidates later thinned to a minimum separation is dart-throwing, and to
+saturate the packing it has to be handed several times the number of instances
+it will keep -- every one of which costs a height lookup, four more for the
+slope, and whatever the caller's own filter costs. A jittered grid at the
+spacing asks for the answer directly.
 """
 from __future__ import annotations
 
@@ -31,47 +38,105 @@ HeightFn = Callable[[Any, Any], Any]
 #: catch a real bank.
 SLOPE_STEP = 1.0
 
+#: How far a candidate may wander from its cell's centre, as a fraction of the
+#: cell. Under 1, so no two candidates can meet: what is wanted is a set that
+#: is not a lattice, not one that has to be thinned again afterwards.
+GRID_JITTER = 0.86
+
 
 def scatter_on_heightfield(
-        height_fn: HeightFn, extent: BoundingBox, density: float, seed: int,
-        scale_range: tuple[float, float] = (1.0, 1.0),
+        height_fn: HeightFn, extent: BoundingBox, density: float | None = None,
+        seed: int = 0, scale_range: tuple[float, float] = (1.0, 1.0),
         slope_limit: float | None = None,
         height_range: tuple[float, float] | None = None,
-        keep: Callable[[np.ndarray], np.ndarray] | None = None) -> Scatter:
+        keep: Callable[[np.ndarray], np.ndarray] | None = None,
+        spacing: float | None = None,
+        slope_fn: HeightFn | None = None) -> Scatter:
     """Place instances over a region of ground.
 
-    ``density`` is instances per square metre of the region's footprint, before
-    filtering. ``slope_limit`` drops anything on ground steeper than that many
-    degrees; ``height_range`` keeps only placements between two elevations --
-    above the waterline and below the treeline, say. ``keep`` is a free filter
-    over the (N,3) candidate positions for anything those two do not express,
-    such as a distance-to-road mask.
+    Say either how many or how far apart. ``density`` is instances per square
+    metre of the region's footprint, placed at random; ``spacing`` is metres
+    between them, placed one to a cell of a jittered grid. Prefer ``spacing``
+    for anything that will be thinned to a minimum separation afterwards: a
+    random set has to be several times too dense before that thinning saturates,
+    and every candidate in it is paid for.
+
+    ``slope_limit`` drops anything on ground steeper than that many degrees;
+    ``height_range`` keeps only placements between two elevations -- above the
+    waterline and below the treeline, say. ``keep`` is a free filter over the
+    (N,3) candidate positions for anything those two do not express, such as a
+    distance-to-road mask.
+
+    ``slope_fn(x, z) -> radians`` is how steep the ground is, for a caller that
+    has a cheaper way to say than four more height lookups apiece -- a bake
+    samples the ground into a height field before it scatters anything on it,
+    and that field can answer. It answers *better*, too, at the resolution a
+    tree cares about: a central difference over a metre reads every wrinkle of
+    an earthwork as a cliff.
+
+    The filters run cheapest first, each on what the last one left: the
+    elevation band is free once the height is known, ``keep`` is the caller's
+    own cost, and the slope is four more height lookups apiece.
 
     The result is the engine's own :class:`~OpenGLContext.loaders.tiles3d.scatter.Scatter`
     -- positions, yaws and uniform scales -- so it feeds the same instanced
     drawing as a tile-time scatter.
     """
-    footprint = float(extent.size[0]) * float(extent.size[2])
-    count = int(round(footprint * density))
-    if count <= 0:
-        return Scatter(np.zeros((0, 3), 'f4'), np.zeros(0), np.zeros(0))
-
     rng = np.random.default_rng(seed)
-    x = rng.uniform(extent.minimum[0], extent.maximum[0], size=count)
-    z = rng.uniform(extent.minimum[2], extent.maximum[2], size=count)
-    y = np.asarray(height_fn(x, z), dtype='d')
-    positions = np.stack([x, y, z], axis=-1)
-    yaws = rng.random(count) * (2.0 * math.pi)
-    scales = rng.uniform(scale_range[0], scale_range[1], size=count)
+    if spacing is not None:
+        x, z = _grid_candidates(extent, spacing, rng)
+    elif density is not None:
+        x, z = _random_candidates(extent, density, rng)
+    else:
+        raise ValueError(
+            "a scatter needs either a density or a spacing to place anything")
+    if not len(x):
+        return Scatter(np.zeros((0, 3), 'f4'), np.zeros(0), np.zeros(0))
+    yaws = rng.random(len(x)) * (2.0 * math.pi)
+    scales = rng.uniform(scale_range[0], scale_range[1], size=len(x))
 
-    mask = np.ones(count, dtype=bool)
+    y = np.asarray(height_fn(x, z), dtype='d')
+    live = np.ones(len(x), dtype=bool)
     if height_range is not None:
-        mask &= (y >= height_range[0]) & (y <= height_range[1])
-    if slope_limit is not None:
-        mask &= surface_slope(height_fn, x, z) <= math.radians(slope_limit)
-    if keep is not None:
-        mask &= np.asarray(keep(positions), dtype=bool)
-    return Scatter(positions[mask].astype('f4'), yaws[mask], scales[mask])
+        live &= (y >= height_range[0]) & (y <= height_range[1])
+    x, z, y, yaws, scales = (part[live] for part in (x, z, y, yaws, scales))
+    positions = np.stack([x, y, z], axis=-1)
+    if keep is not None and len(x):
+        live = np.asarray(keep(positions), dtype=bool)
+        x, z, yaws, scales = (part[live] for part in (x, z, yaws, scales))
+        positions = positions[live]
+    if slope_limit is not None and len(x):
+        measured = (surface_slope(height_fn, x, z) if slope_fn is None
+                    else np.asarray(slope_fn(x, z), dtype='d'))
+        live = measured <= math.radians(slope_limit)
+        positions, yaws, scales = positions[live], yaws[live], scales[live]
+    return Scatter(positions.astype('f4'), yaws, scales)
+
+
+def _random_candidates(extent: BoundingBox, density: float,
+                       rng: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Uniform random points over the region, ``density`` to the square metre."""
+    footprint = float(extent.size[0]) * float(extent.size[2])
+    count = max(int(round(footprint * density)), 0)
+    return (rng.uniform(extent.minimum[0], extent.maximum[0], size=count),
+            rng.uniform(extent.minimum[2], extent.maximum[2], size=count))
+
+
+def _grid_candidates(extent: BoundingBox, spacing: float,
+                     rng: Any) -> tuple[np.ndarray, np.ndarray]:
+    """One point per cell of a jittered grid of ``spacing`` metres."""
+    if spacing <= 0.0:
+        raise ValueError("a scatter's spacing is a distance in metres, not %r"
+                         % (spacing,))
+    axis_x = np.arange(float(extent.minimum[0]), float(extent.maximum[0])
+                       + spacing * 0.5, spacing)
+    axis_z = np.arange(float(extent.minimum[2]), float(extent.maximum[2])
+                       + spacing * 0.5, spacing)
+    grid_x, grid_z = np.meshgrid(axis_x, axis_z)
+    count = grid_x.size
+    wander = spacing * GRID_JITTER / 2.0
+    return (grid_x.ravel() + rng.uniform(-wander, wander, size=count),
+            grid_z.ravel() + rng.uniform(-wander, wander, size=count))
 
 
 def surface_slope(height_fn: HeightFn, x: Any, z: Any,

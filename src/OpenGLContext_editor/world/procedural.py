@@ -11,6 +11,7 @@ your height function, your assets and your scatter rules.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,7 @@ from OpenGLContext.loaders.tiles3d.procedural import (
     terrain_height,
 )
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.props import Prop, rock_mesh
 from OpenGLContext.scenegraph.road import RoadProfile
 from OpenGLContext.scenegraph.roadsigns import SignProfile
 from OpenGLContext.scenegraph.terrain import LayerRule
@@ -36,6 +38,7 @@ from OpenGLContext_editor.bake.layers import (
     InstanceLayer,
     Layer,
 )
+from OpenGLContext_editor.bake.props import PropLayer
 from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
 from OpenGLContext_editor.world.road import (
@@ -56,10 +59,16 @@ from OpenGLContext_editor.world.species import (
 )
 from OpenGLContext_editor.world.structures import Op, choose_structures
 
-#: Trees per square metre, before thinning. Enough candidates that the spacing
-#: below is what actually decides the forest: a scatter thin enough to leave gaps
-#: of its own reads as planting, because the eye finds the gaps.
-TREE_DENSITY = 0.5
+#: Candidate trees per square metre, before thinning. They go one to a cell of a
+#: jittered grid of ``1/sqrt(density)`` metres rather than at random, so the set
+#: handed to the thinning is already nearly the answer.
+#:
+#: At random it would have to be several times denser before the thinning
+#: saturated -- dart-throwing needs a lot of darts -- and every candidate costs
+#: a height lookup, a distance-to-road query and four more lookups for the
+#: slope. On a four-kilometre world that was eight million candidates for half a
+#: million trees, and most of what a bake spent.
+TREE_DENSITY = 0.148
 
 #: How much room a tree keeps to itself, in metres: a fixed part plus a share of
 #: its own height, so a mature tree holds more ground than a sapling. This is
@@ -131,6 +140,28 @@ CAUSEWAY_FREEBOARD = 2.5
 #: circuit is a forest road: the trees come up to the verge and the drive is
 #: through them rather than past them.
 ROAD_CLEARANCE = 0.8
+
+#: Boulders per square metre, before anything is filtered out, and how big they
+#: are. Sparse: a rock is a thing a driver notices, and a landscape strewn with
+#: them evenly is a quarry rather than a hillside.
+ROCK_DENSITY = 0.00035
+ROCK_RADIUS = (0.45, 1.7)
+
+#: How many different boulders are cut, and the tile error past which they are
+#: not drawn. A handful is enough: they are turned, scaled and scattered, and a
+#: driver seeing the same stone twice in a lap is not what anybody notices.
+ROCK_SHAPES = 4
+
+#: Where a boulder may lie: off the carriageway by its own size and this much
+#: more, and no further out than this from the road. The near limit is what
+#: makes it an obstacle rather than scenery -- something a car leaving the road
+#: meets -- and the far one is what stops the whole landscape being strewn.
+ROCK_CLEARANCE = 0.6
+ROCK_REACH = 26.0
+
+#: Boulders will not lie on ground steeper than this, in degrees, nor below the
+#: waterline.
+ROCK_SLOPE_LIMIT = 38.0
 
 #: How far a mature crown reaches from its own trunk, in metres. Where the road
 #: is on the land a crown over the carriageway is the point -- it is what closes
@@ -312,7 +343,58 @@ class ProceduralWorld:
             signs = self.sign_layer()
             if signs is not None:
                 layers.append(signs)
+        props = self.prop_layer()
+        if props is not None:
+            layers.append(props)
         return layers
+
+    def rocks(self) -> Any:
+        """Where the boulders lie: near the road, clear of the carriageway.
+
+        Near it because that is what makes a rock an obstacle rather than
+        scenery: it is the thing a car leaving the road meets. Clear of the
+        carriageway because an obstacle a driver cannot avoid is not an
+        obstacle, it is a wall.
+        """
+        from OpenGLContext.loaders.tiles3d.scatter import Scatter
+        placed = scatter_on_heightfield(
+            self.height_fn(), self.footprint(), density=ROCK_DENSITY,
+            seed=self.seed + 101, scale_range=ROCK_RADIUS,
+            slope_limit=ROCK_SLOPE_LIMIT, slope_fn=self.slope_fn(),
+            height_range=(WATER_LEVEL + 0.5, 1.0e9),
+            keep=self._beside_the_road)
+        return Scatter(placed.positions, placed.yaws, placed.scales)
+
+    def prop_layer(self) -> PropLayer | None:
+        """The world's obstacles, or None for a world with nothing in the way."""
+        placed = self.rocks()
+        if not len(placed.positions):
+            return None
+        prototypes = {_rock_kind(index): rock_mesh(radius=1.0, seed=index)
+                      for index in range(ROCK_SHAPES)}
+        props = [
+            Prop.of(prototypes[_rock_kind(index % ROCK_SHAPES)],
+                    kind=_rock_kind(index % ROCK_SHAPES),
+                    position=point, yaw=float(yaw), scale=float(scale))
+            for index, (point, yaw, scale) in enumerate(
+                zip(placed.positions, placed.yaws, placed.scales, strict=True))]
+        return PropLayer(props=props, prototypes=prototypes)
+
+    def _beside_the_road(self, points: np.ndarray) -> np.ndarray:
+        """Which placements are near the road but out of the way of a car.
+
+        Without a road every one of them stands: a landscape has rocks in it
+        whether or not anybody built through it.
+        """
+        if not self.road:
+            return np.ones(len(points), dtype=bool)
+        circuit = self.circuit()
+        clear = circuit.profile.carriageway_width / 2.0 + ROCK_RADIUS[1] \
+            + ROCK_CLEARANCE
+        found = circuit.sample(points[:, 0], points[:, 2],
+                               radius=ROCK_REACH * 1.5)
+        return np.asarray((found.distance > clear)
+                          & (found.distance < ROCK_REACH))
 
     def sign_layer(self) -> SignLayer | None:
         """The circuit's warning signs, or None for a world with no road.
@@ -394,6 +476,32 @@ class ProceduralWorld:
             extent=self.footprint(), resolution=self.resolution,
             color_fn=terrain_colors, water_level=WATER_LEVEL, name='terrain')
 
+    def _tree_slopes(self, positions: Any) -> Any:
+        """How steep the ground is under each tree, as rise over run."""
+        steepness = self.slope_fn()
+        if steepness is None:
+            return _slopes(self.height_fn(), positions)
+        return np.tan(np.asarray(steepness(positions[:, 0], positions[:, 2]),
+                                 dtype='d'))
+
+    def slope_fn(self) -> Any:
+        """How steep the ground is, in radians, or None for a world with no field.
+
+        The landscape is sampled into a height field before anything is
+        scattered on it, and asking that is a lookup rather than four
+        evaluations of the conformed height function. At four metres a sample it
+        also answers the question a tree asks -- whether the hillside is too
+        steep to hold one -- rather than whether the metre it stands on is.
+        """
+        layer = self.terrain()
+        if not isinstance(layer, FieldTerrainLayer):
+            return None
+        field = layer.field()
+
+        def steepness(x: Any, z: Any) -> Any:
+            return np.arctan(np.asarray(field.slope(x, z), dtype='d'))
+        return steepness
+
     def canopy_shade(self) -> Any:
         """How much of the sun reaches each place: ``shade(x, z)`` in [0, 1].
 
@@ -454,11 +562,14 @@ class ProceduralWorld:
     def _build_scatter(self) -> Any:
         from OpenGLContext.loaders.tiles3d.scatter import Scatter
         from OpenGLContext.loaders.tiles3d.vegetation import poisson_thin
+        if self.tree_density <= 0.0:
+            return Scatter(np.zeros((0, 3), 'f4'), np.zeros(0), np.zeros(0))
         placed = scatter_on_heightfield(
-            self.height_fn(), self.footprint(), density=self.tree_density,
+            self.height_fn(), self.footprint(),
+            spacing=1.0 / math.sqrt(self.tree_density),
             seed=self.seed, scale_range=(0.62, 1.30),
             slope_limit=TREE_SLOPE_LIMIT, height_range=self.treeline(),
-            keep=self._away_from_the_road)
+            slope_fn=self.slope_fn(), keep=self._away_from_the_road)
         if not len(placed.positions):
             return placed
         heights = placed.scales * self.tree_height
@@ -493,7 +604,7 @@ class ProceduralWorld:
         placed = self.scatter()
         species = shipped_species(self.species_directory)
         heights = (placed.scales * self.tree_height).astype('f4')
-        slopes = _slopes(self.height_fn(), placed.positions)
+        slopes = self._tree_slopes(placed.positions)
         return VegetationLayer(
             positions=placed.positions, yaws=placed.yaws, heights=heights,
             species=species,
@@ -547,6 +658,11 @@ class ProceduralWorld:
                             dtype='d')
         carried = found.height - ground > CARRIED_ABOVE
         return np.asarray(found.distance > np.where(carried, reach, corridor))
+
+
+def _rock_kind(index: int) -> str:
+    """The name of one of the cut boulders, as a prop's kind."""
+    return 'rock%d' % (index,)
 
 
 def _slopes(height_fn: Any, positions: np.ndarray, step: float = 8.0
