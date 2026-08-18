@@ -46,6 +46,11 @@ class TestWhatIsDrawn:
         for node in _layer().content(REGION, 1.0):
             assert node.instances.scales is not None
 
+    def test_the_stone_it_draws_is_weathered(self) -> None:
+        """The mottling and the moss ride in the mesh, so they reach a tile."""
+        for node in _layer().content(REGION, 1.0):
+            assert node.mesh.colors is not None
+
     def test_a_tile_holding_none_draws_nothing(self) -> None:
         far = BoundingBox((9000.0, -50.0, 9000.0), (9500.0, 50.0, 9500.0))
         assert _layer().content(far, 1.0) == []
