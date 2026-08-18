@@ -97,7 +97,7 @@ def bake_world(layers: Sequence[Layer], directory: str,
     root_tile = _bake_node(root_cell, layers, error, leaf_error, state)
     extras: dict[str, Any] = {'bakedBy': 'OpenGLContext-editor'}
     for layer in layers:
-        extras.update(getattr(layer, 'metadata', dict)() or {})
+        _contribute(extras, getattr(layer, 'metadata', dict)() or {}, layer)
     if root_tile is None:
         if not shared and len(extras) == 1:
             raise ValueError(
@@ -115,6 +115,29 @@ def bake_world(layers: Sequence[Layer], directory: str,
                       contents=state.contents, bytes_written=state.bytes_written,
                       root_error=error, bounds=root_tile.bounds,
                       layers=dict(state.layer_counts), assets=shared)
+
+
+def _contribute(extras: dict[str, Any], more: dict[str, Any],
+                layer: Layer) -> None:
+    """Fold one layer's metadata into the tileset's.
+
+    Two layers may fill the same channel when it is a list: the props a gantry
+    stands up and the boulders strewn over a landscape are one world's props,
+    and a game reading them wants all of them. Two layers answering the same
+    *question* is a bake to stop rather than to pick a winner from -- where a
+    lap begins has one answer, and silently taking the last one writes a world
+    whose timing belongs to whichever layer was listed later.
+    """
+    for key, value in more.items():
+        held = extras.get(key)
+        if key not in extras:
+            extras[key] = value
+        elif isinstance(held, list) and isinstance(value, list):
+            extras[key] = held + value
+        else:
+            raise ValueError(
+                "two layers disagree about %r: %s says %r and something "
+                "before it said %r" % (key, layer.name, value, held))
 
 
 def _write_assets(layers: Sequence[Layer], directory: str) -> list[str]:

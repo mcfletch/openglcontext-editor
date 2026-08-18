@@ -7,10 +7,9 @@ whatever it says. A tile's signs are then concatenated into a single mesh: one
 render record, one bounding volume, one frustum test and one entry in each
 shadow cascade for all of them.
 
-Baked into place rather than instanced. Instancing is for thousands of copies of
-one thing and buys a world with tens of signs nothing but the machinery -- and
-to place a *different picture* per instance it would need a per-instance texture
-offset, which is a fair amount of engine for a few hundred triangles a tile.
+Baked into place rather than instanced -- see
+:mod:`OpenGLContext_editor.bake.placing`, which does the standing and the
+gathering.
 
 *Which* sign belongs *where* is decided in
 :mod:`OpenGLContext_editor.world.signs`, from the road's own curvature and
@@ -34,6 +33,7 @@ from OpenGLContext.scenegraph.roadsigns import (
 )
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.bake.placing import gathered, placed
 from OpenGLContext_editor.world.signs import Placement
 
 #: Where a world keeps its sign artwork, relative to the tileset.
@@ -133,29 +133,9 @@ class SignLayer:
 
 def _placed(placements: Sequence[Placement], prototypes: dict,
             material: Any) -> PBRMesh:
-    """A tile's signs, turned and moved into place, as one mesh."""
-    positions, texcoords, normals, indices, offset = [], [], [], [], 0
-    for one in placements:
-        prototype = prototypes[one.kind]
-        turn = _about_the_vertical(one.yaw)
-        points = np.asarray(prototype.positions, dtype='d') @ turn.T
-        positions.append(points + np.asarray(one.position, dtype='d'))
-        normals.append(np.asarray(prototype.normals, dtype='d') @ turn.T)
-        texcoords.append(np.asarray(prototype.texcoords))
-        indices.append(np.asarray(prototype.indices) + offset)
-        offset += len(prototype.positions)
-    return PBRMesh(
-        positions=np.concatenate(positions).astype('f'),
-        normals=np.concatenate(normals).astype('f'),
-        texcoords=np.concatenate(texcoords).astype('f'),
-        indices=np.concatenate(indices).astype(np.uint32), material=material)
-
-
-def _about_the_vertical(yaw: float) -> np.ndarray:
-    """The rotation a sign is turned by to face the traffic it is for."""
-    cosine, sine = np.cos(float(yaw)), np.sin(float(yaw))
-    return np.array([[cosine, 0.0, sine], [0.0, 1.0, 0.0],
-                     [-sine, 0.0, cosine]])
+    """A tile's signs, turned to face their traffic and stood in place."""
+    return gathered([placed(prototypes[one.kind], one.position, one.yaw)
+                     for one in placements], material)
 
 
 def _inside(position: Any, region: BoundingBox) -> bool:

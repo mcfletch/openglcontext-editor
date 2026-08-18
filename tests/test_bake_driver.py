@@ -24,6 +24,22 @@ from OpenGLContext_editor.bake.layers import HeightfieldLayer, InstanceLayer
 EXTENT = BoundingBox((-256, 0, -256), (256, 0, 256))
 
 
+def _listing(key, value):
+    """A layer that contributes nothing but one entry of tileset metadata."""
+    class Contributor:
+        name = 'contributor-%s' % (key,)
+
+        def bounds(self):
+            return EXTENT.with_height(-1, 1)
+
+        def content(self, region, error):
+            return []
+
+        def metadata(self):
+            return {key: value}
+    return Contributor()
+
+
 def _hills(x, z):
     x, z = np.asarray(x, 'd'), np.asarray(z, 'd')
     return 20.0 * np.sin(x / 90.0) + 12.0 * np.cos(z / 70.0)
@@ -278,6 +294,24 @@ class TestWhatTheWorldCarriesForAGame:
             document = json.load(handle)
         assert document['extras']['startLine'] == [1.0, 2.0, 3.0]
         assert document['extras']['bakedBy'] == 'OpenGLContext-editor'
+
+    def test_two_layers_can_fill_the_same_channel(self, tmp_path) -> None:
+        """The props a gantry stands up and the boulders strewn over the
+        landscape are one world's props, and a game wants all of them."""
+        result = _bake(tmp_path, layers=[_terrain(), _listing('props', ['a']),
+                                         _listing('props', ['b', 'c'])])
+        with open(result.tileset) as handle:
+            document = json.load(handle)
+        assert document['extras']['props'] == ['a', 'b', 'c']
+
+    def test_two_layers_disagreeing_about_one_answer_stops_the_bake(
+            self, tmp_path) -> None:
+        """Where the lap starts has one answer; picking a winner silently
+        writes a world whose timing is somebody else's."""
+        with pytest.raises(ValueError, match='start'):
+            _bake(tmp_path, layers=[_terrain(),
+                                    _listing('start', {'at': 0}),
+                                    _listing('start', {'at': 9})])
 
     def test_a_layer_s_shared_files_are_written_and_reported(self, tmp_path) -> None:
         class Painted:

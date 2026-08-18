@@ -23,6 +23,7 @@ from OpenGLContext.loaders.tiles3d.procedural import (
     terrain_colors,
     terrain_height,
 )
+from OpenGLContext.scenegraph.gantry import GantryProfile
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.props import Prop, rock_mesh
 from OpenGLContext.scenegraph.road import RoadProfile
@@ -32,6 +33,7 @@ from OpenGLContext.scenegraph.terrain import LayerRule
 from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.field import FieldTerrainLayer
+from OpenGLContext_editor.bake.gantry import GantryLayer
 from OpenGLContext_editor.bake.layers import (
     HeightfieldLayer,
     HeightFn,
@@ -41,6 +43,7 @@ from OpenGLContext_editor.bake.layers import (
 from OpenGLContext_editor.bake.props import PropLayer
 from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
+from OpenGLContext_editor.world.gantry import StartFinish, start_finish
 from OpenGLContext_editor.world.road import (
     RoadLayer,
     RoadPath,
@@ -176,6 +179,11 @@ CROWN_RADIUS = 3.5
 #: road stands a little proud of what it is built on.
 CARRIED_ABOVE = 1.5
 
+#: How much room is left round a gantry leg, in metres. A boulder inside the
+#: upright holding the start line up is the one place on a circuit every driver
+#: looks at.
+GANTRY_CLEARANCE = 3.0
+
 #: How far a sign's post stands outside the road's own edge, in metres. Inside
 #: the cleared corridor, with room to spare: a forest road is cut only as wide as
 #: it has to be, and a sign put outside that strip stands in the trees where
@@ -303,11 +311,14 @@ class ProceduralWorld:
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
     _terrain: Layer | None = field(default=None, init=False, repr=False)
     _scatter: Any = field(default=None, init=False, repr=False)
+    _start_line: StartFinish | None = field(default=None, init=False,
+                                            repr=False)
 
     def natural(self) -> HeightFn:
         """The land before the road touched it, at this world's relief."""
         if self.relief == 1.0:
-            return terrain_height
+            shipped: HeightFn = terrain_height
+            return shipped
 
         def scaled(x: Any, z: Any) -> Any:
             return np.asarray(terrain_height(x, z), dtype='d') * self.relief
@@ -343,6 +354,7 @@ class ProceduralWorld:
             signs = self.sign_layer()
             if signs is not None:
                 layers.append(signs)
+            layers.append(self.gantry_layer())
         props = self.prop_layer()
         if props is not None:
             layers.append(props)
@@ -393,8 +405,22 @@ class ProceduralWorld:
             + ROCK_CLEARANCE
         found = circuit.sample(points[:, 0], points[:, 2],
                                radius=ROCK_REACH * 1.5)
-        return np.asarray((found.distance > clear)
+        keep = np.asarray((found.distance > clear)
                           & (found.distance < ROCK_REACH))
+        room: np.ndarray = keep & self._clear_of_the_gantry(points)
+        return room
+
+    def _clear_of_the_gantry(self, points: np.ndarray) -> np.ndarray:
+        """Which placements leave the start line's uprights room to stand."""
+        line = self.start_line()
+        beam = np.array([math.cos(line.yaw), 0.0, -math.sin(line.yaw)])
+        at = np.asarray(line.position, dtype='d')
+        room = np.ones(len(points), dtype=bool)
+        for side in (-1.0, 1.0):
+            foot = at + beam * (side * line.span / 2.0)
+            away = points[:, [0, 2]] - foot[[0, 2]]
+            room &= np.einsum('ij,ij->i', away, away) > GANTRY_CLEARANCE ** 2
+        return room
 
     def sign_layer(self) -> SignLayer | None:
         """The circuit's warning signs, or None for a world with no road.
@@ -414,6 +440,23 @@ class ProceduralWorld:
                                          ground=self.height_fn()),
                          profile=profile)
 
+    def start_line(self) -> StartFinish:
+        """Where the circuit's start/finish gantry stands.
+
+        Where the centreline begins, which for a closed circuit is where a lap
+        begins and ends. A road that does not return to its start is marked at
+        the point it sets off from.
+        """
+        if self._start_line is None:
+            self._start_line = start_finish(self.circuit(),
+                                            profile=GantryProfile(),
+                                            ground=self.height_fn())
+        return self._start_line
+
+    def gantry_layer(self) -> GantryLayer:
+        """The circuit's start/finish marker: a beam over the road and a line
+        painted under it."""
+        return GantryLayer(placement=self.start_line())
 
     def height_fn(self) -> Any:
         """The ground as the world finally has it, earthworks included."""
@@ -536,7 +579,8 @@ class ProceduralWorld:
         is the strip that was cleared for it and the forest floor begins where
         the forest does.
         """
-        return CIRCUIT_PROFILE.total_width / 2.0 + ROAD_CLEARANCE
+        across: float = CIRCUIT_PROFILE.total_width
+        return across / 2.0 + ROAD_CLEARANCE
 
     def height_fn_at(self) -> Any:
         """The ground as a function of the spacing a tile samples it at.

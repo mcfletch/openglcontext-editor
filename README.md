@@ -136,10 +136,31 @@ metres over a valley builds an embankment as wide as it needs. Under the
 carriageway the ground sits a hand's breadth below the surface, because a road
 is built on a formation and surfaced on top of it.
 
+### What the road puts beside itself
+
+A generated road knows what it is about to do, so the roadside is derived rather
+than authored. `world.signs.warn_of` reads curvature, grade and structures off
+the alignment and returns the warnings it wants, a stopping distance before each
+hazard; `bake.signs.SignLayer` writes them.
+
+A circuit also needs its lap to be visible. `world.gantry.start_finish` takes the
+crown where the centreline begins, spans the carriageway and its shoulders, and
+measures the ground under each leg; `bake.gantry.GantryLayer` writes the frame
+and the chequered line painted under it as one mesh, and the two legs into the
+world's props so a car can hit them.
+
+```python
+from OpenGLContext_editor.bake.gantry import GantryLayer
+from OpenGLContext_editor.world.gantry import start_finish
+
+GantryLayer(placement=start_finish(path, ground=my_heights))
+```
+
 ## Baking is meant to be iterated
 
 Baking the shipped four-kilometre world -- half a million trees, its roads and
-their structures, its signs and its boulders -- takes about **25 seconds**. That
+their structures, its signs, its start line and its boulders -- takes about
+**27 seconds**. That
 is the number that matters: a world nobody can re-bake is a world nobody
 revises, and everything in this package exists so that a designer can change a
 route and drive it.
