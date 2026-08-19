@@ -11,9 +11,10 @@ terrain is sampled at a fixed vertex count over a shrinking footprint (finer
 ground the deeper you go), and instances are thinned to a budget so a coarse
 tile carries a sparse stand-in for the dense scatter beneath it.
 
-Three layers cover the first world:
+Four layers cover the first world:
 
 :class:`HeightfieldLayer`   the ground, sampled from a height function
+:class:`WaterLayer`         open water, wherever the ground dips below a line
 :class:`InstanceLayer`      one mesh placed many times -- trees, props, rocks
 :class:`MeshLayer`          meshes placed once, at a fixed position
 
@@ -31,6 +32,7 @@ from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
 from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.water import water_surface
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 
@@ -175,6 +177,73 @@ def _ground_material() -> PBRMaterial:
     """Vertex-coloured, two-sided: a tile's skirt is seen from both faces."""
     return PBRMaterial(baseColor=(1.0, 1.0, 1.0), metallic=0.0, roughness=1.0,
                        doubleSided=True)
+
+
+# --- open water ---------------------------------------------------------------
+
+@dataclass
+class WaterLayer:
+    """Open water, wherever the ground dips below ``level``.
+
+    Its own surface rather than the ground clamped flat at the waterline, which
+    is what gives a world a **shoreline**: the shore is the line where the land
+    passes through the surface, so the terrain has to be meshed as it is --
+    dipping under -- and the water laid over it. A clamped ground has no such
+    line to draw.
+
+    A tile whose ground never reaches the waterline holds no water. One that
+    dips below it anywhere is covered edge to edge, because a lake does not stop
+    halfway across a tile.
+
+    ``probe`` is how finely the ground is sampled to decide that, and
+    ``resolution`` how finely the sheet itself is meshed -- which is not about
+    its shape, since it is a plane, but about how finely the ripple in its
+    normals is carried.
+    """
+
+    height_fn: HeightFn
+    extent: BoundingBox
+    level: float = 0.0
+    resolution: int = 9
+    probe: int = 17
+    material: PBRMaterial | None = None
+    name: str = 'water'
+
+    def bounds(self) -> BoundingBox:
+        """The extent's footprint, at the waterline. Water has no thickness."""
+        return self.extent.with_height(float(self.level), float(self.level))
+
+    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
+        footprint = self._footprint(region)
+        if footprint is None:
+            return []
+        if not (region.minimum[1] <= self.level <= region.maximum[1]):
+            return []
+        if not self._flooded(footprint):
+            return []
+        sheet = water_surface(
+            float(footprint.minimum[0]), float(footprint.maximum[0]),
+            float(footprint.minimum[2]), float(footprint.maximum[2]),
+            level=float(self.level), resolution=self.resolution,
+            material=self.material)
+        return [SceneNode(mesh=sheet, name='%s_%d' % (self.name, self.resolution))]
+
+    def _flooded(self, footprint: BoundingBox) -> bool:
+        """Whether the ground under this footprint goes under the waterline."""
+        xs = np.linspace(footprint.minimum[0], footprint.maximum[0], self.probe)
+        zs = np.linspace(footprint.minimum[2], footprint.maximum[2], self.probe)
+        gx, gz = np.meshgrid(xs, zs, indexing='ij')
+        return bool(np.asarray(self.height_fn(gx, gz), dtype='d').min()
+                    < self.level)
+
+    def _footprint(self, region: BoundingBox) -> BoundingBox | None:
+        """The region's XZ overlap with the extent, or None if they miss."""
+        low = np.maximum(region.minimum, self.extent.minimum)
+        high = np.minimum(region.maximum, self.extent.maximum)
+        if low[0] >= high[0] or low[2] >= high[2]:
+            return None
+        return BoundingBox((low[0], region.minimum[1], low[2]),
+                           (high[0], region.maximum[1], high[2]))
 
 
 # --- placed copies of one mesh ------------------------------------------------

@@ -18,8 +18,8 @@ from OpenGLContext_editor.world.structures import (
     APPROACH_LIMIT,
     CUTTING_LIMIT,
     EMBANKMENT_LIMIT,
-    MINIMUM_SPAN,
     MINIMUM_APPROACH,
+    MINIMUM_SPAN,
     MINIMUM_TUNNEL,
     Op,
     Structure,
@@ -286,6 +286,7 @@ class TestARealAlignment:
     @pytest.fixture(scope='class')
     def circuit(self):
         from OpenGLContext.loaders.tiles3d.procedural import terrain_height
+
         from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         path = world.circuit()
@@ -360,6 +361,7 @@ class TestStructuresThatMeet:
 
     def test_the_shipped_circuit_has_no_islands_of_made_ground(self) -> None:
         from OpenGLContext.loaders.tiles3d.procedural import terrain_height
+
         from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         line = world.circuit().points

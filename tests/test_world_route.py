@@ -160,7 +160,8 @@ class TestOnTheShippedLandscape:
     def landscape(self):
         """The world's own plan and its own ground, at its own relief."""
         from OpenGLContext_editor.world.procedural import (
-            ProceduralWorld, circuit_plan,
+            ProceduralWorld,
+            circuit_plan,
         )
         world = ProceduralWorld(extent=4096.0)
         return (circuit_plan(world.extent * 0.32, world.extent * 0.25),
@@ -173,6 +174,7 @@ class TestOnTheShippedLandscape:
 
     def test_most_of_the_lap_ends_up_on_the_ground(self, landscape) -> None:
         from OpenGLContext.loaders.tiles3d.procedural import WATER_LEVEL
+
         from OpenGLContext_editor.world.road import follow_terrain
         from OpenGLContext_editor.world.structures import Op, choose_structures
         drawn, ground = landscape
@@ -265,10 +267,14 @@ class TestEasingKeepsTheCornersDrivable:
         """Most of it at the design radius, and nothing so far under it that a
         car cannot take the corner at any speed worth driving."""
         from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED, ProceduralWorld,
+            CIRCUIT_DESIGN_SPEED,
+            ProceduralWorld,
         )
         from OpenGLContext_editor.world.route import (
-            _neighbours, _radius, cornering_radius, least_radius,
+            _neighbours,
+            _radius,
+            cornering_radius,
+            least_radius,
         )
         world = ProceduralWorld(extent=4096.0)
         plan = world.circuit().points[:, [0, 2]]

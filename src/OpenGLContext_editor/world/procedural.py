@@ -39,6 +39,7 @@ from OpenGLContext_editor.bake.layers import (
     HeightFn,
     InstanceLayer,
     Layer,
+    WaterLayer,
 )
 from OpenGLContext_editor.bake.props import PropLayer
 from OpenGLContext_editor.bake.signs import SignLayer
@@ -222,11 +223,23 @@ GROUND_LAYERS = ('grass', 'forest_floor', 'rock', 'dirt')
 #: hold it and the road's corridor is painted as dirt, so the grass stops at the
 #: verge without being told where the road is.
 COVER_ON = ('grass', 'forest_floor')
+#: Where the shore is: dirt from the lake bed up to this far above the
+#: waterline, and grass no lower. A band rather than a line, so the shore is a
+#: beach that fades into the grass rather than an edge drawn round the water.
+#:
+#: **Nothing soft grows below it**, which is what keeps the ground cover out of
+#: the lake: the cover grows on the two soft layers (:data:`COVER_ON`), so a
+#: waterline the *layers* respect is one the grass respects without ever being
+#: told where the water is.
+SHORE_ABOVE = 1.5
+SHORE_FEATHER = 2.5
 GROUND_RULES = (
-    LayerRule(),
-    LayerRule(slope=(0.16, 0.55), weight=1.5),
+    LayerRule(height=(WATER_LEVEL + SHORE_ABOVE, 1.0e9), feather=SHORE_FEATHER),
+    LayerRule(height=(WATER_LEVEL + SHORE_ABOVE, 1.0e9),
+              slope=(0.16, 0.55), weight=1.5, feather=SHORE_FEATHER),
     LayerRule(slope=(0.5, 1.0e9), weight=3.0),
-    LayerRule(weight=0.0),
+    LayerRule(height=(-1.0e9, WATER_LEVEL + SHORE_ABOVE), weight=4.0,
+              feather=SHORE_FEATHER),
 )
 
 CREDITS = (
@@ -297,6 +310,10 @@ class ProceduralWorld:
     field_resolution: int = FIELD_RESOLUTION
     #: How many pixels across the splat control map.
     control_size: int = CONTROL_SIZE
+    #: Where the water sits, in metres. Ground below it is a lake bed with a
+    #: sheet of water over it; the circuit is held clear of it by
+    #: :data:`CAUSEWAY_FREEBOARD`. Raise it to flood the valleys.
+    water_level: float = WATER_LEVEL
     #: How tall the hills are, against the shipped landscape's own relief.
     relief: float = RELIEF
     #: Whether the world's *own* circuit is slid onto ground a road can follow.
@@ -348,7 +365,7 @@ class ProceduralWorld:
         kept clear. A tree placed before the earthworks would stand in a cutting
         with its roots in the air.
         """
-        layers: list[Layer] = [self.terrain(), self.trees()]
+        layers: list[Layer] = [self.terrain(), self.water(), self.trees()]
         if self.road:
             layers.append(self.circuit_layer())
             signs = self.sign_layer()
@@ -359,6 +376,17 @@ class ProceduralWorld:
         if props is not None:
             layers.append(props)
         return layers
+
+    def water(self) -> Layer:
+        """The lakes: a sheet wherever the ground dips below the waterline.
+
+        Its own surface rather than the ground clamped flat, which is what
+        gives the world a shoreline -- the shore is where the land passes
+        through the water, and there is no such line on a ground that has been
+        levelled at it.
+        """
+        return WaterLayer(height_fn=self.height_fn(), extent=self.footprint(),
+                          level=self.water_level, name='water')
 
     def rocks(self) -> Any:
         """Where the boulders lie: near the road, clear of the carriageway.
@@ -517,7 +545,10 @@ class ProceduralWorld:
         return HeightfieldLayer(
             height_fn=self.height_fn(), height_fn_at=self.height_fn_at(),
             extent=self.footprint(), resolution=self.resolution,
-            color_fn=terrain_colors, water_level=WATER_LEVEL, name='terrain')
+            # No clamp: the ground is meshed as it is and the water is laid
+            # over it, so the shoreline is where the land actually passes
+            # through the surface.
+            color_fn=terrain_colors, water_level=None, name='terrain')
 
     def _tree_slopes(self, positions: Any) -> Any:
         """How steep the ground is under each tree, as rise over run."""

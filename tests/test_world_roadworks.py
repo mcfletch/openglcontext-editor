@@ -12,7 +12,7 @@ from OpenGLContext.scenegraph.road import RoadProfile
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.road import RoadLayer, RoadPath, conform_terrain
-from OpenGLContext_editor.world.structures import Op, Structure
+from OpenGLContext_editor.world.structures import Op
 
 SPACING = 10.0
 

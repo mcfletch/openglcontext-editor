@@ -292,6 +292,7 @@ class TestCombiningMeshesDoesNotLoseAMaterial:
 
     def test_meshes_of_one_material_combine(self) -> None:
         from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+
         from OpenGLContext_editor.bake.assets import combined_mesh
         material = PBRMaterial(baseColor=(1.0, 0.0, 0.0))
         combined = combined_mesh([self._mesh(material), self._mesh(material)])
@@ -300,6 +301,7 @@ class TestCombiningMeshesDoesNotLoseAMaterial:
     def test_meshes_of_different_materials_do_not(self) -> None:
         """Silently keeping the first one paints the whole prototype in it."""
         from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+
         from OpenGLContext_editor.bake.assets import combined_mesh
         with pytest.raises(ValueError):
             combined_mesh([self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),
@@ -307,6 +309,7 @@ class TestCombiningMeshesDoesNotLoseAMaterial:
 
     def test_an_override_says_they_may(self) -> None:
         from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+
         from OpenGLContext_editor.bake.assets import combined_mesh
         wanted = PBRMaterial(baseColor=(0.0, 0.0, 1.0))
         combined = combined_mesh(

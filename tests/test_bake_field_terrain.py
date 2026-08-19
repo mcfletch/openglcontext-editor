@@ -12,7 +12,6 @@ height image and a control map, with the numbers to read them back in the
 tileset's ``extras``.
 """
 import json
-import math
 
 import numpy as np
 import pytest
@@ -221,8 +220,12 @@ class TestGroundThatHasToCarryARoad:
 
     def _world(self, **named):
         from OpenGLContext.loaders.tiles3d.procedural import terrain_height
+
         from OpenGLContext_editor.world.road import (
-            RoadPath, conform_terrain, conform_terrain_at, follow_terrain,
+            RoadPath,
+            conform_terrain,
+            conform_terrain_at,
+            follow_terrain,
         )
         plan = np.stack([np.linspace(-450.0, 450.0, 40),
                          np.linspace(-300.0, 300.0, 40)], axis=-1)
