@@ -215,3 +215,17 @@ which also records the division of labour between this package and the engine.
 ## Licence
 
 BSD-3-Clause; see [license.txt](license.txt).
+
+## What a bake writes beside the tiles
+
+Every bake writes `world.json` next to the tileset: what the world is called,
+its seed and extent, how long its road is, and how many metres of that road are
+carried on bridges, bores and causeways. That is what anything offering a
+*choice* of worlds reads, since reading a tileset to find out means loading the
+world being chosen between. `--name` sets the name; without it a world is named
+after the directory it was baked into, so `--output ashdown-forest` gives
+*Ashdown Forest*.
+
+The format is the engine's — `OpenGLContext.loaders.tiles3d.manifest` — so
+anything that loads a baked world can read one without depending on this
+authoring package. See `openglcontext/docs/baking.html`.

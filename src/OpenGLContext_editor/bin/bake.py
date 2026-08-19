@@ -18,8 +18,15 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from datetime import date
+from typing import Any
 
 from OpenGLContext_editor.bake.driver import bake_summary, bake_world
+from OpenGLContext_editor.bake.manifest import (
+    WorldManifest,
+    carried,
+    write_manifest,
+)
 from OpenGLContext_editor.world.procedural import ProceduralWorld
 
 #: Where a bake goes when the command line does not say.
@@ -52,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--forest', choices=('field', 'tiles'), default='field',
                         help="how the trees are carried: one table beside the "
                              "tileset, or instanced into the tiles")
+    parser.add_argument('--name', default=None,
+                        help='what this world is called, for anything offering '
+                             'a choice of them (default: the output '
+                             "directory's own name)")
     parser.add_argument('--seed', type=int, default=11,
                         help='the world is the same every bake for a given seed '
                              '(default: %(default)s)')
@@ -84,15 +95,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                         credits=world.credits(),
                         max_instances=options.max_instances,
                         progress=progress)
+    manifest = describe(world, options, result)
+    write_manifest(options.output, manifest)
     if options.quiet:
         print(result.tileset)
     else:
         print('\r' + ' ' * 40, end='\r')
         print(bake_summary(result))
+        print('  world:       %s' % manifest.summary())
         print('\nView it with:\n  oglc-view %s' % result.tileset)
     if options.view:
         return _view(result.tileset)
     return 0
+
+
+def describe(world: ProceduralWorld, options: Any, result: Any) -> WorldManifest:
+    """What this bake produced, as the manifest written beside it.
+
+    The name defaults to the output directory's own, tidied: a world baked into
+    ``ashdown-forest`` is *Ashdown Forest* until somebody says otherwise, which
+    beats making every world "Untitled" and beats asking for a name before one
+    can be baked at all.
+    """
+    road = world.circuit()
+    return WorldManifest(
+        name=options.name or world_name(options.output),
+        tileset=os.path.basename(result.tileset),
+        seed=options.seed, extent=float(options.extent),
+        road_length=float(road.length), structures=carried(road),
+        closed=True, baked=date.today().isoformat())
+
+
+def world_name(directory: str) -> str:
+    """A readable name for a world baked into that directory."""
+    stem = os.path.basename(os.path.abspath(directory))
+    return stem.replace('-', ' ').replace('_', ' ').strip().title() or 'Untitled'
 
 
 def _prepare_output(directory: str, force: bool) -> None:
