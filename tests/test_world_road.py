@@ -992,3 +992,37 @@ class TestFindingTheRoadQuickly:
         distance, height = path.nearest(np.array([800.0]), np.array([0.0]),
                                         radius=260.0)
         assert distance.shape == (1,) and height.shape == (1,)
+
+
+class TestTheLampsInTheBores:
+    """A bore's lamps travel in the tileset's extras, for the same reason the
+    road does: a lamp is not findable in a pile of triangles, and the tile it
+    is in comes and goes."""
+
+    def _layer(self, **named):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=2048.0, seed=11, **named).circuit_layer()
+
+    def test_a_world_with_bores_carries_lamps(self):
+        assert len(self._layer().luminaires())
+
+    def test_each_is_a_point_in_the_world(self):
+        assert all(len(one) == 3 for one in self._layer().luminaires())
+
+    def test_they_are_spaced_along_the_bores(self):
+        import numpy as np
+        lamps = np.asarray(self._layer().luminaires(), dtype='d')
+        gaps = np.linalg.norm(np.diff(lamps, axis=0), axis=1)
+        # Consecutive lamps in one bore; the jump between bores is much larger.
+        assert float(np.median(gaps[gaps < 100.0])) == pytest.approx(25.0, abs=6.0)
+
+    def test_they_stand_above_the_road_they_light(self):
+        import numpy as np
+        from OpenGLContext_editor.world.structures import Op
+        layer = self._layer()
+        lamps = np.asarray(layer.luminaires(), dtype='d')
+        inside = layer.path.points[layer.path.ops == Op.TUNNEL]
+        assert float(lamps[:, 1].min()) > float(inside[:, 1].min())
+
+    def test_a_road_with_no_bores_carries_none(self):
+        assert self._layer(structures=False).luminaires() == []

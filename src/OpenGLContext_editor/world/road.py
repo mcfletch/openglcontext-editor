@@ -51,6 +51,7 @@ from OpenGLContext.scenegraph.roadworks import (
     bridge_meshes,
     causeway_meshes,
     concrete_material,
+    tunnel_lamps,
     tunnel_meshes,
 )
 
@@ -883,7 +884,27 @@ class RoadLayer:
                             'from': round(start, 3),
                             'to': round(end, 3)}
                            for kind, start, end in self.path.structure_runs()],
-        }]}
+        }], 'luminaires': self.luminaires()}
+
+    def luminaires(self) -> list:
+        """Where the lamps hang in this road's bores, as world points.
+
+        The pool each one throws is baked onto the lining and costs nothing to
+        draw, which is what lights a bore at any distance. What it cannot do is
+        light anything *in* the bore -- a car driving through has no idea it is
+        under a lamp -- so a game spends its few real lights on the fittings the
+        driver is among, and needs to be told where those are. They travel in
+        the tileset's extras for the same reason the road does: a lamp is not
+        findable in a pile of triangles, and the tile it is in comes and goes.
+        """
+        found: list = []
+        for kind, first, last in _op_runs(self.path.ops):
+            if kind is not Op.TUNNEL or last - first < 1:
+                continue
+            run = self.path.points[first:last + 1]
+            found.extend([round(float(v), 3) for v in point]
+                         for point in tunnel_lamps(run, self.tunnel))
+        return found
 
     def assets(self) -> dict[str, bytes]:
         """The road surface, for the bake to write once beside the tileset."""
