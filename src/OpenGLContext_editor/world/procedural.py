@@ -21,7 +21,6 @@ from OpenGLContext.loaders.tiles3d import foliage
 from OpenGLContext.loaders.tiles3d.procedural import (
     WATER_LEVEL,
     terrain_colors,
-    terrain_height,
 )
 from OpenGLContext.scenegraph.gantry import GantryProfile
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
@@ -45,6 +44,11 @@ from OpenGLContext_editor.bake.props import PropLayer
 from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
 from OpenGLContext_editor.world.gantry import StartFinish, start_finish
+from OpenGLContext_editor.world.height import (
+    DEFAULT_RELIEF,
+    HeightSource,
+    ProceduralBase,
+)
 from OpenGLContext_editor.world.road import (
     RoadLayer,
     RoadPath,
@@ -52,7 +56,11 @@ from OpenGLContext_editor.world.road import (
     conform_terrain_at,
     follow_terrain,
 )
-from OpenGLContext_editor.world.route import cornering_radius, ease_route
+from OpenGLContext_editor.world.route import (
+    cornering_radius,
+    ease_route,
+    hold_corners,
+)
 from OpenGLContext_editor.world.scatter import scatter_on_heightfield, yaw_quaternions
 from OpenGLContext_editor.world.signs import sign_placements, warn_of
 from OpenGLContext_editor.world.species import (
@@ -132,7 +140,7 @@ CIRCUIT_DESIGN_SPEED = 42.0
 #: viaduct and bore for most of its length. Halved, the same shapes make hill
 #: country a road can be built through, with a handful of crossings where it
 #: still cannot.
-RELIEF = 0.5
+RELIEF = DEFAULT_RELIEF
 
 #: The circuit stays this far above the waterline. Where the ground is lower --
 #: the lake basin, the floor of the canyon -- the road rides over it on fill and
@@ -302,6 +310,9 @@ class ProceduralWorld:
     route: Any = None
     #: Whether the route returns to where it started.
     closed: bool = True
+    #: The world point a lap begins at, as ``(x, z)``. None puts the line where
+    #: the centreline starts, which for a drawn circuit is its first point.
+    start_at: tuple[float, float] | None = None
     #: Whether a deck or a bore is built where the earthworks would be huge.
     structures: bool = True
     #: How the ground is carried: 'field' (one splat terrain) or 'tiles'.
@@ -315,7 +326,12 @@ class ProceduralWorld:
     #: :data:`CAUSEWAY_FREEBOARD`. Raise it to flood the valleys.
     water_level: float = WATER_LEVEL
     #: How tall the hills are, against the shipped landscape's own relief.
+    #: Ignored when a ``source`` is given, which carries its own.
     relief: float = RELIEF
+    #: Where the ground comes from: a base and the edits made to it. None for
+    #: the shipped landscape at this world's ``relief``, which is what a world
+    #: nobody has authored has.
+    source: HeightSource | None = None
     #: Whether the world's *own* circuit is slid onto ground a road can follow.
     #: A ``route`` a caller gives is built as it was drawn either way: it is a
     #: designer's line, and moving it is the designer's decision to make.
@@ -332,14 +348,18 @@ class ProceduralWorld:
                                             repr=False)
 
     def natural(self) -> HeightFn:
-        """The land before the road touched it, at this world's relief."""
-        if self.relief == 1.0:
-            shipped: HeightFn = terrain_height
-            return shipped
+        """The land before the road touched it: the height source, composed.
 
-        def scaled(x: Any, z: Any) -> Any:
-            return np.asarray(terrain_height(x, z), dtype='d') * self.relief
-        return scaled
+        A world given no source is the shipped landscape at its own ``relief``,
+        which is the same thing said the short way.
+        """
+        return self.height_source().height_fn()
+
+    def height_source(self) -> HeightSource:
+        """Where the ground comes from, whether it was given one or not."""
+        if self.source is not None:
+            return self.source
+        return HeightSource(base=ProceduralBase(relief=self.relief))
 
     def treeline(self) -> tuple[float, float]:
         """The band trees grow in, scaled with the world's own relief."""
@@ -468,17 +488,38 @@ class ProceduralWorld:
                                          ground=self.height_fn()),
                          profile=profile)
 
+    def start_station(self) -> float:
+        """How far along the circuit a lap begins, in metres.
+
+        Zero unless a start point was chosen, in which case it is the station
+        nearest that point. Nearest rather than an index into the drawn plan,
+        because the centreline the game gets is not the plan: it has been
+        eased, draped over the ground and re-sampled, and the point the
+        designer put the line on is the thing that survives all of that.
+        """
+        if self.start_at is None:
+            return 0.0
+        path = self.circuit()
+        where = np.asarray(self.start_at, dtype='d').ravel()
+        found = path.sample(np.asarray([float(where[0])]),
+                            np.asarray([float(where[-1])]))
+        stations = np.asarray(path.stations, dtype='d')
+        index = int(np.clip(int(found.segment.ravel()[0]), 0,
+                            len(stations) - 1))
+        return float(stations[index])
+
     def start_line(self) -> StartFinish:
         """Where the circuit's start/finish gantry stands.
 
-        Where the centreline begins, which for a closed circuit is where a lap
-        begins and ends. A road that does not return to its start is marked at
-        the point it sets off from.
+        At :meth:`start_station`, which is where a lap begins and ends. A road
+        that does not return to its start is marked at the point it sets off
+        from unless the designer said otherwise.
         """
         if self._start_line is None:
             self._start_line = start_finish(self.circuit(),
                                             profile=GantryProfile(),
-                                            ground=self.height_fn())
+                                            ground=self.height_fn(),
+                                            station=self.start_station())
         return self._start_line
 
     def gantry_layer(self) -> GantryLayer:
@@ -504,6 +545,15 @@ class ProceduralWorld:
                     plan, ground, reach=CIRCUIT_REACH, rounds=CIRCUIT_EASING,
                     closed=self.closed, spacing=CIRCUIT_SPACING,
                     minimum_radius=cornering_radius(CIRCUIT_DESIGN_SPEED))
+            else:
+                # A drawn plan's corners are corners: a vertex turns the road
+                # through the whole of it at once, which no car can take. Each
+                # is *rounded in place* rather than opened out, so a hairpin
+                # drawn to climb a slope stays a hairpin and its legs stay
+                # where the designer put them.
+                plan = hold_corners(
+                    plan, minimum=cornering_radius(CIRCUIT_DESIGN_SPEED),
+                    closed=self.closed, spacing=CIRCUIT_SPACING)
             line = follow_terrain(plan, ground, spacing=CIRCUIT_SPACING,
                                   smoothing=CIRCUIT_SMOOTHING,
                                   maximum_grade=CIRCUIT_MAX_GRADE,
@@ -528,7 +578,8 @@ class ProceduralWorld:
 
     def circuit_layer(self) -> RoadLayer:
         return RoadLayer(self.circuit(), wetness=self.wetness,
-                         ground=self.natural(), shade=self.canopy_shade())
+                         ground=self.natural(), shade=self.canopy_shade(),
+                         start=self.start_station())
 
     def terrain(self) -> Layer:
         """The ground, as whichever kind of terrain layer the world asked for."""

@@ -17,6 +17,15 @@ It is a *plan* operation, and deliberately separate from settling the profile:
 what a designer drew is a shape and a place, and this keeps both -- no point
 moves further than ``reach`` from where it was put -- while giving the shape the
 ground under it a say.
+
+**A drawn corner is a different question.** A designer who draws a hairpin up a
+mountainside means it: a switchback is the only way to gain height where the
+slope is steeper than a road can climb, and opening it out into a sweep puts
+the road somewhere else. So a drawn plan gets :func:`hold_corners`, which
+*rounds* each corner in place -- a circular fillet of the tightest legal radius,
+tangent to both legs -- rather than :func:`hold_radius`, which relaxes the whole
+line towards its chords. The legs stay where they were drawn and the hairpin is
+still a hairpin.
 """
 from __future__ import annotations
 
@@ -27,7 +36,7 @@ import numpy as np
 
 HeightFn = Callable[[Any, Any], Any]
 
-__all__ = ['ease_route', 'hold_radius', 'least_radius',
+__all__ = ['ease_route', 'hold_corners', 'hold_radius', 'least_radius',
            'cornering_radius', 'REACH', 'ROUNDS', 'RELAXATION', 'GRIP']
 
 #: How far a point may end up from where it was drawn, in metres. Far enough to
@@ -69,6 +78,23 @@ GRAVITY = 9.81
 #: is given. Under-relaxed for the same reason the sliding is.
 CORNER_RELAXATION = 0.35
 CORNER_ROUNDS = 2000
+
+#: How far apart the points of a rounded corner are, in metres. The road is
+#: built at about this spacing, so an arc drawn more coarsely is re-sampled
+#: onto its own chords and the road turns at the joins between them -- which is
+#: the polygon problem the rounding was there to answer.
+ARC_SPACING = 6.0
+
+#: How much of a leg a fillet may use, as a fraction. Two corners at either end
+#: of one leg have to fit on it, so neither may take more than half; a little
+#: less leaves a straight between them rather than a cusp.
+LEG_SHARE = 0.45
+
+#: How far a vertex has to turn before it counts as a corner somebody drew, in
+#: radians. A curve that has been sampled turns a few degrees a point; a corner
+#: turns tens of them. Below this the vertex is a sample of a curve and
+#: rounding it would replace the curve with a tighter one.
+DRAWN_CORNER = np.radians(15.0)
 
 #: How much the line is fair-smoothed each round, as a fraction of the way to
 #: the average of a point's neighbours. What stops the sliding from folding the
@@ -267,4 +293,109 @@ def _held(moved: np.ndarray, drawn: np.ndarray, reach: float) -> np.ndarray:
     distance = np.linalg.norm(offset, axis=1, keepdims=True)
     scale = np.where(distance > reach, reach / np.where(distance > 0, distance, 1.0),
                      1.0)
-    return drawn + offset * scale
+    held: np.ndarray = drawn + offset * scale
+    return held
+
+
+def hold_corners(plan: Any, minimum: float, closed: bool = False,
+                 spacing: float = ARC_SPACING) -> np.ndarray:
+    """Round every corner of a drawn plan to at least ``minimum`` metres.
+
+    Each corner is replaced by a circular arc tangent to both of its legs, so
+    the legs keep the direction and the place the designer drew them and only
+    the corner itself changes. A hairpin stays a hairpin -- of the tightest
+    radius a car can take -- which is what a switchback is for.
+
+    This is the opposite decision from :func:`hold_radius`, which relaxes the
+    line towards its chords: that is right for a route being *found*, where the
+    corner is an artefact of the search, and wrong for one that was *drawn*,
+    where the corner is the point.
+
+    A fillet is never given more than :data:`LEG_SHARE` of either leg, so two
+    corners at the ends of a short leg still fit on it and the radius comes
+    down instead. The ends of an open route are left exactly where they are.
+
+    This is an operation on the plan **as drawn**, where a vertex is a corner.
+    A vertex turning less than :data:`DRAWN_CORNER` is a sample of a curve
+    rather than a corner, and is left alone: rounding it would replace the
+    curve somebody drew with a tighter one.
+    """
+    line = np.asarray(plan, dtype='d').reshape(-1, 2)
+    if len(line) < 3 or minimum <= 0.0:
+        return line.copy()
+    legs = np.linalg.norm(np.diff(np.vstack([line, line[:1]]), axis=0), axis=1) \
+        if closed else np.linalg.norm(np.diff(line, axis=0), axis=1)
+    corners = range(len(line)) if closed else range(1, len(line) - 1)
+    made: list[np.ndarray] = []
+    if not closed:
+        made.append(line[:1])
+    for index in corners:
+        before = line[index - 1]
+        here = line[index]
+        after = line[(index + 1) % len(line)]
+        room = _corner_room(legs, index, len(line), closed)
+        arc = _fillet(before, here, after, minimum, room, spacing)
+        made.append(arc)
+    if not closed:
+        made.append(line[-1:])
+    return np.vstack(made)
+
+
+def _corner_room(legs: np.ndarray, index: int, count: int,
+                 closed: bool) -> float:
+    """How far along either leg this corner's fillet may reach."""
+    incoming = legs[index - 1] if (closed or index > 0) else legs[0]
+    outgoing = legs[index % len(legs)] if closed else legs[min(index, len(legs) - 1)]
+    return float(min(incoming, outgoing) * LEG_SHARE)
+
+
+def _fillet(before: np.ndarray, here: np.ndarray, after: np.ndarray,
+            minimum: float, room: float, spacing: float) -> np.ndarray:
+    """The arc that replaces one corner, or the corner where none is needed."""
+    into = here - before
+    out_of = after - here
+    into_length = float(np.linalg.norm(into))
+    out_length = float(np.linalg.norm(out_of))
+    if into_length <= 1e-9 or out_length <= 1e-9:
+        return here.reshape(1, 2)
+    into = into / into_length
+    out_of = out_of / out_length
+    # The angle the road turns through at the corner, from 0 (straight on) to
+    # pi (straight back the way it came).
+    turn = float(np.arccos(np.clip(float(np.dot(into, out_of)), -1.0, 1.0)))
+    if turn < DRAWN_CORNER:
+        return here.reshape(1, 2)
+    # A fillet of radius R meets each leg this far back from the corner.
+    tangent = minimum / np.tan((np.pi - turn) / 2.0)
+    if tangent <= 1e-9:
+        return here.reshape(1, 2)
+    if tangent > room:
+        # No room for the radius asked for; take the biggest that fits, which
+        # is still rounder than the vertex it replaces.
+        tangent = room
+    radius = tangent * np.tan((np.pi - turn) / 2.0)
+    if radius <= 1e-9:
+        return here.reshape(1, 2)
+    start = here - into * tangent
+    end = here + out_of * tangent
+    # The centre lies on the bisector, on the inside of the turn.
+    inward = out_of - into
+    inward_length = float(np.linalg.norm(inward))
+    if inward_length <= 1e-9:
+        return np.vstack([start, end])
+    inward = inward / inward_length
+    centre = here + inward * float(np.hypot(radius, tangent))
+    steps = max(2, int(np.ceil(turn * radius / max(float(spacing), 1e-6))))
+    return _arc(centre, start, end, steps)
+
+
+def _arc(centre: np.ndarray, start: np.ndarray, end: np.ndarray,
+         steps: int) -> np.ndarray:
+    """The shorter way round a circle from one point on it to another."""
+    from_start = np.arctan2(start[1] - centre[1], start[0] - centre[0])
+    to_end = np.arctan2(end[1] - centre[1], end[0] - centre[0])
+    swept = (to_end - from_start + np.pi) % (2.0 * np.pi) - np.pi
+    radius = float(np.linalg.norm(start - centre))
+    angles = from_start + swept * np.linspace(0.0, 1.0, steps + 1)
+    return np.stack([centre[0] + radius * np.cos(angles),
+                     centre[1] + radius * np.sin(angles)], axis=1)

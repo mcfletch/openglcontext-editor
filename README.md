@@ -83,6 +83,167 @@ detail policy, the geometric-error ladder, and the limits -- is in the engine's
 [Baking a world](https://github.com/mcfletch/openglcontext/blob/main/docs/baking.html)
 page.
 
+## Where the ground comes from
+
+A world's height is a **base** and an ordered stack of **edits** on it:
+
+```python
+from OpenGLContext_editor.world.height import HeightSource, ProceduralBase
+
+source = HeightSource(base=ProceduralBase(relief=0.5))
+ground = source.height_fn()          # an ordinary height function
+```
+
+`height_fn()` hands back one callable over `(x, z)`, so everything that samples
+terrain — the tile mesher, the road generator, the scatter, a car asking where
+the ground is — is pointed at it and needs to know nothing about how it was
+composed. `ProceduralWorld(source=...)` takes one; a world given none is the
+shipped landscape at its own `relief`.
+
+An edit is a `HeightEdit`: a rectangle it can reach (`bounds()`), and how much
+to add at each sample inside it (`delta(x, z, height)`), given the ground
+everything before it left. Applying them in order is what makes "raise this
+hill, then run a river down it" mean what a designer expects.
+
+**Every edit is vectorised and bounded**, and both matter: a bake samples the
+height function across whole tiles and an editor across its whole plan view, so
+an edit that looped in Python — or that was consulted about ground a kilometre
+away — would put the cost of authoring into every frame and every tile of every
+world afterwards. Outside its rectangle an edit costs one comparison.
+
+A source is JSON, so a designer's landscape survives being saved:
+
+```json
+{"base": {"kind": "procedural", "relief": 0.5}, "edits": []}
+```
+
+A `kind` this version does not know is **refused rather than dropped**: reading
+half of a file loses work without saying so. Declare a new kind with
+`register_base` / `register_edit`.
+
+## Start from a landscape
+
+The presets are tuned terrain profiles under a name and a sentence, so a game
+editor built on this toolkit gets the same starting points:
+
+```python
+from OpenGLContext_editor.world.presets import PRESETS, PresetBase
+
+source = HeightSource(base=PresetBase(name='canyon'))
+print(PRESETS['canyon'].description)
+```
+
+| Preset | What you get |
+|---|---|
+| `shipped` | hill country with a range, a river canyon and a lake basin |
+| `mountains` | ranges over most of the map, rising most of a kilometre |
+| `lakes` | low country dished into broad basins that flood |
+| `hills` | nothing steeper than a road can climb, anywhere |
+| `canyon` | a gorge three hundred metres deep across a high plain |
+
+`relief` multiplies a preset's height — which is how a landscape too tall for a
+road becomes one a road can be built through without changing what it looks
+like — and `seed` gives another landscape of the same description.
+
+## Or from real ground
+
+`DEMBase` puts an elevation file under a world at a point on the Earth:
+
+```python
+from OpenGLContext_editor.world.dem import DEMBase
+
+source = HeightSource(base=DEMBase(path='N47E008.hgt', centre=(47.5, 8.5),
+                                   datum=0.0))
+```
+
+`centre` is the `(latitude, longitude)` the world's origin stands on and is
+recorded in the project, so a reopened track resolves to the same ground.
+`datum` is the height that origin is given: real ground is hundreds of metres
+above the sea, and a world whose waterline is at zero would have all of it
+underwater. `relief` scales what is left, for a valley whose real sides no road
+can climb.
+
+**Format and limits.** SRTM `.hgt` — raw big-endian 16-bit samples, one degree
+square, named for its south-west corner. Voids are filled from the ground around
+them. The mapping from degrees to metres is a local tangent plane about the
+centre, which holds over the few tens of kilometres a track covers and is not a
+projection to use across a continent. **Nothing is fetched**: the file is one the
+designer supplies. The facts behind all of it, with their sources, are in
+[specs/ELEVATION-DATA.md](specs/ELEVATION-DATA.md).
+
+## Shape it by hand
+
+A `SculptStroke` is one gesture of a brush, recorded as data on the edit stack:
+
+```python
+from OpenGLContext_editor.world.sculpt import SculptStroke
+
+source.edits.append(SculptStroke(centre=(120.0, -40.0), radius=150.0,
+                                 amount=25.0, detail=0.35))
+```
+
+`amount` is metres at the centre, positive up; `falloff` is how sharply it dies
+away towards `radius`, reaching zero *at* the radius so a stroke never steps;
+and `detail` is how much of the lift is fractal variation rather than a smooth
+dome. The detail is a **share of the lift**, so a gentle stroke gets gentle
+detail and a raised hill sits in the same visual family as the land around it.
+
+## Put water on it
+
+From a **spring**, follow the ground downhill until the water reaches the
+waterline, runs off the edge of the world, or arrives somewhere it cannot get
+out of — which is where a lake is, and is an answer rather than a failure:
+
+```python
+from OpenGLContext_editor.world.hydrology import Spring, channels_for, flow_from
+
+paths = flow_from(ground, [Spring(at=(-800.0, 700.0))], extent=2048.0,
+                  water_level=0.0)
+source.edits.extend(channels_for(paths))     # the beds the rivers cut
+```
+
+Rivers that meet **merge**: a path arriving on one already there stops and adds
+its water to it, so the river below a junction cuts a wider, deeper bed than
+either branch above it. Water also **fills a hollow and spills**: ground is not
+a smooth ramp, and a river that stopped in the first dimple of a noisy hillside
+would never reach anything.
+
+The `Channel` is an ordinary height edit, so the river becomes part of the
+ground: a road crosses it as water rather than as a stripe, and sculpting the
+land upstream reroutes it the next time the flow is worked out. The path is
+worth keeping and the bed is not — a bed written to a file is the river as the
+land *used to be*.
+
+**Limits.** The water surface is the world's own water layer, so a river is a
+carved bed with water in it only where it runs below the waterline; a stream
+running down a mountainside is a valley, not a ribbon of water. Flow is
+steepest-descent from a point, not a catchment model: it says where water from
+*here* goes, not how much of it there is.
+
+## Read the land off it
+
+Iso-height lines over a height field, for a plan view to draw and a road to be
+held to a grade against:
+
+```python
+from OpenGLContext_editor.world.contours import contours_of
+
+for contour in contours_of(ground, extent=2048.0, interval=25.0, resolution=257):
+    print(contour.elevation, len(contour.lines))   # (N,2) xz polylines
+```
+
+`interval` is the spacing in metres and `resolution` how finely the field is
+sampled to find the lines — the detail of the drawn line, and what it costs: the
+height function is asked once, for the whole grid. A line that comes back to
+where it started is a closed loop (a hilltop or a basin); one that does not runs
+off the edge of the ground. `contours(heights, min_x, max_x, min_z, max_z, ...)`
+takes an already-sampled grid instead.
+
+The extraction is marching squares, so it is exact for a field that is linear
+inside a cell and converges on the truth as the sampling gets finer. It is for
+*drawing*: nothing here is a substitute for asking the height function itself
+where a particular elevation is.
+
 ## Put a road through it
 
 A `RoadLayer` carries a route across the world: it cuts the ground to meet the
@@ -156,6 +317,33 @@ from OpenGLContext_editor.world.gantry import start_finish
 GantryLayer(placement=start_finish(path, ground=my_heights))
 ```
 
+## Corners a designer drew
+
+A drawn plan's vertices are corners: the road turns through the whole of one at
+a single point, which no car can take. There are two ways to answer that, and
+which one is right depends on where the corner came from:
+
+| | |
+|---|---|
+| `hold_radius` | relaxes the line towards its chords until nothing is too tight — right for a route being **found**, where the corner is an artefact of the search |
+| `hold_corners` | rounds each corner **in place**, with a circular fillet tangent to both legs — right for a route that was **drawn**, where the corner is the point |
+
+A **switchback** is the case that decides it. A hairpin drawn up a mountainside
+is the only way to gain height where the slope is steeper than a road can
+climb; relaxing it puts the road somewhere else, while rounding it leaves the
+legs where the designer drew them and the hairpin still a hairpin — of the
+tightest radius a car can take, or the tightest the legs have room for.
+
+`ProceduralWorld` applies `hold_corners` to any route it is given and
+`ease_route` to the circuit it invents for itself, which is the same
+distinction. A vertex turning less than fifteen degrees is a sample of a curve
+rather than a corner, and is left alone.
+
+Where a lap begins travels with the road: `ProceduralWorld(start_at=(x, z))`
+puts the gantry at the station nearest that point, and the tileset's `extras`
+carry it as `roads[0]['start']` — a distance along the centreline, which is what
+the grid, the timing and the autopilot count from.
+
 ## Baking is meant to be iterated
 
 Baking the shipped four-kilometre world -- half a million trees, its roads and
@@ -196,7 +384,7 @@ pytest
 | Path | Holds |
 |---|---|
 | `src/OpenGLContext_editor/bake/` | the tile baker: bounds, the octree, layers, the tileset writer, the bake driver |
-| `src/OpenGLContext_editor/world/` | world generation: scatter, roads, and the example world |
+| `src/OpenGLContext_editor/world/` | world generation: the height source, presets, DEM import, sculpting, hydrology, contours, scatter, roads, and the example world |
 | `src/OpenGLContext_editor/bin/` | `oglc-bake` |
 | `tests/` | the suite; `pytest` runs it |
 | `specs/` | format and interoperability facts the code cites, and the [clean-room procedure](specs/CLEAN-ROOM.md) that governs how they are gathered |

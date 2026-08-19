@@ -7,7 +7,7 @@ from.
 
 | Spec | Covers |
 |---|---|
-| *(none yet)* | |
+| [ELEVATION-DATA.md](ELEVATION-DATA.md) | The SRTM `.hgt` height file's layout and naming, WGS 84, and the local tangent plane that puts a degree square on the ground in metres. |
 
 ## Where the facts are allowed to come from
 

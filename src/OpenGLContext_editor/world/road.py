@@ -822,6 +822,9 @@ class RoadLayer:
     seed: int = 0
     metadata_spacing: float = 8.0
     name: str = 'road'
+    #: How far along the centreline a lap begins, in metres. Zero for a road
+    #: nobody races on, which is where its own start is anyway.
+    start: float = 0.0
     ground: HeightFn | None = None
     shade: HeightFn | None = None
     bridge: BridgeProfile | None = None
@@ -875,6 +878,10 @@ class RoadLayer:
         return {'roads': [{
             'name': self.name,
             'closed': closed,
+            # Where a lap begins, in metres along the centreline. The grid, the
+            # timing and the autopilot all count from here, so a game that
+            # reads the road reads this with it.
+            'start': round(float(self.start), 3),
             'carriagewayWidth': self.path.profile.carriageway_width,
             'totalWidth': self.path.profile.total_width,
             'profile': _profile_json(self.path.profile),
