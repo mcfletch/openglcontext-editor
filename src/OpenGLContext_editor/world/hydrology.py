@@ -62,6 +62,11 @@ BED_WIDTH_PER_DOUBLING = 5.0
 BED_DEPTH = 2.0
 BED_DEPTH_PER_DOUBLING = 1.1
 
+#: How far below the top of the bank the water sits, as a share of the bed's
+#: depth. A river fills its channel; it does not brim over it, and a surface at
+#: the bank is a flood rather than a river.
+SURFACE_SHARE = 0.55
+
 #: How many samples of a channel are measured against its segments at a time.
 #: The distance query is one array of samples against every segment, so this is
 #: what keeps a whole tile's worth of ground from being multiplied out at once.
@@ -302,6 +307,45 @@ class Channel(HeightEdit):
             across = np.clip(1.0 - distance / np.maximum(half, 1e-9), 0.0, 1.0)
             cut[piece] = -depths[at] * across * across * (3.0 - 2.0 * across)
         return cut.reshape(np.shape(x))
+
+    # -- the water in it ---------------------------------------------------
+    def surface(self, height_fn: Callable[[Any, Any], Any],
+                style: Any = None, when: float = 0.0, lift: float = 0.0,
+                width: Any = None, on_gpu: bool = False) -> Any:
+        """The water running down this channel, or None if it is too short.
+
+        The bed is a valley; what makes it a river is water in it. The surface
+        sits part way up the bed it cut -- a river fills its channel and does
+        not brim over it -- and is as wide as the bed is there, so a river
+        carrying more is a wider one.
+
+        ``height_fn`` is the ground **without** this channel in it, which is
+        the land the bed was cut into: the surface is measured down from that
+        rather than up from the bed, so it is water in a valley and not a
+        ribbon draped on a hillside.
+
+        ``on_gpu`` hands the movement to the card, so the river flows for the
+        cost of a few uniforms a frame rather than a re-meshing.
+
+        ``lift`` raises it, and ``width`` overrides how wide it is drawn. Both
+        are for a *map*: a plan view meshes the ground at a few hundred samples
+        across a landscape kilometres wide, which cannot hold a bed twelve
+        metres across at all, so a river drawn at its true depth and width is
+        inside the ground and two pixels wide. A map says where the river is;
+        the baked world says how deep it is.
+        """
+        from OpenGLContext.scenegraph.water import FLOWING, water_ribbon
+        line = np.asarray(self.points, dtype='d').reshape(-1, 2)
+        if len(line) < 2:
+            return None
+        land = np.asarray(height_fn(line[:, 0], line[:, 1]), dtype='d')
+        depths = self.depths()
+        course = np.stack([line[:, 0], land - depths * SURFACE_SHARE,
+                           line[:, 1]], axis=-1)
+        return water_ribbon(course,
+                            width=self.widths() if width is None else width,
+                            style=style if style is not None else FLOWING,
+                            when=when, lift=float(lift), on_gpu=on_gpu)
 
     # -- the file ----------------------------------------------------------
     def to_json(self) -> dict[str, Any]:

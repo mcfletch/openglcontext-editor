@@ -14,7 +14,6 @@ import pytest
 from OpenGLContext_editor.world.dem import (
     VOID,
     DEMBase,
-    ElevationGrid,
     corner_from_name,
     local_frame,
     read_hgt,

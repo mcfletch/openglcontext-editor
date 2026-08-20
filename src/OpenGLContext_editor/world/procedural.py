@@ -307,6 +307,11 @@ class ProceduralWorld:
     tree_height: float = 15.0
     seed: int = 11
     road: bool = True
+    #: The rivers running through this world, as
+    #: :class:`~OpenGLContext_editor.world.hydrology.Channel` beds. Their water
+    #: is a layer; their *bed* is already in the height source, because a
+    #: channel is an edit on it.
+    channels: Any = field(default_factory=list)
     #: The circuit's plan, (N,2) XZ; None for the world's own.
     route: Any = None
     #: Whether the route returns to where it started.
@@ -387,6 +392,9 @@ class ProceduralWorld:
         with its roots in the air.
         """
         layers: list[Layer] = [self.terrain(), self.water(), self.trees()]
+        rivers = self.rivers()
+        if rivers is not None:
+            layers.append(rivers)
         if self.road:
             layers.append(self.circuit_layer())
             signs = self.sign_layer()
@@ -408,6 +416,20 @@ class ProceduralWorld:
         """
         return WaterLayer(height_fn=self.height_fn(), extent=self.footprint(),
                           level=self.water_level, name='water')
+
+    def rivers(self) -> Any:
+        """The water running down this world's channels, or None if it has none.
+
+        Given the land **without** the channels in it: the surface is measured
+        down from the ground the beds were cut into, which is what puts water
+        in a valley rather than a ribbon on a hillside.
+        """
+        if not len(self.channels):
+            return None
+        from OpenGLContext_editor.bake.rivers import RiverLayer
+        return RiverLayer(channels=list(self.channels),
+                          ground=self.height_source().height_fn(),
+                          name='river')
 
     def rocks(self) -> Any:
         """Where the boulders lie: near the road, clear of the carriageway.

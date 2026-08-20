@@ -1098,6 +1098,7 @@ class TestTheLampsInTheBores:
 
     def test_they_stand_above_the_road_they_light(self):
         import numpy as np
+
         from OpenGLContext_editor.world.structures import Op
         layer = self._layer()
         lamps = np.asarray(layer.luminaires(), dtype='d')

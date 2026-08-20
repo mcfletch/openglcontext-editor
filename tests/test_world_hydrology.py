@@ -209,3 +209,44 @@ class TestGettingOutOfHollows:
                          extent=EXTENT)[0]
         along = self._dimpled(path.points[:, 0], path.points[:, 1])
         assert along[-1] < along[0] - 100.0
+
+
+class TestTheSurfaceOnIt:
+    """A carved bed is a valley; what makes it a river is water in it."""
+
+    def _river(self):
+        path = flow_from(_slope, [Spring(at=(-800.0, 0.0))], extent=EXTENT)[0]
+        return channels_for([path])[0]
+
+    def test_a_channel_can_be_asked_for_its_water(self) -> None:
+        assert self._river().surface(_slope) is not None
+
+    def test_the_water_runs_down_the_channel(self) -> None:
+        import numpy as np
+        surface = self._river().surface(_slope)
+        points = np.asarray(surface.positions)
+        upstream = points[points[:, 0] < -600.0][:, 1].mean()
+        downstream = points[points[:, 0] > 600.0][:, 1].mean()
+        assert upstream > downstream
+
+    def test_it_sits_in_the_bed_rather_than_over_the_bank(self) -> None:
+        """Below the land the channel cut into, or it is a ribbon on a hill."""
+        import numpy as np
+        channel = self._river()
+        surface = channel.surface(_slope)
+        points = np.asarray(surface.positions)
+        land = np.asarray(_slope(points[:, 0], points[:, 2]), dtype='d')
+        assert (points[:, 1] < land).mean() > 0.9
+
+    def test_a_bigger_river_is_wider(self) -> None:
+        import numpy as np
+        line = np.array([[0.0, -100.0], [0.0, 100.0]])
+        small = Channel(points=line, flow=np.array([1.0, 1.0]))
+        big = Channel(points=line, flow=np.array([16.0, 16.0]))
+        assert np.ptp(np.asarray(big.surface(_slope).positions)[:, 0]) \
+            > np.ptp(np.asarray(small.surface(_slope).positions)[:, 0])
+
+    def test_a_channel_too_short_to_carve_has_no_water(self) -> None:
+        import numpy as np
+        assert Channel(points=np.array([[0.0, 0.0]]),
+                       flow=np.array([1.0])).surface(_slope) is None

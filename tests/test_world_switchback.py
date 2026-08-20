@@ -6,7 +6,6 @@ slope too steep to climb straight up. What it needs from the generator is to be
 that goes somewhere else.
 """
 import numpy as np
-import pytest
 
 from OpenGLContext_editor.world.route import (
     hold_corners,
@@ -168,7 +167,6 @@ class TestThroughTheGenerator:
         a corner rather than the vertex it replaced."""
         plan = _hairpin(leg=400.0, offset=60.0)
         built = self._world(plan).circuit().points[:, [0, 2]]
-        bare = self._world(np.asarray(plan)).circuit()
         assert least_radius(built) > 20.0
         assert least_radius(built) < 60.0
 
