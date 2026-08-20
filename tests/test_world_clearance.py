@@ -24,11 +24,16 @@ PROFILE = RoadProfile(lane_width=3.6, lanes=2, shoulder_width=0.7,
 
 
 class _World(ProceduralWorld):
-    """A world whose road and ground are stated rather than generated."""
+    """A world whose road and ground are stated rather than generated.
 
-    def __init__(self, lift=0.0, **named):
+    ``lift`` carries the road that far over the land on a causeway; ``sink``
+    puts it that far under it in a bore.
+    """
+
+    def __init__(self, lift=0.0, sink=0.0, **named):
         super().__init__(**named)
         self._lift = lift
+        self._sink = sink
 
     def natural(self):
         return lambda x, z: np.zeros(np.shape(np.asarray(x, 'd')))
@@ -36,10 +41,11 @@ class _World(ProceduralWorld):
     def circuit(self):
         if self._circuit is None:
             z = np.linspace(-500.0, 500.0, 201)
-            line = np.stack([np.zeros(201), np.full(201, self._lift), z],
-                            axis=-1)
-            ops = np.full(201, Op.CAUSEWAY if self._lift else Op.DIRT,
-                          dtype=object)
+            height = self._lift - self._sink
+            line = np.stack([np.zeros(201), np.full(201, height), z], axis=-1)
+            op = (Op.TUNNEL if self._sink
+                  else Op.CAUSEWAY if self._lift else Op.DIRT)
+            ops = np.full(201, op, dtype=object)
             self._circuit = RoadPath(line, profile=PROFILE, ops=ops)
         return self._circuit
 
@@ -49,6 +55,42 @@ def _kept(world, offsets):
                        np.zeros(len(offsets)),
                        np.zeros(len(offsets))], axis=-1)
     return np.asarray(world._away_from_the_road(points))
+
+
+class TestInsideABore:
+    """Nothing grows in a tunnel.
+
+    The ground a bore runs through is taken out from under it, down to the
+    road, for as far as the bore goes -- so the land a tree would have stood on
+    is not there any more, and one planted on the cut floor is a tree inside
+    the tunnel, in plain view through the portal. The cleared corridor is the
+    whole of what was dug out.
+    """
+
+    def _world(self, sink=30.0):
+        return _World(extent=1024.0, sink=sink)
+
+    def test_a_tree_where_the_hill_was_is_dropped(self) -> None:
+        world = self._world()
+        corridor = PROFILE.total_width / 2.0 + ROAD_CLEARANCE
+        assert not bool(_kept(world, [corridor + 5.0])[0])
+
+    def test_one_out_past_the_cutting_is_kept(self) -> None:
+        world = self._world(sink=30.0)
+        assert bool(_kept(world, [200.0])[0])
+
+    def test_it_is_the_same_on_both_sides(self) -> None:
+        world = self._world()
+        corridor = PROFILE.total_width / 2.0 + ROAD_CLEARANCE
+        assert list(_kept(world, [-(corridor + 5.0), corridor + 5.0])) \
+            == [False, False]
+
+    def test_a_shallower_bore_clears_less(self) -> None:
+        shallow = float(np.sum(_kept(self._world(sink=10.0),
+                                     np.linspace(10.0, 200.0, 96))))
+        deep = float(np.sum(_kept(self._world(sink=40.0),
+                                  np.linspace(10.0, 200.0, 96))))
+        assert shallow > deep
 
 
 class TestOnTheGround:

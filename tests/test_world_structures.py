@@ -13,6 +13,7 @@ and are tested there.
 """
 import numpy as np
 import pytest
+from OpenGLContext.scenegraph.roadworks import TunnelProfile
 
 from OpenGLContext_editor.world.structures import (
     APPROACH_LIMIT,
@@ -165,6 +166,28 @@ class TestReachingTheGround:
                       if s.kind is Op.TUNNEL)
         crossing = int(np.searchsorted(-np.asarray(ramp), CUTTING_LIMIT))
         assert tunnel.first < crossing
+
+    def test_a_portal_opens_where_the_bore_fits_inside_the_hill(self) -> None:
+        """A bore is a tube with its crown seven or eight metres over the road,
+        not a hole in the tarmac. A portal placed where there is a couple of
+        metres of soil over the carriageway is one whose opening is buried: the
+        road runs into a bank and the arch stands in the air behind it. So the
+        ground at the portal has to be deep enough to hold the whole bore, and
+        the stretch between there and the surface is a cutting."""
+        ramp = list(np.linspace(0.0, -40.0, 40))
+        line, natural = _line(ramp + _flat(20, -40.0) + ramp[::-1])
+        tunnel = next(s for s in choose_structures(line, natural)
+                      if s.kind is Op.TUNNEL)
+        cover = float(natural[tunnel.first] - line[tunnel.first][1])
+        assert cover >= TunnelProfile().clearance, cover
+
+    def test_and_the_run_up_to_it_is_left_as_ordinary_road(self) -> None:
+        """Which is what a cutting is: the ground comes down to meet the road
+        until there is enough of it overhead to bore through."""
+        ramp = list(np.linspace(0.0, -40.0, 40))
+        line, natural = _line(ramp + _flat(20, -40.0) + ramp[::-1])
+        kinds = _kinds(choose_structures(line, natural))
+        assert kinds[0] is Op.DIRT
 
     def test_reaching_out_never_swallows_the_whole_road(self) -> None:
         ramp = list(np.linspace(0.0, 40.0, 20))

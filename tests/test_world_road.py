@@ -373,6 +373,86 @@ class TestTheGroundNeverCoversTheRoad:
                 % (height - centre[1], np.round(centre, 1), spacing))
 
 
+class TestTheGroundOpensAtAPortal:
+    """A bore's mouth has to be in the open.
+
+    A ground mesh draws straight lines between its samples, so where the cut
+    stops short of a portal the line from the last cut sample up to the
+    untouched hillside is a bank standing across the opening: the road arrives
+    at a wall of ground with the arch in the air behind it, and the only reason
+    a car gets through is that the collider has the bore taken out of it. The
+    cut has to carry far enough *inside* the bore that the foot of that line is
+    behind the portal, where the lining hides the rest of it.
+    """
+
+    def _through_a_hill(self):
+        """A level road with a hill across the middle of it, bored through."""
+        from OpenGLContext_editor.world.structures import Op, choose_structures
+
+        def hill(x, z):
+            z = np.asarray(z, 'd')
+            return np.asarray(60.0 * np.exp(-((z + 300.0) / 90.0) ** 2)
+                              + np.zeros_like(np.asarray(x, 'd')), 'd')
+        line = _straight(600.0, count=201, height=0.0)
+        natural = np.asarray(hill(line[:, 0], line[:, 2]), 'd')
+        chosen = choose_structures(line, natural)
+        ops = np.full(len(line), Op.DIRT, dtype=object)
+        for structure in chosen:
+            ops[structure.indices(len(line))] = structure.kind
+        assert Op.TUNNEL in set(ops), 'the hill should have been bored through'
+        return hill, RoadPath(line, RoadProfile(), ops=ops)
+
+    def test_the_bore_itself_is_clear_of_ground(self) -> None:
+        """Along the whole of it, not only at the mouth: a hillside standing
+        inside the tube is what a driver sees when they look into the portal,
+        whether it is a metre in or fifty."""
+        hill, path = self._through_a_hill()
+        ground = conform_terrain(hill, path)
+        for index in np.flatnonzero(~path.on_ground):
+            at = path.points[index]
+            height = float(np.asarray(ground(np.array([at[0]]),
+                                             np.array([at[2]])))[0])
+            assert height <= at[1] + 1e-6, (
+                'the ground is %.2f m over the road inside the bore'
+                % (height - at[1],))
+
+    @pytest.mark.parametrize('spacing', [2.0, 4.0, 8.0, 16.0])
+    @pytest.mark.parametrize('phase', [0.0, 0.25, 0.5, 0.75])
+    def test_the_run_up_to_the_portal_is_open_to_the_sky(self, spacing, phase,
+                                                         mesh_surface) -> None:
+        """Along the road rather than at its written points, and over every
+        alignment of the sample grid with the portal.
+
+        The mesh is only ever wrong *between* its samples, so a portal that
+        happens to fall on one is the case that was never in doubt -- and where
+        a tile's grid falls is not something a road gets to choose.
+        """
+        from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
+
+        from OpenGLContext_editor.world.road import conform_terrain_at
+        hill, path = self._through_a_hill()
+        ground = conform_terrain_at(hill, path)(spacing)
+        portal = int(np.flatnonzero(~path.on_ground)[0]) - 1
+        centre = path.points[portal] + np.array([0.0, 0.0, spacing * phase])
+        resolution = 65
+        span = spacing * (resolution - 1)
+        positions, _, _, indices = terrain_patch(
+            centre[0] - span / 2, centre[0] + span / 2,
+            centre[2] - span / 2, centre[2] + span / 2,
+            resolution, height_fn=ground, water_level=None)
+        along = np.linspace(path.stations[portal] - 40.0,
+                            path.stations[portal], 81)
+        for station in along:
+            at = path.points[
+                int(np.searchsorted(path.stations, station))]
+            height = mesh_surface(positions, indices, at[0], at[2])
+            assert height is not None
+            assert height <= at[1] + 1e-3, (
+                'the ground is %.2f m over the road %.0f m short of the '
+                'portal, at spacing %s'
+                % (height - at[1], path.stations[portal] - station, spacing))
+
+
 class TestTilesDivideTheRoadBetweenThem:
     """Each stretch of road is written by exactly one tile.
 

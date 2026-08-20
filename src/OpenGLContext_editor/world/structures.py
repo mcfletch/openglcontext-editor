@@ -28,12 +28,13 @@ from enum import Enum
 from typing import Any
 
 import numpy as np
+from OpenGLContext.scenegraph.roadworks import TunnelProfile
 
 __all__ = [
     'Op', 'Structure', 'choose_structures',
     'CUTTING_LIMIT', 'EMBANKMENT_LIMIT', 'MINIMUM_TUNNEL', 'MINIMUM_SPAN',
-    'APPROACH_LIMIT', 'ABUTMENT_HEIGHT', 'PORTAL_COVER', 'MINIMUM_CAUSEWAY',
-    'MINIMUM_APPROACH',
+    'APPROACH_LIMIT', 'ABUTMENT_HEIGHT', 'PORTAL_COVER', 'PORTAL_SOIL',
+    'MINIMUM_CAUSEWAY', 'MINIMUM_APPROACH',
 ]
 
 #: How deep a cutting is worth digging, in metres. Below this the road is bored
@@ -62,7 +63,24 @@ MINIMUM_SPAN = 40.0
 #: that decays over a kilometre does not turn the whole road into bridge.
 APPROACH_LIMIT = 120.0
 ABUTMENT_HEIGHT = 2.0
-PORTAL_COVER = 2.0
+
+#: How much ground stands over the crown of a bore where it opens, in metres.
+#: Enough to be an arch inside a hill rather than a tube laid in a slot and
+#: covered over.
+PORTAL_SOIL = 1.5
+
+#: How far under the natural ground the road has to be before a bore's portal
+#: can open in it, in metres.
+#:
+#: **Measured to the top of the bore, not to the carriageway.** A bore is a
+#: tube with its crown the better part of eight metres over the road, so a
+#: portal placed where there are two metres of soil over the tarmac is a portal
+#: whose opening is buried: the road runs into a bank of hillside and the arch
+#: stands in the air behind it. Where there is less cover than this the road is
+#: in a *cutting* -- the ground comes down to meet it
+#: (:func:`~OpenGLContext_editor.world.road.conform_terrain`) -- and the bore
+#: begins where the hill is deep enough to hold it.
+PORTAL_COVER = TunnelProfile().clearance + PORTAL_SOIL
 
 #: How long a road has to run over drowned ground before the fill carrying it
 #: is called a causeway rather than an embankment, in metres.
@@ -134,6 +152,7 @@ def choose_structures(line: Any, natural: Any, *,
                       minimum_tunnel: float = MINIMUM_TUNNEL,
                       minimum_span: float = MINIMUM_SPAN,
                       approach_limit: float = APPROACH_LIMIT,
+                      portal_cover: float = PORTAL_COVER,
                       waterline: float | None = None,
                       closed: bool = False,
                       overrides: Iterable[tuple[int, int, Op]] = (),
@@ -146,6 +165,10 @@ def choose_structures(line: Any, natural: Any, *,
     once, in order along the road, so ``[s.kind for s in result]`` is the
     sequence of operations and nothing between two structures is unaccounted
     for.
+
+    ``portal_cover`` is how much ground a bore's portal has to open inside;
+    see :data:`PORTAL_COVER`, which is measured to the crown of the bore rather
+    than to the carriageway.
 
     ``waterline`` marks fill over drowned ground as :attr:`Op.CAUSEWAY` rather
     than plain dirt; without one, no causeway is found, because a road on fill
@@ -174,7 +197,7 @@ def choose_structures(line: Any, natural: Any, *,
     _reach_out(kinds, station, departure, Op.BRIDGE, approach_limit,
                departure > ABUTMENT_HEIGHT, closed)
     _reach_out(kinds, station, departure, Op.TUNNEL, approach_limit,
-               departure < -PORTAL_COVER, closed)
+               departure < -portal_cover, closed)
     _close_gaps(kinds, station, closed)
     if waterline is not None:
         _mark_causeways(kinds, station, ground, departure, waterline, closed)

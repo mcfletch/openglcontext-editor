@@ -95,9 +95,19 @@ class TestGroundUnderAStructure:
         assert float(conformed(np.array([200.0]), np.array([0.0]))[0]) \
             == pytest.approx(0.0)
 
-    def test_the_hill_over_a_bore_is_left_as_it_was(self) -> None:
+    def test_the_hill_over_a_bore_comes_out_from_under_it(self) -> None:
+        """A ground mesh is a surface, so the only way to take a tunnel out of
+        it is to cut down to the road for the length of the bore. Left in, the
+        hillside stands inside the tube and a driver looking into the portal
+        sees the hill rather than the lining."""
+        path, conformed = self._under(Op.TUNNEL)
+        at = path.points[20]
+        assert float(conformed(np.array([at[0]]), np.array([at[2]]))[0]) \
+            <= float(at[1]) + 1e-6
+
+    def test_and_the_land_out_past_the_cutting_is_left_as_it_was(self) -> None:
         _path, conformed = self._under(Op.TUNNEL)
-        assert float(conformed(np.array([200.0]), np.array([0.0]))[0]) \
+        assert float(conformed(np.array([200.0]), np.array([400.0]))[0]) \
             == pytest.approx(0.0)
 
     def test_the_ground_beside_a_deck_is_left_as_it_was(self) -> None:
@@ -253,7 +263,13 @@ class TestTheShippedWorld:
     def test_the_ground_is_no_longer_moved_by_the_height_of_a_mountain(
             self, world) -> None:
         """What the structures are for: the earthworks left over are the size
-        of earthworks."""
+        of earthworks.
+
+        Measured where the road is on the land and under a deck. A bore is the
+        one place the ground *is* moved by the height of a mountain, because a
+        surface cannot hold a tunnel any other way -- see
+        :meth:`~OpenGLContext_editor.world.road.RoadPath.reshaped_segments`.
+        """
         terrain_height = world.natural()
         circuit = world.circuit()
         conformed = world.height_fn()
@@ -270,7 +286,8 @@ class TestTheShippedWorld:
         beside = right + offset
         moved = np.abs(np.asarray(conformed(beside[:, 0], beside[:, 1]))
                        - np.asarray(terrain_height(beside[:, 0], beside[:, 1])))
-        assert float(np.percentile(moved, 99)) < 40.0
+        bored = np.array([op is Op.TUNNEL for op in circuit.ops], dtype=bool)
+        assert float(np.percentile(moved[~bored], 99)) < 40.0
         # And there was something worth building a structure for.
         assert float(np.abs(line[:, 1] - natural).max()) > 40.0
 
@@ -301,11 +318,18 @@ class TestWhereAStructureMeetsTheGround:
         beside = float(conformed(np.array([at[0]]), np.array([at[2] + 4.0]))[0])
         assert beside < at[1] + 0.5
 
-    def test_the_hill_over_the_bore_is_still_there(self) -> None:
+    def test_the_hill_out_past_the_cutting_is_still_there(self) -> None:
         path, conformed, hill = self._approach()
         at = path.points[30]
+        aside = at[2] + 400.0
+        over = float(conformed(np.array([at[0]]), np.array([aside]))[0])
+        assert over == pytest.approx(float(hill(at[0], aside)), abs=0.01)
+
+    def test_and_the_bore_itself_is_cut_down_to_the_road(self) -> None:
+        path, conformed, _hill = self._approach()
+        at = path.points[30]
         over = float(conformed(np.array([at[0]]), np.array([at[2]]))[0])
-        assert over == pytest.approx(float(hill(at[0], at[2])), abs=0.01)
+        assert over <= float(at[1]) + 1e-6
 
     def test_a_road_all_on_the_ground_is_unchanged(self) -> None:
         path = RoadPath(_line(height=6.0))

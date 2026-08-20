@@ -89,33 +89,42 @@ class TestTheShippedWorld:
         assert Op.CAUSEWAY in kinds
 
 
-if __name__ == '__main__':
-    raise SystemExit(pytest.main([__file__, '-v']))
-
-
 class TestWhatTheWallIsMadeOf:
-    """A parapet is the thing closest to the driver for the whole length of a
-    crossing, and the one thing in frame that is not landscape. In structural
-    concrete under a strong sun it comes out white, and a white wall along a
-    forest road is the most conspicuous object in the game."""
+    """A causeway's wall is the same stuff as the fill it stands on.
 
-    def _named(self, kind='causeway'):
-        layer = RoadLayer(_crossing(), ground=_ground)
+    What stands on the edge of a causeway is a low solid wall, not a railing,
+    so the barrier material is the wrong thing on it. That material is dark on
+    purpose -- a viaduct's parapet is the thing closest to the camera for a
+    whole span, and structural concrete there comes out white -- and a vertical
+    face at a tenth albedo is lit by nothing but sky whichever way the sun is.
+    Seen from the driver's seat, on both sides of the crossing at once, that is
+    a black line lying along the horizon for as long as the causeway lasts.
+    """
+
+    def _named(self, kind='causeway', **named):
+        layer = RoadLayer(_crossing(), ground=_ground, **named)
         for node in layer.content(BoundingBox((-200.0, -50.0, -50.0),
                                               (200.0, 100.0, 250.0)), 1.0):
             if node.name == '%s-wall' % (kind,):
                 return node.mesh.material
         raise AssertionError('no %s wall was written' % (kind,))
 
-    def test_the_wall_is_darker_than_the_fill_it_stands_on(self) -> None:
+    def test_the_wall_is_the_concrete_the_fill_is(self) -> None:
         from OpenGLContext.scenegraph.roadworks import CONCRETE_ALBEDO
-        assert max(self._named().baseColor[:3]) < min(CONCRETE_ALBEDO)
+        assert tuple(float(one) for one in self._named().baseColor[:3]) \
+            == pytest.approx(CONCRETE_ALBEDO, abs=1e-6)
 
     def test_a_caller_may_choose_its_own(self) -> None:
         from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         wanted = PBRMaterial(baseColor=(0.4, 0.1, 0.1))
-        layer = RoadLayer(_crossing(), ground=_ground, barrier=wanted)
-        found = [node.mesh.material for node in layer.content(
-            BoundingBox((-200.0, -50.0, -50.0), (200.0, 100.0, 250.0)), 1.0)
-            if node.name == 'causeway-wall']
-        assert found and all(one is wanted for one in found)
+        assert self._named(structure_material=wanted) is wanted
+
+    def test_and_the_barrier_material_is_left_for_a_railing(self) -> None:
+        """Which is a deck's parapet, and not a causeway's wall."""
+        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+        wanted = PBRMaterial(baseColor=(0.4, 0.1, 0.1))
+        assert self._named(barrier=wanted) is not wanted
+
+
+if __name__ == '__main__':
+    raise SystemExit(pytest.main([__file__, '-v']))

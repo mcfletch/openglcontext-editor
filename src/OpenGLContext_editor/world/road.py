@@ -220,6 +220,38 @@ class RoadPath:
         """How long the road is, following the ground."""
         return float(self.stations[-1])
 
+    def reshaped_segments(self) -> np.ndarray:
+        """Which segments the earthwork reshapes the ground along.
+
+        The ones standing on the land, and **every one running through a bore**.
+
+        The ground a tunnel passes through has to come out from under it. Left
+        in, the hillside stands inside the tube: a ground mesh draws straight
+        lines between its samples, so the line from the last cut sample outside
+        the portal up to the untouched hill is a bank across the opening -- the
+        road arrives at a wall with the arch in the air behind it, and a car
+        only gets through because the collider has the bore taken out of it.
+        Cutting a sample's worth inside the portal only moves the bank a few
+        metres in, where it is a hillside seen through the mouth instead of the
+        lining.
+
+        A height field is a surface, so what "out from under it" can mean here
+        is *down to the road*: the approach cutting carries on through the hill
+        for the length of the bore, with the lining standing inside it. The
+        hill above a long bore is opened into a broad cutting, which is the
+        cost of drawing a tunnel in a surface rather than in a solid; what
+        would keep the hill whole is a hole in the ground mesh with the bore's
+        own outside plugging it, and that is a terrain feature rather than a
+        road one.
+
+        Not a deck: under one the same move would raise a pillar of ground to
+        meet a road that is forty metres up.
+        """
+        on = self.segment_on_ground
+        bore = np.array([op is Op.TUNNEL for op in self.ops], dtype=bool)
+        found: np.ndarray = on | (bore[:-1] & bore[1:])
+        return found
+
     def ops_at(self, stations: Any) -> np.ndarray:
         """What is built at each of these distances along the road.
 
@@ -424,17 +456,13 @@ class RoadPath:
     def section_offset(self, distance: Any) -> np.ndarray:
         """How far below the centreline the road's surface is, at a distance out.
 
-        The profile's own cross-section, interpolated, and held at the verge's
-        value beyond the road's edge -- which is the height the ground has to
-        arrive at for the two to meet.
+        The profile's own answer
+        (:meth:`~OpenGLContext.scenegraph.road.RoadProfile.section_offset`),
+        which is where it belongs: the cut across a road is a property of the
+        road's section and not of the line it is swept along.
         """
-        section = self.profile.section()
-        lateral, vertical = section[:, 0], section[:, 1]
-        half = lateral.max()
-        offset: np.ndarray = np.interp(
-            np.minimum(np.abs(np.asarray(distance, 'd')), half),
-            lateral[lateral >= 0], vertical[lateral >= 0])
-        return offset
+        found: np.ndarray = self.profile.section_offset(distance)
+        return found
 
     def crosses(self, region: BoundingBox, margin: float = 0.0) -> bool:
         """Whether the road comes within ``margin`` of a region, in plan."""
@@ -716,11 +744,12 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     is where a bridge or a tunnel belongs and moving a mountain would only hide
     the fact.
 
-    Where the road is *carried* rather than laid -- a deck over a valley, a bore
-    through a hill -- the ground is left exactly as it was found: a bridge
-    stands over the land and a tunnel runs inside it, and reshaping either would
-    put the structure inside a hill of its own making. The road's ``ops`` say
-    which stretches those are.
+    Where the road is carried *over* the land -- a deck, a causeway -- the ground
+    is left exactly as it was found: a bridge stands over a valley, and filling
+    the valley in would put the structure inside a hill of its own making.
+    Where it is carried *inside* the land the opposite is true, and the cutting
+    runs the length of the bore: see :meth:`RoadPath.reshaped_segments`. The
+    road's ``ops`` say which stretches are which.
 
     ``widening`` is how far apart the samples are that will read this function.
     A ground mesh only knows the surface at its vertices and draws straight
@@ -739,6 +768,7 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     reach = half + widening + maximum_earthwork
 
     laid = path.on_ground.all()
+    reshaped = path.reshaped_segments()
 
     def conformed(x: Any, z: Any) -> np.ndarray:
         natural = np.asarray(height_fn(x, z), dtype='d')
@@ -747,7 +777,7 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
         road_height = road_height.reshape(natural.shape)
         near = distance < reach
         if not laid:
-            near = near & path.segment_on_ground[segment.reshape(natural.shape)]
+            near = near & reshaped[segment.reshape(natural.shape)]
         if not np.any(near):
             return natural
         # Beside a climbing road, the ground has to sit low enough that the
@@ -807,8 +837,9 @@ class RoadLayer:
     written into the surface's vertex colours. A road through a wood carries the
     wood's shade rather than being a lit strip laid across it.
 
-    ``structure_material`` is what a deck, a bore and a causeway's fill are
-    built from, and ``barrier`` the wall standing on the edge of one -- a
+    ``structure_material`` is what a deck, a bore and a causeway -- its fill and
+    the low wall on each edge of it alike -- are built from, and ``barrier`` the
+    railing standing on the edge of a deck -- a
     different thing, and darker, because it is the object closest to the driver
     for the whole length of a crossing.
     """
@@ -998,8 +1029,8 @@ class RoadLayer:
                                       self.barrier)
             elif kind is Op.CAUSEWAY:
                 parts = causeway_meshes(run, self.path.profile, self.ground,
-                                        self.causeway, self.structure_material,
-                                        self.barrier)
+                                        self.causeway,
+                                        self.structure_material)
             else:
                 parts = tunnel_meshes(run, self.path.profile, self.tunnel,
                                       self.structure_material)

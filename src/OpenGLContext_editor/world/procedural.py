@@ -50,6 +50,7 @@ from OpenGLContext_editor.world.height import (
     ProceduralBase,
 )
 from OpenGLContext_editor.world.road import (
+    EARTHWORK_SLOPE,
     RoadLayer,
     RoadPath,
     conform_terrain,
@@ -445,6 +446,10 @@ class ProceduralWorld:
 
         Without a road every one of them stands: a landscape has rocks in it
         whether or not anybody built through it.
+
+        Not inside a bore: the ground a boulder was lying on is the ground that
+        came out to make the tunnel, and one left behind is a rock on the floor
+        of it -- lit through the portal, and solid to hit.
         """
         if not self.road:
             return np.ones(len(points), dtype=bool)
@@ -453,7 +458,8 @@ class ProceduralWorld:
             + ROCK_CLEARANCE
         found = circuit.sample(points[:, 0], points[:, 2],
                                radius=ROCK_REACH * 1.5)
-        keep = np.asarray((found.distance > clear)
+        dug = self._bore_corridor(circuit, clear)[found.segment]
+        keep = np.asarray((found.distance > np.maximum(clear, dug))
                           & (found.distance < ROCK_REACH))
         room: np.ndarray = keep & self._clear_of_the_gantry(points)
         return room
@@ -773,17 +779,44 @@ class ProceduralWorld:
         crown of a tree rooted at the foot of an embankment grows through the
         side of it rather than over the carriageway, and a wood growing out of
         a causeway's concrete is what that looks like from the road.
+
+        Wider again over a bore, where the corridor is the whole of what was
+        dug out (:meth:`~OpenGLContext_editor.world.road.RoadPath.reshaped_segments`).
+        The land a tree would have stood on is not there any more, and one
+        planted on the floor of the cut is a tree inside the tunnel, in plain
+        view through the portal.
         """
         if not self.road:
             return np.ones(len(points), dtype=bool)
         circuit = self.circuit()
         corridor = circuit.profile.total_width / 2.0 + ROAD_CLEARANCE
         reach = corridor + CROWN_RADIUS
-        found = circuit.sample(points[:, 0], points[:, 2], radius=reach * 1.5)
+        cut = self._bore_corridor(circuit, corridor)
+        found = circuit.sample(points[:, 0], points[:, 2],
+                               radius=max(reach, cut.max()) * 1.5)
         ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
                             dtype='d')
         carried = found.height - ground > CARRIED_ABOVE
-        return np.asarray(found.distance > np.where(carried, reach, corridor))
+        cleared = np.maximum(np.where(carried, reach, corridor),
+                             cut[found.segment])
+        return np.asarray(found.distance > cleared)
+
+    def _bore_corridor(self, circuit: Any, corridor: float) -> np.ndarray:
+        """How far out the ground is dug away at each segment of the road.
+
+        The corridor for a stretch on the land, and the corridor plus the
+        earthwork's own batter for one inside a hill: how deep the road is
+        under the land, over the slope the cut stands at.
+        """
+        depth = np.zeros(len(circuit.ops), dtype='d')
+        bore = np.array([op is Op.TUNNEL for op in circuit.ops], dtype=bool)
+        if bore.any():
+            points = circuit.points
+            ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
+                                dtype='d')
+            depth = np.where(bore, np.maximum(ground - points[:, 1], 0.0), 0.0)
+        along = np.maximum(depth[:-1], depth[1:]) / EARTHWORK_SLOPE
+        return np.where(along > 0.0, corridor + along, corridor)
 
 
 def _rock_kind(index: int) -> str:
