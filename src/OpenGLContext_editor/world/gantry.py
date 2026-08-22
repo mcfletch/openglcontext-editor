@@ -38,6 +38,12 @@ class StartFinish:
     reaches across the carriageway, and ``crossfall`` the camber it is painted
     on. ``drops`` is how far below the road surface each leg's own ground lies,
     left leg first.
+
+    ``bank`` is how far the road leans where the line is drawn. It is the
+    *paint* that leans: the line lies on the carriageway, and a flat strip
+    across a road leaning one in ten stands a third of a metre proud of it on
+    one side and is buried on the other. The gantry over it is steel on two
+    feet and stands upright, which is what a gantry over a banked road does.
     """
 
     position: Any
@@ -46,6 +52,7 @@ class StartFinish:
     width: float
     crossfall: float = 0.0
     drops: tuple[float, float] = (0.0, 0.0)
+    bank: float = 0.0
 
     def __repr__(self) -> str:
         return 'StartFinish(%s, %.0fm wide)' % (
@@ -73,10 +80,15 @@ def start_finish(path: Any, profile: GantryProfile | None = None,
     road = path.profile
     span = road.carriageway_width + 2.0 * (road.shoulder_width + profile.margin)
     at = line[index]
+    bank = float(path.bank[index])
     return StartFinish(position=at, yaw=yaw, span=float(span),
                        width=float(road.carriageway_width),
-                       crossfall=float(road.crossfall),
-                       drops=_drops(at, yaw, span, ground, footing))
+                       # What the lean has left of the camber: past it the
+                       # carriageway is one plane and there is no crown for the
+                       # paint to follow.
+                       crossfall=float(road.banked(bank).crossfall),
+                       drops=_drops(at, yaw, span, ground, footing),
+                       bank=bank)
 
 
 def _drops(at: np.ndarray, yaw: float, span: float, ground: Any,

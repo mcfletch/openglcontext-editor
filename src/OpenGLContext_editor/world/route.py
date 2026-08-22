@@ -33,11 +33,13 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from OpenGLContext.scenegraph.road import GRIP, cornering_radius
 
 HeightFn = Callable[[Any, Any], Any]
 
 __all__ = ['ease_route', 'hold_corners', 'hold_radius', 'least_radius',
-           'cornering_radius', 'REACH', 'ROUNDS', 'RELAXATION', 'GRIP']
+           'cornering_radius', 'CURVE_BASELINE', 'REACH', 'ROUNDS',
+           'RELAXATION', 'GRIP']
 
 #: How far a point may end up from where it was drawn, in metres. Far enough to
 #: go round a hill rather than over it; near enough that the circuit a designer
@@ -66,18 +68,24 @@ FLATTEST = 0.02
 #: the next valley before the smoothing can answer.
 LONGEST_STEP = 25.0
 
-#: How much of a car's weight is available sideways in a corner, as a fraction:
-#: what a tyre on dry tarmac has to hold it on the line. It is what turns the
-#: speed a road is designed for into the tightest corner it may have.
-GRIP = 1.0
-
-#: Standard gravity, m/s**2.
-GRAVITY = 9.81
+#: How much of a car's weight is available sideways in a corner, and standard
+#: gravity. The engine's, because the same two numbers turn a design speed into
+#: the tightest corner a road may have *and* a corner's radius into the speed
+#: its sign says, and a road signed by one rule and laid out by another is a
+#: road whose signs are about a different road.
 
 #: How much of a corner's excess is taken out per round, and how many rounds it
 #: is given. Under-relaxed for the same reason the sliding is.
 CORNER_RELAXATION = 0.35
 CORNER_ROUNDS = 2000
+
+#: Over how much road a corner's radius is measured, in metres. The three-point
+#: circle is exact for a circle and noisy for a road: an alignment written down
+#: every few metres carries its arcs as chords, and a point a hand's breadth
+#: off its arc reads as a corner half the radius of the one it is on. Long
+#: enough that the sampling washes out, short enough that a hairpin is still a
+#: hairpin.
+CURVE_BASELINE = 20.0
 
 #: How far apart the points of a rounded corner are, in metres. The road is
 #: built at about this spacing, so an arc drawn more coarsely is re-sampled
@@ -104,30 +112,29 @@ DRAWN_CORNER = np.radians(15.0)
 TENSION = 0.05
 
 
-def cornering_radius(design_speed: float, grip: float = GRIP) -> float:
-    """The tightest corner a road may have, in metres.
-
-    A car of speed ``v`` on a corner of radius ``R`` needs ``v**2 / R`` of
-    lateral acceleration to stay on it, and has ``grip * g`` to find it with.
-    A road with no design speed has no limit -- there is always some speed at
-    which any corner is too tight, and the answer to that is to say how fast the
-    road is meant to be driven.
-    """
-    if design_speed <= 0 or grip <= 0:
-        return 0.0
-    return float(design_speed * design_speed / (grip * GRAVITY))
-
-
-def least_radius(plan: Any, closed: bool = False) -> float:
+def least_radius(plan: Any, closed: bool = False,
+                 over: float = CURVE_BASELINE) -> float:
     """The tightest corner in a plan, in metres, or infinity if it is straight.
 
-    The circle through each point and its two neighbours: the radius the road
-    actually turns at there.
+    The circle through each point and the road ``over`` metres either side of
+    it: the radius the road actually turns at there.
+
+    Over a length of road rather than between neighbouring points, because the
+    three-point circle is exact for a circle and noisy for a road. An alignment
+    written down every few metres carries its arcs as chords, and a point a
+    hand's breadth off its arc reads as a corner half the radius of the one it
+    is on -- so a check on the tightest corner fails a road that is fine, and a
+    driver reading the same figure brakes for a corner nobody built. Short
+    enough to resolve a real corner: a hairpin is still a hairpin.
     """
     line = np.asarray(plan, dtype='d').reshape(-1, 2)
     if len(line) < 3:
         return float('inf')
-    before, after = _neighbours(line, closed)
+    steps = np.linalg.norm(np.diff(line, axis=0), axis=1)
+    spacing = float(np.mean(steps)) if len(steps) else 0.0
+    apart = max(int(round(float(over) / spacing)), 1) if spacing > 0 else 1
+    apart = min(apart, max(len(line) // 3, 1))
+    before, after = _neighbours(line, closed, apart)
     return float(np.min(_radius(before, line, after)))
 
 
@@ -232,15 +239,21 @@ def _slide(line: np.ndarray, drawn: np.ndarray, height_fn: HeightFn,
     return _held(moved, drawn, reach)
 
 
-def _neighbours(line: np.ndarray, closed: bool) -> tuple[np.ndarray, np.ndarray]:
+def _neighbours(line: np.ndarray, closed: bool,
+                apart: int = 1) -> tuple[np.ndarray, np.ndarray]:
     """Each point's two neighbours along the route.
+
+    ``apart`` is how many points away to take them, for a caller measuring a
+    curve over a length of road rather than between adjacent samples.
 
     An open route's ends have only one, and take themselves for the other, which
     leaves them where they are -- which is where they belong.
     """
-    before, after = np.roll(line, 1, axis=0), np.roll(line, -1, axis=0)
+    apart = max(int(apart), 1)
+    before, after = (np.roll(line, apart, axis=0),
+                     np.roll(line, -apart, axis=0))
     if not closed:
-        before[0], after[-1] = line[0], line[-1]
+        before[:apart], after[-apart:] = line[0], line[-1]
     return before, after
 
 
@@ -297,7 +310,7 @@ def _held(moved: np.ndarray, drawn: np.ndarray, reach: float) -> np.ndarray:
     return held
 
 
-def hold_corners(plan: Any, minimum: float, closed: bool = False,
+def hold_corners(plan: Any, minimum: Any, closed: bool = False,
                  spacing: float = ARC_SPACING) -> np.ndarray:
     """Round every corner of a drawn plan to at least ``minimum`` metres.
 
@@ -305,6 +318,14 @@ def hold_corners(plan: Any, minimum: float, closed: bool = False,
     the legs keep the direction and the place the designer drew them and only
     the corner itself changes. A hairpin stays a hairpin -- of the tightest
     radius a car can take -- which is what a switchback is for.
+
+    ``minimum`` is one radius, or **one per point of the plan**, which is what
+    makes a lap worth learning: a road whose every corner is held to the same
+    figure is a road of one corner repeated, and a driver who has taken the
+    first has taken them all. Given per point, the entry for a vertex is the
+    radius that vertex is rounded to -- small for a corner meant to be braked
+    for, large for one meant to be carried through -- and the entries for the
+    ends of an open plan are ignored, since its ends are not corners.
 
     This is the opposite decision from :func:`hold_radius`, which relaxes the
     line towards its chords: that is right for a route being *found*, where the
@@ -321,7 +342,13 @@ def hold_corners(plan: Any, minimum: float, closed: bool = False,
     curve somebody drew with a tighter one.
     """
     line = np.asarray(plan, dtype='d').reshape(-1, 2)
-    if len(line) < 3 or minimum <= 0.0:
+    wanted = np.asarray(minimum, dtype='d')
+    if wanted.ndim and len(wanted.reshape(-1)) != len(line):
+        raise ValueError("a plan of %d points needs %d radii, not %d"
+                         % (len(line), len(line), len(wanted.reshape(-1))))
+    radii = np.broadcast_to(wanted.reshape(-1) if wanted.ndim else wanted,
+                            (len(line),))
+    if len(line) < 3 or float(radii.max()) <= 0.0:
         return line.copy()
     legs = np.linalg.norm(np.diff(np.vstack([line, line[:1]]), axis=0), axis=1) \
         if closed else np.linalg.norm(np.diff(line, axis=0), axis=1)
@@ -334,7 +361,7 @@ def hold_corners(plan: Any, minimum: float, closed: bool = False,
         here = line[index]
         after = line[(index + 1) % len(line)]
         room = _corner_room(legs, index, len(line), closed)
-        arc = _fillet(before, here, after, minimum, room, spacing)
+        arc = _fillet(before, here, after, float(radii[index]), room, spacing)
         made.append(arc)
     if not closed:
         made.append(line[-1:])

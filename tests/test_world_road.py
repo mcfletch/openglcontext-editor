@@ -802,9 +802,12 @@ class TestTheShippedCircuitIsDrivable:
     built for, does the car stay on the road?
     """
 
-    def _circuit(self):
+    def _world(self):
         from OpenGLContext_editor.world.procedural import ProceduralWorld
-        return ProceduralWorld(extent=2048.0, resolution=17, seed=11).circuit()
+        return ProceduralWorld(extent=2048.0, resolution=17, seed=11)
+
+    def _circuit(self):
+        return self._world().circuit()
 
     def _profile(self, line):
         loop = line[:-1] if np.allclose(line[0], line[-1]) else line
@@ -815,16 +818,33 @@ class TestTheShippedCircuitIsDrivable:
         return np.abs(grade[:-1]), np.abs(np.diff(grade)) / span
 
     def test_no_crest_lifts_the_car_off_the_road(self) -> None:
-        from OpenGLContext_editor.world.procedural import CIRCUIT_DESIGN_SPEED
+        """At the speed **each stretch** is built for. The road is not laid out
+        to one speed from end to end any more, and a crest inside a hairpin
+        rounded for the speed of the straight before it is a quarter of a
+        kilometre of earthwork for a crest nobody meets at that speed."""
         from OpenGLContext_editor.world.road import CREST_WEIGHT_LOSS, GRAVITY
-        _grade, curvature = self._profile(self._circuit().points)
-        lift = curvature.max() * CIRCUIT_DESIGN_SPEED ** 2 / GRAVITY
-        assert lift <= CREST_WEIGHT_LOSS + 1e-6
+        world = self._world()
+        _grade, curvature = self._profile(world.circuit().points)
+        # ``_profile`` measures the bend at each point from the two steps
+        # either side of it, so entry *j* is the bend at point *j+1*.
+        speed = np.roll(
+            world.circuit_character().design_speed[:len(curvature)], -1)
+        lift = curvature * speed ** 2 / GRAVITY
+        assert lift.max() <= CREST_WEIGHT_LOSS + 1e-6
 
     def test_no_climb_is_steeper_than_the_grade_limit(self) -> None:
-        from OpenGLContext_editor.world.procedural import CIRCUIT_MAX_GRADE
-        grade, _curvature = self._profile(self._circuit().points)
-        assert grade.max() <= CIRCUIT_MAX_GRADE + 1e-3
+        """The ordinary limit, or the steeper one a hillside earns: a road held
+        to a gentle grade across a mountainside stands off it on an embankment
+        for as far as the mountainside lasts."""
+        from OpenGLContext_editor.world.procedural import (
+            CIRCUIT_MAX_GRADE, CIRCUIT_STEEP_GRADE,
+        )
+        world = self._world()
+        grade, _curvature = self._profile(world.circuit().points)
+        allowed = world.circuit_character().grade_limit[:len(grade)]
+        assert grade.max() <= CIRCUIT_STEEP_GRADE + 1e-3
+        assert np.all(grade <= allowed + 1e-3)
+        assert grade.max() > CIRCUIT_MAX_GRADE * 0.5
 
     def test_it_is_still_a_circuit_through_hills(self) -> None:
         heights = self._circuit().points[:, 1]
@@ -1002,7 +1022,9 @@ class TestAWorldCanBeGivenItsOwnRoute:
         line = world.circuit().points
         steps = np.linalg.norm(np.diff(line[:, [0, 2]], axis=0), axis=1)
         grade = np.abs(np.diff(line[:, 1])) / np.where(steps > 0, steps, 1.0)
-        assert grade.max() <= CIRCUIT_MAX_GRADE + 1e-3
+        allowed = world.circuit_character().grade_limit[:len(grade)]
+        assert np.all(grade <= allowed + 1e-3)
+        assert allowed.min() == pytest.approx(CIRCUIT_MAX_GRADE)
 
     def test_an_open_route_is_a_road_rather_than_a_circuit(self) -> None:
         from OpenGLContext_editor.world.procedural import ProceduralWorld

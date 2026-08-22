@@ -25,7 +25,12 @@ from OpenGLContext.loaders.tiles3d.procedural import (
 from OpenGLContext.scenegraph.gantry import GantryProfile
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.props import Prop, rock_mesh
-from OpenGLContext.scenegraph.road import RoadProfile
+from OpenGLContext.scenegraph.road import (
+    MAXIMUM_BANK,
+    RoadProfile,
+    bank_profile,
+)
+from OpenGLContext_editor.world.character import corner_radii, road_character
 from OpenGLContext.scenegraph.roadsigns import SignProfile
 from OpenGLContext.scenegraph.terrain import LayerRule
 
@@ -63,7 +68,11 @@ from OpenGLContext_editor.world.route import (
     hold_corners,
 )
 from OpenGLContext_editor.world.scatter import scatter_on_heightfield, yaw_quaternions
-from OpenGLContext_editor.world.signs import sign_placements, warn_of
+from OpenGLContext_editor.world.signs import (
+    POSTED_LIMIT,
+    sign_placements,
+    warn_of,
+)
 from OpenGLContext_editor.world.species import (
     biome_species,
     shipped_cover,
@@ -109,6 +118,12 @@ IMPOSTOR_ERROR = 8.0
 #: a ring the car can hold at full throttle.
 CIRCUIT_HARMONICS = ((3, 0.20), (5, 0.09))
 
+#: How many corners the circuit has, and so how many straights join them.
+#: Enough that a lap has variety in it; few enough that the legs between them
+#: are long -- a straight is what a circuit is overtaken on, and one shorter
+#: than the manoeuvre is a straight nobody passes on.
+CIRCUIT_CORNERS = 7
+
 #: The alignment is smoothed over this many metres of road before it is built,
 #: so the track carries the shape of the landscape without its every hummock,
 #: and no grade steeper than this fraction survives.
@@ -129,11 +144,76 @@ CIRCUIT_EASING = 500
 #: corner at one vertex, however gentle the polygon looks from a distance.
 CIRCUIT_SPACING = 6.0
 
-#: How fast the circuit is meant to be driven, in metres per second (151 km/h),
-#: which is what rounds off its crests: a change of grade sharp enough to take a
-#: car's wheels off the road at this speed is spread into a vertical curve that
-#: does not.
-CIRCUIT_DESIGN_SPEED = 42.0
+#: How fast the circuit is meant to be driven, in metres per second: two hundred
+#: kilometres an hour.
+#:
+#: It decides two things about the shape of the road. Its corners are held to
+#: the radius this speed needs (:func:`~OpenGLContext.scenegraph.road.cornering_radius`,
+#: 315 m), and its crests are rounded off so that a change of grade sharp enough
+#: to take a car's wheels off the road at this speed is spread into a vertical
+#: curve that does not.
+#:
+#: It is the speed the circuit is *for*: a road whose corners are worth a
+#: hundred and fifty is a road nobody averages two hundred on, however hard they
+#: drive it.
+CIRCUIT_DESIGN_SPEED = 200.0 / 3.6
+
+#: How far in or out a varied circuit's vertices are drawn from the ellipse
+#: they sit on, as a fraction of its radius, at full ``variation``. A vertex
+#: inside its neighbours turns the road much further than one in line with
+#: them; a fifth is enough for a near-reversal without folding the loop back
+#: through itself.
+CIRCUIT_EXCURSION = 0.20
+
+#: The shortest step a varied circuit puts between two vertices, as a share of
+#: an even one. Two corners a fifth of an even step apart are a chicane; two on
+#: top of each other are one corner drawn twice.
+CIRCUIT_LEAST_STEP = 0.2
+
+#: How unlike each other the circuit's corners and stretches are, from 0 to 1.
+#:
+#: At 0 the circuit is a regular loop of one corner repeated, laid out to one
+#: design speed, one grade and one smoothing from end to end -- the road every
+#: figure being a single figure gives. Turned up, the vertices are drawn apart
+#: (:func:`circuit_plan`), the corners are drawn from a mix
+#: (:data:`~OpenGLContext_editor.world.character.CORNER_MIX`) so a lap gets a
+#: hairpin and a sweeper as well as the corner it was laid out for, and each
+#: stretch is then laid out for the speed *it* is worth -- which is what puts
+#: bumps on the slow parts, a climb where the land climbs, and a clearing at
+#: the corners a driver has to see round.
+CIRCUIT_VARIETY = 1.0
+
+#: The steepest the circuit may climb where the land climbs harder than
+#: :data:`CIRCUIT_MAX_GRADE`, as a fraction. One in seven is a hill road: a car
+#: gets up it and a driver knows they are on it. Held to the ordinary limit
+#: everywhere the land does not demand more, so this is what a hillside buys
+#: rather than what the road is.
+CIRCUIT_STEEP_GRADE = 0.14
+
+#: How far the circuit's corners lean, at most, as a fraction -- how far the
+#: road's surface rises across it over the distance it rises across.
+#:
+#: :data:`~OpenGLContext.scenegraph.road.MAXIMUM_BANK`, which is the steepest a
+#: **road** is built: this is a road through hill country driven fast, not an
+#: oval. Flat, a corner holding :data:`CIRCUIT_DESIGN_SPEED` needs a radius of
+#: 315 m; leaning this far it needs 257 m, and the corners the landscape
+#: already had hold some ten per cent more speed than they did.
+#:
+#: What each corner actually gets is the lean that *balances* a car at the
+#: design speed and no more (:func:`~OpenGLContext.scenegraph.road.bank_profile`),
+#: capped here: a gentle sweeper leans a little, a tight corner leans to the
+#: limit, and no corner is banked for a speed nothing on it will do. Zero lays
+#: the circuit out flat, which is the road the design speed alone would give.
+CIRCUIT_MAXIMUM_BANK = MAXIMUM_BANK
+
+#: How much looser than the theoretical minimum the circuit's corners are laid
+#: out. The design speed is a **floor**, and a corner at exactly the radius that
+#: floor asks for holds it with nothing to spare -- so a corner built a fraction
+#: tighter than it was drawn holds a fraction less. A plan is drawn at one
+#: spacing, filleted, draped over the ground and re-sampled, and each of those
+#: moves the line by centimetres; a twentieth is more room than all of them
+#: together need, and costs a corner nothing anybody driving it would notice.
+CORNER_MARGIN = 1.05
 
 #: How tall this world's hills are, as a multiple of the shipped landscape's own
 #: relief. At 1 the terrain rises five hundred metres over four kilometres,
@@ -153,6 +233,17 @@ CAUSEWAY_FREEBOARD = 2.5
 #: circuit is a forest road: the trees come up to the verge and the drive is
 #: through them rather than past them.
 ROAD_CLEARANCE = 0.8
+
+#: How much further out than the road's own corridor the trees may be cut back
+#: where a driver needs to see round a bend, in metres. Enough to open a corner
+#: out; not so much that the drive stops being through a forest.
+MOST_CLEARING_BEYOND = 6.0
+
+#: How much more carriageway a sustained climb gets, in metres -- a lane's
+#: worth, so there is room to get past whatever is labouring up it. The corridor
+#: opens out with it, since a wider road inside the same cleared strip is a road
+#: whose new lane runs into the trees.
+CLIMBING_LANE = 3.6
 
 #: Boulders per square metre, before anything is filtered out, and how big they
 #: are. Sparse: a rock is a thing a driver notices, and a landscape strewn with
@@ -307,6 +398,11 @@ class ProceduralWorld:
     tree_height: float = 15.0
     seed: int = 11
     road: bool = True
+    #: What the circuit is posted at, in km/h, repeated along it on speed limit
+    #: signs. How fast a *bend* is worth the road works out for itself; what the
+    #: whole road is posted at is a decision, so it is told. 0 leaves the road
+    #: unposted.
+    posted: int = POSTED_LIMIT
     #: The rivers running through this world, as
     #: :class:`~OpenGLContext_editor.world.hydrology.Channel` beds. Their water
     #: is a layer; their *bed* is already in the height source, because a
@@ -331,6 +427,14 @@ class ProceduralWorld:
     #: sheet of water over it; the circuit is held clear of it by
     #: :data:`CAUSEWAY_FREEBOARD`. Raise it to flood the valleys.
     water_level: float = WATER_LEVEL
+    #: How far the circuit's corners lean, at most, as a fraction
+    #: (:data:`CIRCUIT_MAXIMUM_BANK`). Zero lays it out flat, which gives the
+    #: long sweeping corners the design speed needs with no help from the road.
+    maximum_bank: float = CIRCUIT_MAXIMUM_BANK
+    #: How unlike each other the circuit's corners and stretches are, from 0 to
+    #: 1 (:data:`CIRCUIT_VARIETY`). Zero is the road one figure for everything
+    #: gives.
+    variety: float = CIRCUIT_VARIETY
     #: How tall the hills are, against the shipped landscape's own relief.
     #: Ignored when a ``source`` is given, which carries its own.
     relief: float = RELIEF
@@ -338,10 +442,20 @@ class ProceduralWorld:
     #: the shipped landscape at this world's ``relief``, which is what a world
     #: nobody has authored has.
     source: HeightSource | None = None
-    #: Whether the world's *own* circuit is slid onto ground a road can follow.
-    #: A ``route`` a caller gives is built as it was drawn either way: it is a
-    #: designer's line, and moving it is the designer's decision to make.
-    ease: bool = True
+    #: Whether the world's *own* circuit is slid onto ground a road can
+    #: follow. A ``route`` a caller gives is built as it was drawn either way:
+    #: it is a designer's line, and moving it is the designer's decision to
+    #: make.
+    #:
+    #: Off, because the world's own circuit is drawn too now -- straights
+    #: joined by corners of the radius :data:`CIRCUIT_DESIGN_SPEED` asks for
+    #: (:func:`circuit_plan`) -- and sliding is for a route that was *found*,
+    #: where the shape is an artefact of the search. Slid, the straights come
+    #: back as gentle curves and the overtaking goes with them, since how far
+    #: a driver sees round a bend is what decides whether a pass is on. On this
+    #: landscape it buys nothing to pay for that: the same structures over the
+    #: same share of the lap, the same earthwork, the same grade.
+    ease: bool = False
     #: How the trees are carried: 'field' (a table and its species) or 'tiles'.
     forest: str = 'field'
     #: Where the species' files are; None for the shipped ones.
@@ -350,6 +464,7 @@ class ProceduralWorld:
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
     _terrain: Layer | None = field(default=None, init=False, repr=False)
     _scatter: Any = field(default=None, init=False, repr=False)
+    _character: Any = field(default=None, init=False, repr=False)
     _start_line: StartFinish | None = field(default=None, init=False,
                                             repr=False)
 
@@ -499,16 +614,18 @@ class ProceduralWorld:
         return room
 
     def sign_layer(self) -> SignLayer | None:
-        """The circuit's warning signs, or None for a world with no road.
+        """The circuit's signs, or None for a world with no road.
 
-        Nothing here decides what they say: the alignment does, from its own
-        curvature, its own grade and the structures along it. See
-        :mod:`OpenGLContext_editor.world.signs`.
+        Nothing here decides what the warnings say: the alignment does, from its
+        own curvature, its own grade and the structures along it, and how fast
+        each bend is worth from its own radius. The posted limit is the one
+        thing a road cannot work out about itself, so it is told
+        (:attr:`posted`). See :mod:`OpenGLContext_editor.world.signs`.
         """
         if not self.road:
             return None
         circuit = self.circuit()
-        warnings = warn_of(circuit, CIRCUIT_DESIGN_SPEED)
+        warnings = warn_of(circuit, CIRCUIT_DESIGN_SPEED, limit=self.posted)
         if not warnings:
             return None
         profile = SignProfile(offset=SIGN_OFFSET)
@@ -567,30 +684,123 @@ class ProceduralWorld:
         if self._circuit is None:
             ground = self.natural()
             plan = (np.asarray(self.route, dtype='d') if self.route is not None
-                    else circuit_plan(self.extent * 0.32, self.extent * 0.25))
+                    else circuit_plan(self.extent * 0.32, self.extent * 0.25,
+                                      variation=self.variety, seed=self.seed))
+            # Corners are corners, drawn or generated: a vertex turns the road
+            # through the whole of it at once, which no car can take. Each is
+            # *rounded in place* rather than opened out, so a hairpin drawn to
+            # climb a slope stays a hairpin and its legs stay where they were
+            # put -- and the straights between them stay straight, which is
+            # what a circuit is overtaken on.
+            # Every corner rounded to the same radius is one corner repeated;
+            # the world's *own* circuit draws each from a mix instead, so a lap
+            # has somewhere to brake and somewhere to carry speed. The plan's
+            # own turn angles are untouched -- what changes is how hard each
+            # turn has to be taken.
+            #
+            # A route a caller gave is held to the one radius, because its
+            # corners are already a decision somebody made: a designer who drew
+            # a hairpin meant it, and re-drawing it from a mix is the generator
+            # overruling them. What a drawn route still gets is everything
+            # :meth:`character` derives -- how fast each stretch is for, where
+            # it may climb, where it is left rough, where it is opened out --
+            # all of which follows from the line they drew rather than replacing
+            # it.
+            drawn = self.route is not None
+            plan = hold_corners(
+                plan,
+                minimum=(self.corner_radius() if drawn else
+                         corner_radii(plan, self.corner_radius(),
+                                      spread=self.variety, seed=self.seed)),
+                closed=self.closed, spacing=CIRCUIT_SPACING)
             if self.ease and self.route is None:
+                # And then slid onto ground it can follow, which is worth
+                # doing to a road that is already drivable rather than
+                # instead of making it one.
                 plan = ease_route(
                     plan, ground, reach=CIRCUIT_REACH, rounds=CIRCUIT_EASING,
                     closed=self.closed, spacing=CIRCUIT_SPACING,
-                    minimum_radius=cornering_radius(CIRCUIT_DESIGN_SPEED))
-            else:
-                # A drawn plan's corners are corners: a vertex turns the road
-                # through the whole of it at once, which no car can take. Each
-                # is *rounded in place* rather than opened out, so a hairpin
-                # drawn to climb a slope stays a hairpin and its legs stay
-                # where the designer put them.
-                plan = hold_corners(
-                    plan, minimum=cornering_radius(CIRCUIT_DESIGN_SPEED),
-                    closed=self.closed, spacing=CIRCUIT_SPACING)
+                    minimum_radius=self.corner_radius())
+            character = self._character = self.character(plan, ground)
             line = follow_terrain(plan, ground, spacing=CIRCUIT_SPACING,
-                                  smoothing=CIRCUIT_SMOOTHING,
-                                  maximum_grade=CIRCUIT_MAX_GRADE,
-                                  design_speed=CIRCUIT_DESIGN_SPEED,
+                                  smoothing=character.smoothing,
+                                  maximum_grade=character.grade_limit,
+                                  design_speed=character.design_speed,
                                   minimum_height=WATER_LEVEL + CAUSEWAY_FREEBOARD,
                                   closed=self.closed)
-            self._circuit = RoadPath(line, profile=CIRCUIT_PROFILE,
-                                     ops=self._ops(line))
+            self._circuit = RoadPath(
+                line, profile=CIRCUIT_PROFILE, ops=self._ops(line),
+                bank=bank_profile(line, CIRCUIT_DESIGN_SPEED,
+                                  profile=CIRCUIT_PROFILE,
+                                  maximum=self.maximum_bank,
+                                  closed=self.closed),
+                # The corridor opens out with the carriageway: a lane added
+                # inside the strip that was cleared for two runs into the trees.
+                clearance=character.clearance + character.widening / 2.0,
+                widening=character.widening)
         return self._circuit
+
+    def circuit_character(self) -> Any:
+        """What kind of road each stretch of the built circuit turned out to be.
+
+        The design speed, grade limit, smoothing and cleared width the alignment
+        was actually settled with, one figure per point of it. A road that
+        varies cannot be checked against a single figure -- the question "does a
+        car stay on it" is asked of each stretch at the speed *that* stretch is
+        for -- and this is what answers it.
+        """
+        self.circuit()
+        return self._character
+
+    def character(self, plan: Any, ground: Any) -> Any:
+        """What kind of road each stretch of this circuit is to be.
+
+        The design speed, the grade limit, the smoothing and the cleared width,
+        one figure per point of the alignment about to be built from ``plan``
+        (:func:`~OpenGLContext_editor.world.character.road_character`). At
+        :attr:`variety` 0 all four come out as the world's own single figures,
+        which is the road this generator used to build.
+        """
+        if self.variety <= 0.0:
+            return road_character(
+                plan, ground, design_speed=CIRCUIT_DESIGN_SPEED,
+                spacing=CIRCUIT_SPACING, closed=self.closed,
+                grade_limit=CIRCUIT_MAX_GRADE, steep_grade=CIRCUIT_MAX_GRADE,
+                smoothing=CIRCUIT_SMOOTHING, least_smoothing=CIRCUIT_SMOOTHING,
+                clearance=self._corridor(), most_clearing=self._corridor())
+        return road_character(
+            plan, ground, design_speed=CIRCUIT_DESIGN_SPEED,
+            spacing=CIRCUIT_SPACING, closed=self.closed,
+            grade_limit=CIRCUIT_MAX_GRADE, steep_grade=CIRCUIT_STEEP_GRADE,
+            smoothing=CIRCUIT_SMOOTHING,
+            clearance=self._corridor(),
+            most_clearing=self._corridor() + MOST_CLEARING_BEYOND,
+            climbing_lane=CLIMBING_LANE)
+
+    def corner_radius(self) -> float:
+        """The tightest corner this world's circuit may have, in metres.
+
+        What the design speed asks for once the lean is allowed for
+        (:func:`~OpenGLContext.scenegraph.road.cornering_radius`): a corner
+        banked to :attr:`maximum_bank` holds the speed at a radius a flat one
+        could not, and holding the plan to the flat figure anyway would throw
+        the whole of what the banking buys away.
+
+        It is a **floor on the corner and so on the speed**: nothing tighter is
+        laid, and every corner looser than it -- which is most of them -- holds
+        appreciably more than the design speed rather than exactly it. The floor
+        is kept by :data:`CORNER_MARGIN`, so that what is *built* clears it
+        rather than sitting exactly on it.
+
+        A plan whose legs are too short to fit the fillet keeps its corner and
+        loses radius instead
+        (:func:`~OpenGLContext_editor.world.route.hold_corners`) -- a drawn
+        hairpin stays a hairpin. Such a corner is slower than the design speed,
+        and the road says so: what it is signed at comes from the radius and the
+        lean it ended up with.
+        """
+        return CORNER_MARGIN * cornering_radius(CIRCUIT_DESIGN_SPEED,
+                                                bank=self.maximum_bank)
 
     def _ops(self, line: np.ndarray) -> Any:
         """What is built along the alignment, point by point."""
@@ -607,7 +817,7 @@ class ProceduralWorld:
     def circuit_layer(self) -> RoadLayer:
         return RoadLayer(self.circuit(), wetness=self.wetness,
                          ground=self.natural(), shade=self.canopy_shade(),
-                         start=self.start_station())
+                         start=self.start_station(), posted=self.posted)
 
     def terrain(self) -> Layer:
         """The ground, as whichever kind of terrain layer the world asked for."""
@@ -680,7 +890,9 @@ class ProceduralWorld:
             layers=list(GROUND_LAYERS), rules=list(GROUND_RULES),
             road=self.circuit() if self.road else None,
             road_layer=GROUND_LAYERS.index('dirt'),
-            road_corridor=self._corridor(), name='terrain')
+            road_corridor=self._corridor(),
+            road_cut=(self._bore_corridor(self.circuit(), self._corridor())
+                      if self.road else None), name='terrain')
 
     def _corridor(self) -> float:
         """How far out the road's own ground reaches, in metres.
@@ -691,6 +903,19 @@ class ProceduralWorld:
         """
         across: float = CIRCUIT_PROFILE.total_width
         return across / 2.0 + ROAD_CLEARANCE
+
+    def widest_corridor(self) -> float:
+        """The widest the road's own ground gets, in metres from the centreline.
+
+        What a splat map or a bare strip has to be painted out to: the corridor
+        is not one width any more, and painting it at the narrow one leaves the
+        ground cover growing over the extra lane on every climb.
+        """
+        if not self.road:
+            return self._corridor()
+        beside = self.circuit().clearance
+        return (self._corridor() if beside is None
+                else float(np.max(beside)))
 
     def height_fn_at(self) -> Any:
         """The ground as a function of the spacing a tile samples it at.
@@ -811,24 +1036,32 @@ class ProceduralWorld:
         if not self.road:
             return np.ones(len(points), dtype=bool)
         circuit = self.circuit()
-        corridor = circuit.profile.total_width / 2.0 + ROAD_CLEARANCE
+        # The corridor the road is built inside, opened out where a driver has
+        # to see round the bend they are on -- so a fast corner is a clearing
+        # and the straight after it is a road through trees.
+        along = circuit.clearance_along()
+        corridor = (np.full(len(circuit.ops) - 1, self._corridor())
+                    if along is None else along)
         reach = corridor + CROWN_RADIUS
         cut = self._bore_corridor(circuit, corridor)
         found = circuit.sample(points[:, 0], points[:, 2],
-                               radius=max(reach, cut.max()) * 1.5)
+                               radius=max(reach.max(), cut.max()) * 1.5)
         ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
                             dtype='d')
         carried = found.height - ground > CARRIED_ABOVE
-        cleared = np.maximum(np.where(carried, reach, corridor),
-                             cut[found.segment])
+        segment = found.segment
+        cleared = np.maximum(np.where(carried, reach[segment],
+                                      corridor[segment]),
+                             cut[segment])
         return np.asarray(found.distance > cleared)
 
-    def _bore_corridor(self, circuit: Any, corridor: float) -> np.ndarray:
+    def _bore_corridor(self, circuit: Any, corridor: Any) -> np.ndarray:
         """How far out the ground is dug away at each segment of the road.
 
-        The corridor for a stretch on the land, and the corridor plus the
-        earthwork's own batter for one inside a hill: how deep the road is
-        under the land, over the slope the cut stands at.
+        The corridor for a stretch on the land -- one figure or one per segment
+        -- and the corridor plus the earthwork's own batter for one inside a
+        hill: how deep the road is under the land, over the slope the cut stands
+        at.
         """
         depth = np.zeros(len(circuit.ops), dtype='d')
         bore = np.array([op is Op.TUNNEL for op in circuit.ops], dtype=bool)
@@ -838,7 +1071,8 @@ class ProceduralWorld:
                                 dtype='d')
             depth = np.where(bore, np.maximum(ground - points[:, 1], 0.0), 0.0)
         along = np.maximum(depth[:-1], depth[1:]) / EARTHWORK_SLOPE
-        return np.where(along > 0.0, corridor + along, corridor)
+        beside = np.broadcast_to(np.asarray(corridor, dtype='d'), along.shape)
+        return np.where(along > 0.0, beside + along, beside)
 
 
 def _rock_kind(index: int) -> str:
@@ -857,21 +1091,79 @@ def _slopes(height_fn: Any, positions: np.ndarray, step: float = 8.0
     return np.hypot(dx, dz)
 
 
-def circuit_plan(radius_x: float, radius_z: float, points: int = 360,
-                 harmonics: Sequence[tuple[int, float]] = CIRCUIT_HARMONICS
-                 ) -> np.ndarray:
-    """A closed race circuit as an (N,2) plan, smooth by construction.
+def circuit_plan(radius_x: float, radius_z: float,
+                 harmonics: Sequence[tuple[int, float]] = CIRCUIT_HARMONICS,
+                 corners: int = CIRCUIT_CORNERS,
+                 variation: float = 0.0, seed: int = 0) -> np.ndarray:
+    """A closed race circuit as a plan **as drawn**: one point per corner.
 
-    An ellipse whose radius is modulated by a few harmonics of the angle: the
-    result has straights, sweepers and a slow complex, and -- being a sum of
-    sinusoids -- has no corner anywhere for the alignment to have to round off.
+    Straights joined by corners, which is what a circuit is.
+
+    ``corners`` points are placed around an ellipse whose radius is modulated
+    by a few harmonics of the angle, so no two are the same distance out and
+    the circuit is not a regular polygon. What comes back is those points and
+    nothing between them: a vertex is a corner, which is what
+    :func:`~OpenGLContext_editor.world.route.hold_corners` reads a plan as, and
+    it rounds each to a radius a car can take using the whole length of the
+    legs either side. Handed a plan already re-sampled along its straights it
+    has millimetres of leg to work with and leaves the corner where it was.
+
+    **Straights are what a circuit is passed on.** How far a driver can see
+    round a bend of radius *r* is `sqrt(8 * r * clear)`, and a road cut through
+    a wood offers a hundred-odd metres of that against the two hundred an
+    overtake at racing speed needs -- so a circuit that is one continuous bend
+    is a circuit nobody overtakes on, and the traffic on it is scenery to queue
+    behind. A plan of straights has somewhere to do it.
+
+    ``variation`` from 0 to 1 is **how unlike each other the corners are**. At 0
+    the vertices are evenly spaced round the ellipse and every corner turns
+    through much the same angle over much the same length of leg, which is one
+    corner repeated: a driver who has taken the first has taken them all. Turned
+    up, the *angles between* the vertices and their distances out are drawn
+    apart, so the lap gets a long straight somewhere and a pair of corners in
+    quick succession elsewhere, and the corners themselves turn through
+    anything from a kink to most of a reversal. ``seed`` picks which lap; the
+    same seed is always the same lap.
+
+    What comes back is still a plan -- vertices and nothing between them -- so
+    how *tight* each of those corners is remains
+    :func:`~OpenGLContext_editor.world.route.hold_corners`'s to say, and it
+    takes a radius per corner.
     """
-    angle = np.linspace(0.0, 2.0 * np.pi, points, endpoint=False)
-    radius = np.ones_like(angle)
+    count = max(int(corners), 3)
+    spread = float(np.clip(variation, 0.0, 1.0))
+    turn = np.linspace(0.0, 2.0 * math.pi, count, endpoint=False)
+    if spread > 0.0:
+        turn = _uneven_turns(count, spread, seed)
+    radius = np.ones_like(turn)
     for order, amount in harmonics:
-        radius = radius + amount * np.sin(order * angle + order)
-    return np.stack([radius_x * radius * np.cos(angle),
-                     radius_z * radius * np.sin(angle)], axis=-1)
+        radius = radius + amount * np.sin(order * turn + order)
+    if spread > 0.0:
+        # Vertices drawn in and out as well as round: a vertex well inside its
+        # two neighbours turns the road much further than one in line with
+        # them, which is what puts a hairpin on a lap of sweepers.
+        draw = np.random.default_rng(seed + 1).uniform(-1.0, 1.0, count)
+        radius = radius * (1.0 + spread * CIRCUIT_EXCURSION * draw)
+    apex: np.ndarray = np.stack([radius_x * radius * np.cos(turn),
+                                 radius_z * radius * np.sin(turn)], axis=-1)
+    return apex
+
+
+def _uneven_turns(count: int, spread: float, seed: int) -> np.ndarray:
+    """Angles round the circuit, drawn apart but still going once round.
+
+    The *steps* between vertices are what is varied, and then normalised back
+    to a full turn: a long step is a straight and two short ones together are a
+    pair of corners a driver has no time between. Held above
+    :data:`CIRCUIT_LEAST_STEP` of an even share, because two vertices on top of
+    each other are one corner drawn twice rather than a chicane.
+    """
+    least = CIRCUIT_LEAST_STEP
+    drawn = np.random.default_rng(seed).uniform(least, 2.0 - least, count)
+    steps = 1.0 + spread * (drawn - 1.0)
+    steps = steps / steps.sum() * 2.0 * math.pi
+    found: np.ndarray = np.concatenate([[0.0], np.cumsum(steps)[:-1]])
+    return found
 
 
 def conifer_mesh(height: float = 9.0, seed: int = 11) -> list[PBRMesh]:

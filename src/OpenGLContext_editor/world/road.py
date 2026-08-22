@@ -36,12 +36,16 @@ import numpy as np
 from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.road import (
+    MAXIMUM_BANK,
     RoadProfile,
+    bank_profile,
+    banked_sections,
     morphed_sections,
     resample_polyline,
     road_mesh,
     road_texture,
     tarmac_material,
+    widened_sections,
 )
 from OpenGLContext.scenegraph.roadworks import (
     BridgeProfile,
@@ -72,11 +76,19 @@ class RoadSample(NamedTuple):
     ``height`` how high the road is at the nearest place on it, and ``segment``
     which segment of the centreline that place is on -- which is how a caller
     finds out what is built there.
+
+    ``side`` is which hand of the road the point is on, +1 for its right and -1
+    for its left, and ``bank`` how far the road leans at that place. The two go
+    together: a level road's two verges are at one height and a banked one's are
+    not, so anything meeting the road out at a distance has to know which side
+    of it that distance is on.
     """
 
     distance: np.ndarray
     height: np.ndarray
     segment: np.ndarray
+    side: np.ndarray
+    bank: np.ndarray
 
 
 #: Below this many samples a query is answered in one go: grouping them by
@@ -111,6 +123,7 @@ FORMATION_DEPTH = 0.12
 #: of the vertices on the same road.
 FINEST_SPACING = 3.0
 SPACING_PER_ERROR = 1.5
+
 
 #: How far outside a tile the road is still looked for, as a multiple of the
 #: road's half-width, when deciding whether the tile has any road in it at all.
@@ -151,6 +164,18 @@ SURFACE_IMAGE = 'road-surface.png'
 TRANSITION_LENGTH = 24.0
 
 
+def _bank_array(bank: Any, count: int) -> np.ndarray:
+    """How far the road leans at each point, defaulting to not at all."""
+    if bank is None:
+        return np.zeros(count)
+    found = np.asarray(bank, dtype='d').reshape(-1)
+    if len(found) != count:
+        raise ValueError(
+            "a road of %d points needs %d leans, not %d"
+            % (count, count, len(found)))
+    return found
+
+
 def _ops_array(ops: Any, count: int) -> np.ndarray:
     """What is built at each centreline point, defaulting to plain dirt."""
     if ops is None:
@@ -173,12 +198,37 @@ class RoadPath:
     """
 
     def __init__(self, points: Any, profile: RoadProfile | None = None,
-                 ops: Any = None) -> None:
+                 ops: Any = None, bank: Any = None,
+                 clearance: Any = None, widening: Any = None) -> None:
         line = np.asarray(points, dtype='d').reshape(-1, 3)
         if len(line) < 2:
             raise ValueError("a road needs a centreline of at least two points")
         self.points = line
         self.profile = profile or RoadProfile()
+        #: How far the road leans at each point of the centreline, as a
+        #: fraction and signed the way
+        #: :func:`~OpenGLContext.scenegraph.road.plan_curvature` is. Zero from
+        #: end to end for a road whose corners are flat, which is what a road
+        #: nobody laid out for speed has.
+        self.bank: np.ndarray = _bank_array(bank, len(line))
+        #: Whether any of it leans at all. A flat road costs nothing extra
+        #: anywhere the lean would otherwise have to be carried.
+        self.banked = bool(np.any(self.bank))
+        #: How far from the centreline the ground beside the road is cleared,
+        #: at each point, in metres -- the corridor the road is built inside,
+        #: opened out where a driver has to see round a bend
+        #: (:func:`~OpenGLContext_editor.world.character.road_character`). None
+        #: for a road whose corridor is the same width from end to end, which
+        #: is what a caller that never asked for one has.
+        self.clearance: np.ndarray | None = (
+            None if clearance is None
+            else _bank_array(clearance, len(line)))
+        #: How much more carriageway the road has at each point, in metres --
+        #: zero for its own width, a lane's worth on a stretch built to be
+        #: passed on.
+        self.widening: np.ndarray = _bank_array(widening, len(line))
+        #: Whether any of it is wider than the road it is on.
+        self.wider = bool(np.any(self.widening))
         #: What is built at each point of the centreline. A road that has not
         #: been through :func:`~OpenGLContext_editor.world.structures.choose_structures`
         #: is on dirt from end to end, which is the ordinary case and the one
@@ -244,12 +294,20 @@ class RoadPath:
         own outside plugging it, and that is a terrain feature rather than a
         road one.
 
+        **Either end in a bore is enough.** A ground mesh draws straight lines
+        between its samples, so what the opening looks like is decided by the
+        sample *at the mouth* -- and the segment straddling a portal has one end
+        outside it. Reshape only the segments with both ends inside and that
+        sample keeps the hillside's own height: the cut starts a segment late,
+        and the line from the hill down to it is a wall across the road with the
+        arch standing in the air behind it.
+
         Not a deck: under one the same move would raise a pillar of ground to
         meet a road that is forty metres up.
         """
         on = self.segment_on_ground
         bore = np.array([op is Op.TUNNEL for op in self.ops], dtype=bool)
-        found: np.ndarray = on | (bore[:-1] & bore[1:])
+        found: np.ndarray = on | bore[:-1] | bore[1:]
         return found
 
     def ops_at(self, stations: Any) -> np.ndarray:
@@ -266,6 +324,39 @@ class RoadPath:
                      0, len(self.ops) - 1)
         found: np.ndarray = self.ops[at]
         return found
+
+    def widening_at(self, stations: Any) -> np.ndarray:
+        """How much wider the carriageway is, at each distance along the road.
+
+        The companion to :meth:`bank_at`: a tile carries the road at its own
+        spacing, and how wide it is was worked out on the full alignment.
+        """
+        return np.interp(np.asarray(stations, dtype='d'), self.stations,
+                         self.widening)
+
+    def bank_at(self, stations: Any) -> np.ndarray:
+        """How far the road leans at each of these distances along it.
+
+        The companion to :meth:`ops_at`, and there for the same reason: a tile
+        carries the road at its own spacing and the lean was worked out on the
+        full-density alignment. Interpolated rather than stepped, because a lean
+        is a continuous thing and a coarse tile that took the nearest point
+        behind it would carry a road that rolled in steps.
+        """
+        return np.interp(np.asarray(stations, dtype='d'), self.stations,
+                         self.bank)
+
+    def clearance_along(self) -> np.ndarray | None:
+        """How wide the cleared corridor is beside each *segment*, in metres.
+
+        The wider of the corridor at the segment's two ends, so a tree is kept
+        out of a clearing that either end of the segment it is beside asks for
+        rather than slipping into the join between them. None for a road whose
+        corridor never changes width.
+        """
+        if self.clearance is None:
+            return None
+        return np.maximum(self.clearance[:-1], self.clearance[1:])
 
     def structure_runs(self) -> list[tuple[Op, float, float]]:
         """Every stretch that is not plain dirt, as ``(op, from, to)`` metres.
@@ -286,7 +377,7 @@ class RoadPath:
 
     def bounds(self) -> BoundingBox:
         """The centreline's box, widened by the road's own half-width."""
-        half = self.profile.total_width / 2.0
+        half = self.widest() / 2.0
         box = BoundingBox.of_points(self.points)
         assert box is not None                   # the constructor refuses an empty line
         return BoundingBox((box.minimum[0] - half, box.minimum[1] - half,
@@ -330,11 +421,14 @@ class RoadPath:
         distance = np.full(flat_x.shape, np.inf)
         height = np.zeros(flat_x.shape)
         segment = np.zeros(flat_x.shape, dtype=np.intp)
+        side = np.ones(flat_x.shape)
+        bank = np.zeros(flat_x.shape)
         for rows, segments in self._batches(flat_x, flat_z, radius):
-            distance[rows], height[rows], segment[rows] = self._measure(
-                flat_x[rows], flat_z[rows], segments)
+            (distance[rows], height[rows], segment[rows], side[rows],
+             bank[rows]) = self._measure(flat_x[rows], flat_z[rows], segments)
         return RoadSample(distance.reshape(shape), height.reshape(shape),
-                          segment.reshape(shape))
+                          segment.reshape(shape), side.reshape(shape),
+                          bank.reshape(shape))
 
     def index_cells(self, x: Any, z: Any, radius: float | None = None) -> int:
         """How many groups the index splits a query into.
@@ -365,8 +459,9 @@ class RoadPath:
                    for rows, segments in self._batches(flat_x, flat_z, radius))
 
     def _measure(self, x: np.ndarray, z: np.ndarray, segments: np.ndarray
-                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Distance, road height and segment for a batch, against these."""
+                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+                            np.ndarray]:
+        """Distance, height, segment, side and lean for a batch, against these."""
         start = self._start[segments]
         delta = self._delta[segments]
         length2 = self._length2[segments]
@@ -380,9 +475,22 @@ class RoadPath:
         gaps = np.hypot(x[:, None] - near_x, z[:, None] - near_z)
         best = gaps.argmin(axis=1)
         rows = np.arange(len(x))
+        along = t[rows, best]
+        chosen = segments[best]
+        run = self._delta[chosen]
+        # Which hand of the road the point is on: the road's right vector in
+        # plan is the segment turned a quarter clockwise, so the sign of the
+        # offset along it says which side. A point exactly on the centreline
+        # takes the right, since it has to take one and the crown is at the
+        # same height either way.
+        away_x = x - (start[best, 0] + along * run[:, 0])
+        away_z = z - (start[best, 2] + along * run[:, 2])
+        side = np.where(run[:, 0] * away_z - run[:, 2] * away_x < 0.0, -1.0, 1.0)
+        lean = self.bank[chosen] + along * (self.bank[chosen + 1]
+                                            - self.bank[chosen])
         return (gaps[rows, best],
-                start[best, 1] + t[rows, best] * delta[best, 1],
-                segments[best])
+                start[best, 1] + along * delta[best, 1],
+                chosen, side, lean)
 
     def _batches(self, x: np.ndarray, z: np.ndarray, radius: float | None
                  ) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -453,20 +561,57 @@ class RoadPath:
         candidates: np.ndarray = np.nonzero(inside)[0]
         return candidates
 
-    def section_offset(self, distance: Any) -> np.ndarray:
+    def section_offset(self, distance: Any, side: Any = 1.0,
+                       bank: Any = 0.0) -> np.ndarray:
         """How far below the centreline the road's surface is, at a distance out.
 
-        The profile's own answer
-        (:meth:`~OpenGLContext.scenegraph.road.RoadProfile.section_offset`),
-        which is where it belongs: the cut across a road is a property of the
-        road's section and not of the line it is swept along.
+        ``distance`` is measured in plan, ``side`` is which hand of the road it
+        is on (+1 for the right) and ``bank`` how far the road leans there --
+        all three as :meth:`sample` gives them, so a caller hands the answer
+        back in.
+
+        The cut across a road is a property of its section
+        (:meth:`~OpenGLContext.scenegraph.road.RoadProfile.section_offset`) and
+        not of the line it is swept along, so that is where the shape comes
+        from. What is here is the lean, which the line *does* own: a banked
+        road's two verges are as far apart in height as the road is wide, and
+        the ground meeting one of them has to be told which.
+
+        Past the road's own edge the answer is held at the verge, level road or
+        banked, since past there the surface is the ground rather than the road.
         """
-        found: np.ndarray = self.profile.section_offset(distance)
-        return found
+        distance = np.asarray(distance, dtype='d')
+        if not self.banked:
+            # A road with no lean in it anywhere is asked this of every ground
+            # sample of every tile it crosses. The cut alone is the answer, and
+            # the arithmetic that would resolve a lean is arithmetic over
+            # millions of zeroes.
+            found: np.ndarray = self.profile.section_offset(
+                np.minimum(distance, self.profile.total_width / 2.0))
+            return found
+        lean = np.asarray(bank, dtype='d')
+        # The pavement rotates about the crown, so a cut `across` wide along a
+        # leaning surface is `across * upright` wide in plan.
+        upright = 1.0 / np.hypot(1.0, lean)
+        across = np.minimum(distance / upright,
+                            self.profile.total_width / 2.0)
+        leaning: np.ndarray = (
+            self.profile.section_offset(across, lean) * upright
+            - np.asarray(side, dtype='d') * across * lean * upright)
+        return leaning
+
+    def widest(self) -> float:
+        """Across everything the road occupies at its widest, verge to verge.
+
+        The profile's own width, plus whatever the widest stretch built to be
+        passed on adds to it: a road that reaches past its nominal width is a
+        road whose tile is a metre short of it at the edge.
+        """
+        return float(self.profile.total_width + self.widening.max())
 
     def crosses(self, region: BoundingBox, margin: float = 0.0) -> bool:
         """Whether the road comes within ``margin`` of a region, in plan."""
-        half = self.profile.total_width / 2.0 + margin
+        half = self.widest() / 2.0 + margin
         return bool(np.any(
             (self._low[:, 0] - half <= region.maximum[0])
             & (self._high[:, 0] + half >= region.minimum[0])
@@ -475,10 +620,10 @@ class RoadPath:
 
 
 def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
-                   smoothing: float = 60.0, clearance: float = 0.0,
-                   maximum_grade: float | None = None,
+                   smoothing: Any = 60.0, clearance: float = 0.0,
+                   maximum_grade: Any = None,
                    minimum_height: float | None = None,
-                   design_speed: float | None = None,
+                   design_speed: Any = None,
                    closed: bool = False) -> np.ndarray:
     """A drawn line turned into an alignment a car can drive.
 
@@ -505,6 +650,16 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
     ``closed`` says the course is a circuit that returns to its start. The
     smoothing then wraps around the join and the last point is made to match
     the first exactly, so a lap has no step in it at the start line.
+
+    **``smoothing``, ``maximum_grade`` and ``design_speed`` may each be one
+    figure or one per re-sampled point**, which is what makes a road that is not
+    the same road all the way round: a stretch left rough where the rest is
+    ironed flat, a climb steeper than the road it is on, a slow corner whose
+    crests are rounded for the speed anybody will actually take it at rather
+    than for the speed of the straight before it. Each is still a *limit* over
+    the whole road -- what varies is how tight it is where. A per-point figure
+    has to be as long as the alignment ``spacing`` produces; see
+    :func:`points_along` for how many that is.
     """
     plan = np.asarray(course, dtype='d')
     if plan.shape[1] == 2:
@@ -513,23 +668,24 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
         plan = np.vstack([plan, plan[:1]])
     line: np.ndarray = resample_polyline(plan, spacing)
     line[:, 1] = np.asarray(height_fn(line[:, 0], line[:, 2]), dtype='d')
-    if smoothing > 0 and len(line) > 2:
-        line[:, 1] = _smooth(line[:, 1], window=max(int(smoothing / spacing), 1),
-                             closed=closed)
-    bend = (curvature_limit(design_speed) if design_speed is not None
-            else float('inf'))
-    if maximum_grade is not None or np.isfinite(bend):
-        line[:, 1] = _settle_profile(line, maximum_grade, bend, closed)
+    window = _per_point(smoothing, len(line), 'smoothing') / max(spacing, 1e-9)
+    if float(window.max()) > 1.0 and len(line) > 2:
+        line[:, 1] = _smooth(line[:, 1], window, closed=closed)
+    grade = (None if maximum_grade is None
+             else _per_point(maximum_grade, len(line), 'grade limits'))
+    bend = (float('inf') if design_speed is None else curvature_limit(
+        _per_point(design_speed, len(line), 'design speeds')))
+    if grade is not None or np.any(np.isfinite(bend)):
+        line[:, 1] = _settle_profile(line, grade, bend, closed)
     if minimum_height is not None:
         line[:, 1] = np.maximum(line[:, 1], minimum_height)
-        if maximum_grade is not None:
-            line[:, 1] = _ramp_up_to_grade(line, maximum_grade, closed=closed)
-        if np.isfinite(bend):
+        if grade is not None:
+            line[:, 1] = _ramp_up_to_grade(line, grade, closed=closed)
+        if np.any(np.isfinite(bend)):
             # The floor put corners back into the profile where it lifted the
             # road; round them off again, keeping the road above the water.
-            floor = line[:, 1].copy()
-            line[:, 1] = _settle_profile(line, maximum_grade, bend, closed)
-            line[:, 1] = np.maximum(line[:, 1], floor.min() * 0.0 + minimum_height)
+            line[:, 1] = _settle_profile(line, grade, bend, closed)
+            line[:, 1] = np.maximum(line[:, 1], minimum_height)
     line[:, 1] += clearance
     if closed:
         # The ends are the same place, so give them the same height rather than
@@ -538,7 +694,35 @@ def follow_terrain(course: Any, height_fn: HeightFn, spacing: float = 5.0,
     return line
 
 
-def curvature_limit(design_speed: float,
+def points_along(course: Any, spacing: float, closed: bool = False) -> int:
+    """How many points :func:`follow_terrain` will re-sample a plan into.
+
+    A caller working out a limit *per point* -- a grade that varies, a design
+    speed that varies -- needs to know how many points there will be before
+    there is an alignment to count. This is that, from the same plan and the
+    same spacing, so the two cannot disagree.
+    """
+    plan = np.asarray(course, dtype='d')
+    if plan.shape[1] == 2:
+        plan = np.stack([plan[:, 0], np.zeros(len(plan)), plan[:, 1]], axis=-1)
+    if closed and not np.allclose(plan[0], plan[-1]):
+        plan = np.vstack([plan, plan[:1]])
+    return len(resample_polyline(plan, spacing))
+
+
+def _per_point(value: Any, count: int, what: str) -> np.ndarray:
+    """A limit as one figure per point, from one figure or a whole array."""
+    found = np.asarray(value, dtype='d')
+    if found.ndim == 0:
+        return np.full(count, float(found))
+    found = found.reshape(-1)
+    if len(found) != count:
+        raise ValueError("an alignment of %d points needs %d %s, not %d"
+                         % (count, count, what, len(found)))
+    return found
+
+
+def curvature_limit(design_speed: Any,
                     weight_loss: float = CREST_WEIGHT_LOSS) -> float:
     """The sharpest crest a road may have, as change of grade per metre.
 
@@ -547,16 +731,21 @@ def curvature_limit(design_speed: float,
     needs ``R >= v**2 / (g * weight_loss)``. Change of grade per metre is the
     reciprocal of that radius, which is the form the alignment is checked in.
 
-    ``design_speed`` is in metres per second. A road with no design speed has no
+    ``design_speed`` is in metres per second, one figure or one per point of an
+    alignment whose speed varies along it. A road with no design speed has no
     limit -- there is always some speed at which any crest launches a car, and
     the answer to that is to say how fast the road is meant to be driven.
     """
-    if design_speed <= 0 or weight_loss <= 0:
-        return float('inf')
-    return GRAVITY * weight_loss / (design_speed * design_speed)
+    speed = np.asarray(design_speed, dtype='d')
+    if weight_loss <= 0:
+        return np.inf if speed.ndim else float('inf')
+    with np.errstate(divide='ignore'):
+        found = np.where(speed > 0, GRAVITY * weight_loss / (speed * speed),
+                         np.inf)
+    return found if speed.ndim else float(found)
 
 
-def _limit_curvature(line: np.ndarray, maximum: float,
+def _limit_curvature(line: np.ndarray, maximum: Any,
                      closed: bool = False) -> np.ndarray:
     """Round off the changes of grade to ``maximum`` per metre.
 
@@ -569,7 +758,8 @@ def _limit_curvature(line: np.ndarray, maximum: float,
     """
     heights = np.asarray(line[:, 1], dtype='d').copy()
     count = len(heights)
-    if count < 3 or not np.isfinite(maximum):
+    allowed = np.broadcast_to(np.asarray(maximum, dtype='d'), (count,))
+    if count < 3 or not np.any(np.isfinite(allowed)):
         return heights
     steps = _steps(line, closed)
     if closed:
@@ -584,7 +774,7 @@ def _limit_curvature(line: np.ndarray, maximum: float,
     for _sweep in range(CURVATURE_SWEEPS):
         bend = ((np.roll(heights, -1) - heights) / forward
                 - (heights - np.roll(heights, 1)) / back)
-        excess = np.abs(bend) - maximum * span
+        excess = np.abs(bend) - allowed * span
         shift = np.where(excess > 0.0,
                          np.sign(bend) * excess * CURVATURE_RELAXATION * lever,
                          0.0)
@@ -596,8 +786,8 @@ def _limit_curvature(line: np.ndarray, maximum: float,
     return heights
 
 
-def _settle_profile(line: np.ndarray, maximum_grade: float | None,
-                    maximum_curvature: float, closed: bool) -> np.ndarray:
+def _settle_profile(line: np.ndarray, maximum_grade: Any,
+                    maximum_curvature: Any, closed: bool) -> np.ndarray:
     """Bring an alignment inside the grade *and* the curvature limit.
 
     Rounding a crest off can steepen what leads to it, and clipping a grade puts
@@ -608,7 +798,9 @@ def _settle_profile(line: np.ndarray, maximum_grade: float | None,
     too steep is still a road and a road with a kink in it is a ramp.
     """
     heights = line[:, 1]
-    if not np.isfinite(maximum_curvature):
+    curvature = np.broadcast_to(np.asarray(maximum_curvature, dtype='d'),
+                                (len(line),))
+    if not np.any(np.isfinite(curvature)):
         return (_limit_grade(line, maximum_grade, closed=closed)
                 if maximum_grade is not None else heights)
     # A closed course arrives with its first point repeated at the end, so the
@@ -617,32 +809,53 @@ def _settle_profile(line: np.ndarray, maximum_grade: float | None,
     # it actually has, and the repeat takes the answer at the end.
     repeated = closed and bool(np.allclose(line[0, [0, 2]], line[-1, [0, 2]]))
     working = (line[:-1] if repeated else line).copy()
+    grade = maximum_grade
+    if repeated:
+        # The repeat is the first point over again, and so is its limit.
+        curvature = curvature[:-1]
+        if grade is not None and np.asarray(grade).ndim:
+            grade = np.asarray(grade, dtype='d')[:-1]
     for _round in range(SETTLING_ROUNDS):
-        if maximum_grade is not None:
-            working[:, 1] = _limit_grade(working, maximum_grade, closed=closed)
-        working[:, 1] = _limit_curvature(working, maximum_curvature, closed=closed)
+        if grade is not None:
+            working[:, 1] = _limit_grade(working, grade, closed=closed)
+        working[:, 1] = _limit_curvature(working, curvature, closed=closed)
     if repeated:
         return np.concatenate([working[:, 1], working[:1, 1]])
     return working[:, 1]
 
 
-def _smooth(values: np.ndarray, window: int, closed: bool = False) -> np.ndarray:
-    """A moving average over an alignment's heights.
+def _smooth(values: np.ndarray, window: Any, closed: bool = False) -> np.ndarray:
+    """A moving average over an alignment's heights, in points either side.
+
+    ``window`` may be one width or **one per point**, which is what leaves the
+    ground's own shape in one stretch of a road and irons it out of the next: a
+    road smoothed to one width from end to end has one texture, and a lap of it
+    feels the same everywhere.
 
     Edge-padded, so the first and last points of an open road stay on the ground
     the designer put them on; wrap-padded for a circuit, so the smoothing runs
     through the join instead of flattening towards it from both sides.
+
+    A box filter of a width that changes per point is a difference of running
+    sums rather than a convolution -- one pass over the alignment whatever the
+    widths are, and exactly the average of the points each one covers.
     """
-    if window <= 1:
+    widths = np.asarray(window, dtype='d').reshape(-1)
+    reach = np.maximum((widths // 2).astype(np.intp), 0)
+    if widths.size == 1:
+        reach = np.full(len(values), int(reach[0]))
+    if not len(reach) or int(reach.max()) < 1:
         return values
-    padding = window // 2
+    padding = int(reach.max())
     padded = np.pad(values, padding, mode='wrap' if closed else 'edge')
-    kernel = np.ones(2 * padding + 1) / (2 * padding + 1)
-    smoothed: np.ndarray = np.convolve(padded, kernel, mode='valid')[:len(values)]
-    return smoothed
+    running = np.concatenate([[0.0], np.cumsum(padded)])
+    at = np.arange(len(values)) + padding
+    low, high = at - reach, at + reach + 1
+    found: np.ndarray = (running[high] - running[low]) / (high - low)
+    return found
 
 
-def _limit_grade(line: np.ndarray, maximum: float,
+def _limit_grade(line: np.ndarray, maximum: Any,
                  closed: bool = False) -> np.ndarray:
     """Cap the climb between consecutive points, forwards then backwards.
 
@@ -658,14 +871,19 @@ def _limit_grade(line: np.ndarray, maximum: float,
     heights = line[:, 1].copy()
     steps = _steps(line, closed)
     count = len(heights)
+    # A step joins two points, and the limit over it is the gentler of what the
+    # two allow: a stretch permitted to climb steeply does not drag the stretch
+    # it joins up with it.
+    allowed = np.broadcast_to(np.asarray(maximum, dtype='d'), (count,))
+    over = np.minimum(allowed, np.roll(allowed, -1))
     for index in _forward(count, closed):
         behind = (index - 1) % count
-        limit = maximum * steps[behind]
+        limit = over[behind] * steps[behind]
         heights[index] = np.clip(heights[index], heights[behind] - limit,
                                  heights[behind] + limit)
     for index in _backward(count, closed):
         ahead = (index + 1) % count
-        limit = maximum * steps[index]
+        limit = over[index] * steps[index]
         heights[index] = np.clip(heights[index], heights[ahead] - limit,
                                  heights[ahead] + limit)
     return heights
@@ -696,7 +914,7 @@ def _backward(count: int, closed: bool) -> list[int]:
     return [index % count for index in range(2 * count - 2, -2, -1)]
 
 
-def _ramp_up_to_grade(line: np.ndarray, maximum: float,
+def _ramp_up_to_grade(line: np.ndarray, maximum: Any,
                       closed: bool = False) -> np.ndarray:
     """Raise whatever is needed so no step exceeds the grade, lowering nothing.
 
@@ -707,14 +925,16 @@ def _ramp_up_to_grade(line: np.ndarray, maximum: float,
     heights = line[:, 1].copy()
     steps = _steps(line, closed)
     count = len(heights)
+    allowed = np.broadcast_to(np.asarray(maximum, dtype='d'), (count,))
+    over = np.minimum(allowed, np.roll(allowed, -1))
     for index in _forward(count, closed):
         behind = (index - 1) % count
         heights[index] = max(heights[index],
-                             heights[behind] - maximum * steps[behind])
+                             heights[behind] - over[behind] * steps[behind])
     for index in _backward(count, closed):
         ahead = (index + 1) % count
         heights[index] = max(heights[index],
-                             heights[ahead] - maximum * steps[index])
+                             heights[ahead] - over[index] * steps[index])
     return heights
 
 
@@ -764,7 +984,7 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     The result is an ordinary height function: everything that samples terrain
     picks up the road's earthworks by being pointed at this instead.
     """
-    half = path.profile.total_width / 2.0
+    half = path.widest() / 2.0
     reach = half + widening + maximum_earthwork
 
     laid = path.on_ground.all()
@@ -772,12 +992,12 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
 
     def conformed(x: Any, z: Any) -> np.ndarray:
         natural = np.asarray(height_fn(x, z), dtype='d')
-        distance, road_height, segment = path.sample(x, z, radius=reach)
-        distance = distance.reshape(natural.shape)
-        road_height = road_height.reshape(natural.shape)
+        found = path.sample(x, z, radius=reach)
+        distance = found.distance.reshape(natural.shape)
+        road_height = found.height.reshape(natural.shape)
         near = distance < reach
         if not laid:
-            near = near & reshaped[segment.reshape(natural.shape)]
+            near = near & reshaped[found.segment.reshape(natural.shape)]
         if not np.any(near):
             return natural
         # Beside a climbing road, the ground has to sit low enough that the
@@ -787,7 +1007,10 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
         # goes at that resolution.
         outside = distance > half
         sag = np.where(outside, widening * path.max_grade, 0.0)
-        section = (road_height + path.section_offset(np.minimum(distance, half))
+        section = (road_height
+                   + path.section_offset(distance,
+                                         found.side.reshape(natural.shape),
+                                         found.bank.reshape(natural.shape))
                    - sag - formation)
         # Out to the widening the ground is held at the verge; past that the
         # batter falls away at its slope until it reaches the land.
@@ -856,6 +1079,11 @@ class RoadLayer:
     #: How far along the centreline a lap begins, in metres. Zero for a road
     #: nobody races on, which is where its own start is anyway.
     start: float = 0.0
+    #: What the road is posted at, in km/h; 0 for an unposted road. Written into
+    #: the road's own extras rather than left to be guessed from the signs
+    #: standing beside it, because it is a fact about the road and a game that
+    #: reads the road should not have to read its furniture to learn it.
+    posted: int = 0
     ground: HeightFn | None = None
     shade: HeightFn | None = None
     bridge: BridgeProfile | None = None
@@ -879,9 +1107,10 @@ class RoadLayer:
             return
         # The surface is written beside the tileset and named by every tile,
         # so the material points at a file rather than carrying the pixels.
-        self._surface = road_texture(self.texture_size, self.seed)
+        self._surface = road_texture(self.texture_size, self.seed,
+                                     self.path.profile)
         self._material = tarmac_material(
-            wetness=self.wetness,
+            wetness=self.wetness, profile=self.path.profile,
             image=ExternalImage(SURFACE_IMAGE, srgb=True))
 
     def metadata(self) -> dict[str, Any]:
@@ -900,12 +1129,21 @@ class RoadLayer:
         under the wheels is a wall in the middle of an open road. See
         :class:`OpenGLContext.physics.road.RoadColliders`.
 
+        The **lean** travels with the line, point for point, for the same
+        reason: a game building the carriageway itself has to build the one the
+        bake drew, and a collider swept flat under a superelevated corner is a
+        surface the car falls through on the inside and stands on the outside.
+        A road whose corners are flat writes an empty list rather than one zero
+        per point.
+
         The line is written at ``metadata_spacing`` rather than at its full
         density -- a course is a shape, and a game re-samples it for whatever it
         is doing. Structures are given as distances along that same line.
         """
         line = self.path.resampled(self.metadata_spacing)
         closed = bool(np.allclose(self.path.points[0], self.path.points[-1]))
+        walked = np.concatenate(
+            [[0.0], np.cumsum(np.linalg.norm(np.diff(line, axis=0), axis=1))])
         return {'roads': [{
             'name': self.name,
             'closed': closed,
@@ -915,9 +1153,18 @@ class RoadLayer:
             'start': round(float(self.start), 3),
             'carriagewayWidth': self.path.profile.carriageway_width,
             'totalWidth': self.path.profile.total_width,
+            'posted': int(self.posted),
             'profile': _profile_json(self.path.profile),
             'length': self.path.length,
             'centreline': [[round(float(v), 3) for v in point] for point in line],
+            'bank': ([round(float(lean), 5)
+                      for lean in self.path.bank_at(walked)]
+                     if self.path.banked else []),
+            # How much more carriageway than `carriagewayWidth` the road has at
+            # each of those points. Empty for a road of one width.
+            'widening': ([round(float(extra), 3)
+                          for extra in self.path.widening_at(walked)]
+                         if self.path.wider else []),
             'structures': [{'kind': str(kind),
                             'from': round(start, 3),
                             'to': round(end, 3)}
@@ -940,8 +1187,10 @@ class RoadLayer:
             if kind is not Op.TUNNEL or last - first < 1:
                 continue
             run = self.path.points[first:last + 1]
-            found.extend([round(float(v), 3) for v in point]
-                         for point in tunnel_lamps(run, self.tunnel))
+            found.extend(
+                [round(float(v), 3) for v in point]
+                for point in tunnel_lamps(run, self.tunnel,
+                                          bank=self.path.bank[first:last + 1]))
         return found
 
     def assets(self) -> dict[str, bytes]:
@@ -977,7 +1226,7 @@ class RoadLayer:
         return found
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
-        reach = self.path.profile.total_width * TILE_REACH
+        reach = self.path.widest() * TILE_REACH
         if not self.path.crosses(region, margin=reach):
             return []
         spacing = self.spacing_for(error)
@@ -991,17 +1240,26 @@ class RoadLayer:
         blend = _tapered(carried, max(int(round(self.transition / spacing)), 1))
         sections = morphed_sections(self.path.profile,
                                     self.path.profile.on_structure(), blend)
+        # The lean at this tile's own spacing, and the camber it uses up. The
+        # cut and the frame have to agree about the same point of the road, so
+        # both are re-sampled from the alignment rather than one of them being
+        # carried over from the density it was worked out at.
+        bank = self.path.bank_at(stations)
+        sections = widened_sections(sections,
+                                    self.path.widening_at(stations),
+                                    self.path.profile)
+        sections = banked_sections(sections, bank, self.path.profile)
 
         found: list[SceneNode] = []
         for rows in _runs_inside(line, region):
             found.append(SceneNode(
                 mesh=road_mesh(line[rows], self.path.profile,
                                material=self._material,
-                               sections=sections[rows],
+                               sections=sections[rows], bank=bank[rows],
                                shade=(None if self.shade is None
                                       else self._shade_of)),
                 name=self.name))
-            found.extend(self._structures(line, ops, rows))
+            found.extend(self._structures(line, ops, rows, bank))
         return found
 
     def _shade_of(self, points: np.ndarray) -> Any:
@@ -1010,7 +1268,7 @@ class RoadLayer:
         return np.asarray(self.shade(points[:, 0], points[:, 2]), dtype='d')
 
     def _structures(self, line: np.ndarray, ops: np.ndarray,
-                    rows: np.ndarray) -> list[SceneNode]:
+                    rows: np.ndarray, bank: np.ndarray) -> list[SceneNode]:
         """The decks and bores along the stretch of road a tile is drawing.
 
         A structure is split at the tile boundary the same way the carriageway
@@ -1023,17 +1281,18 @@ class RoadLayer:
             if kind not in CARRIED or last - first < 1:
                 continue
             run = line[rows[first:last + 1]]
+            lean = bank[rows[first:last + 1]]
             if kind is Op.BRIDGE:
                 parts = bridge_meshes(run, self.path.profile, self.ground,
                                       self.bridge, self.structure_material,
-                                      self.barrier)
+                                      self.barrier, bank=lean)
             elif kind is Op.CAUSEWAY:
                 parts = causeway_meshes(run, self.path.profile, self.ground,
                                         self.causeway,
-                                        self.structure_material)
+                                        self.structure_material, bank=lean)
             else:
                 parts = tunnel_meshes(run, self.path.profile, self.tunnel,
-                                      self.structure_material)
+                                      self.structure_material, bank=lean)
             out.extend(SceneNode(mesh=mesh, name='%s-%s' % (kind, part))
                        for part, mesh in parts.items())
         return out

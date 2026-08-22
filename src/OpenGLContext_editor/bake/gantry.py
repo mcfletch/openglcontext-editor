@@ -80,7 +80,8 @@ class GantryLayer:
             [placed(gantry_mesh(one.span, self.profile, material, cells,
                                 one.drops), one.position, one.yaw),
              placed(start_line_mesh(one.width, self.profile, material, cells,
-                                    one.crossfall), one.position, one.yaw)],
+                                    one.crossfall), one.position, one.yaw,
+                    roll=math.atan(one.bank))],
             material)
 
     def bounds(self) -> BoundingBox:
