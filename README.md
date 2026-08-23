@@ -291,6 +291,42 @@ goes into the `RoadPath`, and from there into the surface, the earthwork beside
 it, the structures carrying it and the tileset a game reads. `RoadPath()` with
 no `bank` is a road whose corners are flat.
 
+### One road, several kinds of road
+
+`follow_terrain` takes `smoothing`, `maximum_grade` and `design_speed` as **one
+figure or one per point of the alignment**, and that is what makes a road that
+is not the same road all the way round.
+`OpenGLContext_editor.world.character` works out what each of them should be:
+
+```python
+from OpenGLContext_editor.world.character import corner_radii, road_character
+from OpenGLContext_editor.world.route import hold_corners
+
+plan = hold_corners(my_route, corner_radii(my_route, design_radius=270.0,
+                                           seed=3), closed=True)
+kind = road_character(plan, my_heights, design_speed=200 / 3.6, spacing=6.0,
+                      closed=True, climbing_lane=3.6)
+course = follow_terrain(plan, my_heights, spacing=6.0, closed=True,
+                        smoothing=kind.smoothing,
+                        maximum_grade=kind.grade_limit,
+                        design_speed=kind.design_speed)
+```
+
+Nothing there is sprinkled about; every figure is **derived** from the corner
+the road is on, the land under it, or how far ahead a driver has to see:
+
+| | |
+|---|---|
+| **the corners** | drawn from a mix (`CORNER_MIX`) so a lap has a hairpin and a sweeper as well as the corner it was laid out for. The plan's own turn angles are untouched — what changes is how hard each turn has to be taken |
+| **how fast a stretch is for** | what its own corner allows, never more than the road's design speed. A crest inside a hairpin rounded for the speed of the straight before it is a quarter of a kilometre of earthwork for a crest nobody meets at that speed |
+| **how steeply it may climb** | the ordinary limit, raised towards `steep_grade` where the land itself climbs harder than that over a quarter of a kilometre. Held to a gentle grade, a road across a hillside stands off it on an embankment for as far as the hillside lasts |
+| **how much it is smoothed** | with the speed. A bump taken at two hundred is a car in the air and has to go; the same bump at eighty is the road having some shape, and ironing it out costs the drive and buys nothing |
+| **how far the trees are cut back** | what a driver needs to see round the bend they are on. Sight round a bend of radius *r* past an obstruction *clear* to the side is about `sqrt(8 · r · clear)`, so the corridor that buys a stopping distance falls out of it. It is the corners **near the design radius** that get opened out: a tighter one is taken slowly enough to see round already, a wider one is straight enough |
+| **where it is wide enough to be passed on** | the sustained climbs — 4% or more for four hundred metres — worst first, until `lane_share` of the road has been widened. Hill country asks for more climbing lanes than anybody builds, and a road widened along half its length is a wide road rather than a road with passing places on it |
+
+`RoadCharacter.summary()` reports the range each covers, and `varies()` says
+whether this came out as a road of one character after all.
+
 `conform_terrain_at` returns the ground *with the road built into it*, at
 whatever sample spacing the tile being baked uses -- a cut narrower than that
 spacing falls between two vertices and never appears in the mesh.
@@ -352,6 +388,13 @@ tightest radius a car can take, or the tightest the legs have room for.
 `ease_route` to the circuit it invents for itself, which is the same
 distinction. A vertex turning less than fifteen degrees is a sample of a curve
 rather than a corner, and is left alone.
+
+**A drawn route keeps the corners it was drawn with.** `corner_radii` is for
+the circuit `ProceduralWorld` invents for itself; a route a caller gives is held
+to the one design radius, because its corners are already a decision somebody
+made and re-drawing them from a mix is the generator overruling the designer.
+What a drawn route still gets is everything `road_character` derives, all of
+which follows from the line they drew rather than replacing it.
 
 **How tight "too tight" is depends on how far the corner leans.**
 `ProceduralWorld.corner_radius()` is the floor, and it is

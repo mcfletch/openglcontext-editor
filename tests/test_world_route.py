@@ -276,7 +276,15 @@ class TestEasingKeepsTheCornersDrivable:
 
     def test_the_shipped_circuit_corners_at_its_design_speed(self) -> None:
         """Most of it at the design radius, and nothing so far under it that a
-        car cannot take the corner at any speed worth driving."""
+        car cannot take the corner at any speed worth driving.
+
+        Measured with the circuit laid out to one corner throughout
+        (``variety=0``). The shipped world draws its corners from a mix instead
+        -- a lap of one corner repeated is a lap a driver learns once -- and
+        what that mix is bounded by is
+        :data:`~OpenGLContext_editor.world.character.TIGHTEST_CORNER` rather
+        than the design radius. See ``tests/test_world_variation.py``.
+        """
         from OpenGLContext_editor.world.procedural import (
             CIRCUIT_DESIGN_SPEED,
             ProceduralWorld,
@@ -287,7 +295,7 @@ class TestEasingKeepsTheCornersDrivable:
             cornering_radius,
             least_radius,
         )
-        world = ProceduralWorld(extent=4096.0)
+        world = ProceduralWorld(extent=4096.0, variety=0.0)
         plan = world.circuit().points[:, [0, 2]]
         # The corner the *world* is laid out to, which allows for the lean its
         # bends carry: flat, the same speed would want twice the radius, and

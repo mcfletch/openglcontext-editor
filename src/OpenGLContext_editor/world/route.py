@@ -310,7 +310,7 @@ def _held(moved: np.ndarray, drawn: np.ndarray, reach: float) -> np.ndarray:
     return held
 
 
-def hold_corners(plan: Any, minimum: float, closed: bool = False,
+def hold_corners(plan: Any, minimum: Any, closed: bool = False,
                  spacing: float = ARC_SPACING) -> np.ndarray:
     """Round every corner of a drawn plan to at least ``minimum`` metres.
 
@@ -318,6 +318,14 @@ def hold_corners(plan: Any, minimum: float, closed: bool = False,
     the legs keep the direction and the place the designer drew them and only
     the corner itself changes. A hairpin stays a hairpin -- of the tightest
     radius a car can take -- which is what a switchback is for.
+
+    ``minimum`` is one radius, or **one per point of the plan**, which is what
+    makes a lap worth learning: a road whose every corner is held to the same
+    figure is a road of one corner repeated, and a driver who has taken the
+    first has taken them all. Given per point, the entry for a vertex is the
+    radius that vertex is rounded to -- small for a corner meant to be braked
+    for, large for one meant to be carried through -- and the entries for the
+    ends of an open plan are ignored, since its ends are not corners.
 
     This is the opposite decision from :func:`hold_radius`, which relaxes the
     line towards its chords: that is right for a route being *found*, where the
@@ -334,7 +342,13 @@ def hold_corners(plan: Any, minimum: float, closed: bool = False,
     curve somebody drew with a tighter one.
     """
     line = np.asarray(plan, dtype='d').reshape(-1, 2)
-    if len(line) < 3 or minimum <= 0.0:
+    wanted = np.asarray(minimum, dtype='d')
+    if wanted.ndim and len(wanted.reshape(-1)) != len(line):
+        raise ValueError("a plan of %d points needs %d radii, not %d"
+                         % (len(line), len(line), len(wanted.reshape(-1))))
+    radii = np.broadcast_to(wanted.reshape(-1) if wanted.ndim else wanted,
+                            (len(line),))
+    if len(line) < 3 or float(radii.max()) <= 0.0:
         return line.copy()
     legs = np.linalg.norm(np.diff(np.vstack([line, line[:1]]), axis=0), axis=1) \
         if closed else np.linalg.norm(np.diff(line, axis=0), axis=1)
@@ -347,7 +361,7 @@ def hold_corners(plan: Any, minimum: float, closed: bool = False,
         here = line[index]
         after = line[(index + 1) % len(line)]
         room = _corner_room(legs, index, len(line), closed)
-        arc = _fillet(before, here, after, minimum, room, spacing)
+        arc = _fillet(before, here, after, float(radii[index]), room, spacing)
         made.append(arc)
     if not closed:
         made.append(line[-1:])

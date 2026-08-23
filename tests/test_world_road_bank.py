@@ -141,10 +141,27 @@ class TestWhatTheCircuitIsLaidOutFor:
     def test_its_corners_lean(self) -> None:
         assert np.abs(self._circuit().bank).max() > 0.05
 
-    def test_every_corner_holds_the_speed_the_circuit_is_for(self) -> None:
+    def test_every_corner_holds_the_speed_that_stretch_is_for(self) -> None:
+        """Not one speed for the whole lap: the corners are drawn from a mix
+        now, and a hairpin holds what a hairpin holds. What has to be true of
+        each of them is that it holds the speed it was *laid out* for."""
         from OpenGLContext.scenegraph.road import plan_curvature
-        from OpenGLContext_editor.world.procedural import CIRCUIT_DESIGN_SPEED
-        path = self._circuit()
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        world = ProceduralWorld(structures=False)
+        path = world.circuit()
+        curvature = np.abs(plan_curvature(path.points, closed=True))
+        radius = np.where(curvature > 1e-9, 1.0 / np.maximum(curvature, 1e-12),
+                          np.inf)
+        held = np.array([corner_speed(float(r), bank=float(b))
+                         for r, b in zip(radius, path.bank, strict=True)])
+        assert np.all(held >= world.circuit_character().design_speed - 1e-6)
+
+    def test_a_circuit_of_one_corner_holds_the_speed_it_was_laid_out_for(self) -> None:
+        from OpenGLContext.scenegraph.road import plan_curvature
+        from OpenGLContext_editor.world.procedural import (
+            CIRCUIT_DESIGN_SPEED, ProceduralWorld,
+        )
+        path = ProceduralWorld(structures=False, variety=0.0).circuit()
         curvature = np.abs(plan_curvature(path.points, closed=True))
         radius = np.where(curvature > 1e-9, 1.0 / np.maximum(curvature, 1e-12),
                           np.inf)
