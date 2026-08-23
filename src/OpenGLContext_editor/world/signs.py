@@ -23,21 +23,25 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from OpenGLContext.scenegraph.road import sweep_frames
-from OpenGLContext.scenegraph.roadsigns import SignProfile
+from OpenGLContext.scenegraph.road import (
+    GRAVITY,
+    advisory_speed,
+    sweep_frames,
+)
+from OpenGLContext.scenegraph.roadsigns import LIMIT, SignFace, SignProfile
 
 from OpenGLContext_editor.world.route import cornering_radius
 from OpenGLContext_editor.world.structures import Op
 
 __all__ = ['Warning', 'Placement', 'warn_of', 'sign_placements',
-           'stopping_distance']
+           'stopping_distance', 'LIMIT_SPACING', 'POSTED_LIMIT']
+
 
 #: How long a driver takes to react, in seconds, and how hard a car brakes, as a
 #: fraction of gravity. Together they give the distance a warning needs: a sign
 #: a driver cannot act on before reaching what it warns of is decoration.
 REACTION_SECONDS = 1.5
 BRAKING = 0.55
-GRAVITY = 9.81
 
 #: How much tighter than the design corner a bend has to be before it is worth a
 #: sign. A road held to its design radius is full of corners at exactly that
@@ -57,6 +61,32 @@ VERTICAL_WINDOW = 160.0
 #: sign every twenty metres is a sign nobody reads; two bends inside this become
 #: one double-bend.
 SEPARATION = 220.0
+
+#: How far apart the speed limit is repeated along a road, in metres. Far
+#: enough that it is not clutter, near enough that a driver joining a road, or
+#: coming out of a bore, is told what it is inside a minute of driving.
+LIMIT_SPACING = 1500.0
+
+#: How far a limit sign moves at a time while it is looking for room, in metres.
+#: Short enough that it stops at the first place it fits, long enough that
+#: finding a place on a kilometre of road is a few dozen comparisons.
+LIMIT_STEP = 20.0
+
+#: How far a limit sign keeps from a warning, in metres. Less than two warnings
+#: keep from each other: a warning is a hazard to act on and wants the road to
+#: itself either side of it, and a number on a white plate is a smaller thing to
+#: read. At the design speed this is still nearly three seconds apart.
+LIMIT_CLEARANCE = SEPARATION / 2.0
+
+#: What a road is posted at unless it is told otherwise, in km/h. A decision
+#: rather than a measurement -- which is the difference between this and the
+#: number on a bend's tab -- so it is told to the road rather than worked out
+#: from it.
+#:
+#: Eighty on a two-lane road through forest, which is what this one is: it is
+#: also the speed everything else on the road is doing, and a racer's lap is
+#: made of the difference between that and what they are doing.
+POSTED_LIMIT = 80
 
 #: Which warning survives when two fall within :data:`SEPARATION` of each other,
 #: highest first. A driver about to go into the dark and round a bend needs
@@ -99,21 +129,32 @@ def stopping_distance(speed: float, reaction: float = REACTION_SECONDS,
 
 @dataclass(frozen=True)
 class Warning:
-    """One sign: where it stands, what it warns of, and where that is.
+    """One sign: where it stands, what it says, and where that is about.
 
     ``station`` and ``hazard`` are distances along the road in metres -- where
     the sign is and where the thing it is about begins. ``side`` is +1 for the
     right-hand edge of the road in the direction of travel and -1 for the left.
+
+    ``speed`` is in km/h: under a bend it is the tab saying how fast that bend
+    is worth, and on a :data:`~OpenGLContext.scenegraph.roadsigns.LIMIT` it is
+    the number the sign is. Zero for a sign that says nothing about speed.
     """
 
     station: float
     hazard: float
     kind: str
     side: int = NEARSIDE
+    speed: int = 0
 
     def __repr__(self) -> str:
-        return 'Warning(%s at %.0fm, of %.0fm)' % (self.kind, self.station,
-                                                   self.hazard)
+        return 'Warning(%s%s at %.0fm, of %.0fm)' % (
+            self.kind, ' %d' % self.speed if self.speed else '',
+            self.station, self.hazard)
+
+    @property
+    def face(self) -> SignFace:
+        """The sign this is, as the engine builds one."""
+        return SignFace(self.kind, self.speed)
 
 
 @dataclass(frozen=True)
@@ -123,31 +164,90 @@ class Placement:
     position: Any
     yaw: float
     kind: str
+    speed: int = 0
 
     def __repr__(self) -> str:
         return 'Placement(%s at %s)' % (
-            self.kind, ', '.join('%.1f' % v for v in self.position))
+            self.face, ', '.join('%.1f' % v for v in self.position))
+
+    @property
+    def face(self) -> SignFace:
+        """The sign this is, as the engine builds one."""
+        return SignFace(self.kind, self.speed)
 
 
 def warn_of(path: Any, design_speed: float, side: int = NEARSIDE,
-            separation: float = SEPARATION) -> list[Warning]:
+            separation: float = SEPARATION,
+            limit: int = POSTED_LIMIT) -> list[Warning]:
     """Every sign a road wants, in order along it.
 
     ``path`` is a :class:`~OpenGLContext_editor.world.road.RoadPath`; the
-    curvature, the grade and the structures all come off it.
+    curvature, the grade and the structures all come off it. ``limit`` is what
+    the road is posted at, in km/h, and 0 leaves it unposted.
     """
     line = np.asarray(path.points, dtype='d').reshape(-1, 3)
     if len(line) < 5:
         return []
     stations = np.asarray(path.stations, dtype='d')
-    found = (_bends(line, stations, design_speed)
+    found = (_bends(line, stations, design_speed,
+                    np.asarray(path.bank, dtype='d'))
              + _grades(line, stations)
              + _bores(path))
     ahead = stopping_distance(design_speed)
     placed = [Warning(station=max(float(at - ahead), 0.0), hazard=float(at),
-                      kind=kind, side=int(side))
-              for at, kind in sorted(found)]
-    return _thinned(placed, separation)
+                      kind=kind, side=int(side), speed=speed)
+              for at, kind, speed in sorted(found)]
+    warnings = _thinned(placed, separation)
+    return sorted(warnings + _limits(stations, warnings, side, limit, separation),
+                  key=lambda one: one.station)
+
+
+def _limits(stations: np.ndarray, warnings: list[Warning], side: int,
+            limit: int, separation: float) -> list[Warning]:
+    """The speed limit, repeated along the road.
+
+    A limit sign is not about a hazard, so it stands where the road has room
+    for one rather than where anything is happening: on the interval, and never
+    inside ``separation`` of a warning, because two plates a driver reads as one
+    sign is a driver who has read neither.
+
+    **A blocked one moves rather than going away.** Since it is not about a
+    place, the sign slides along the road until there is room for it -- a
+    circuit with a bend warning every few hundred metres would otherwise be
+    posted nowhere, which is worse than being posted a hundred metres from
+    where the interval fell.
+    """
+    if limit <= 0:
+        return []
+    length = float(stations[-1])
+    out: list[Warning] = []
+    for step in range(1, int(length // LIMIT_SPACING) + 1):
+        at = _room_for_a_limit(step * LIMIT_SPACING, warnings, out,
+                               min(separation, LIMIT_CLEARANCE), length)
+        if at is None:
+            continue
+        out.append(Warning(station=at, hazard=at, kind=LIMIT, side=int(side),
+                           speed=int(limit)))
+    return out
+
+
+def _room_for_a_limit(wanted: float, warnings: list[Warning],
+                      placed: list[Warning], separation: float,
+                      length: float) -> float | None:
+    """Where near ``wanted`` a limit sign fits, or None for nowhere near it.
+
+    Nearest first, either side of where the interval fell, so a sign moves as
+    little as it has to. It gives up at half an interval, past which it would be
+    standing where the next one belongs.
+    """
+    for step in np.arange(0.0, LIMIT_SPACING / 2.0, LIMIT_STEP):
+        for at in ((wanted - step, wanted + step) if step else (wanted,)):
+            if not 0.0 <= at <= length:
+                continue
+            if all(abs(at - one.station) >= separation
+                   for one in list(warnings) + placed):
+                return float(at)
+    return None
 
 
 def sign_placements(path: Any, warnings: Sequence[Warning],
@@ -175,6 +275,7 @@ def sign_placements(path: Any, warnings: Sequence[Warning],
             at[1] = float(np.asarray(ground(at[0], at[2]), dtype='d').ravel()[0])
         forward = line[min(index + 1, len(line) - 1)] - line[max(index - 1, 0)]
         placed.append(Placement(position=at, kind=warning.kind,
+                                speed=warning.speed,
                                 yaw=_facing_back(forward)))
     return placed
 
@@ -184,25 +285,45 @@ def _facing_back(forward: np.ndarray) -> float:
     return float(np.arctan2(-forward[0], -forward[2]) + np.pi)
 
 
-def _bends(line: np.ndarray, stations: np.ndarray,
-           design_speed: float) -> list[tuple[float, str]]:
+def _bends(line: np.ndarray, stations: np.ndarray, design_speed: float,
+           bank: np.ndarray) -> list[tuple[float, str, int]]:
     """Where the road turns more tightly than it is meant to be driven.
 
     A run of points below the limit is one bend, however many points it is, and
     the sign is about where it *starts*: that is what a driver is arriving at.
     Two bends close together are one double-bend, because that is what they are
     to drive and two plates fifty metres apart tell nobody anything.
+
+    Each carries the speed its own tightest radius allows
+    (:func:`~OpenGLContext.scenegraph.road.advisory_speed`), which is what goes
+    on the tab under the plate: the road knows how tightly it turns, so how fast
+    that is worth is derivable in the same way the symbol is.
+
+    **How far the bend leans counts as much as how tight it is.** A
+    superelevated corner is faster than the same corner flat, and both the
+    decision to sign it at all and the number on the tab are taken with the lean
+    in hand: a plate warning a driver off a bend the road is holding them
+    through is a plate they learn to ignore.
     """
-    limit = cornering_radius(design_speed) / max(BEND_MARGIN, 1e-6)
+    steepest = float(np.abs(bank).max()) if len(bank) else 0.0
+    limit = cornering_radius(design_speed, bank=steepest) / max(BEND_MARGIN, 1e-6)
     if limit <= 0.0:
         return []
     radius, turn = _curvature(line)
     tight = _closed_up(radius < limit, stations, BEND_GAP)
     found = []
     for first, last in _runs(tight):
-        for start, hand in _hands(turn[first:last + 1], stations[first:last + 1]):
+        hands = _hands(turn[first:last + 1], stations[first:last + 1])
+        for index, (start, hand) in enumerate(hands):
+            over = (first + start,
+                    first + (hands[index + 1][0] if index + 1 < len(hands)
+                             else last - first + 1))
             found.append((float(stations[first + start]),
-                          'bend-left' if hand > 0 else 'bend-right'))
+                          'bend-left' if hand > 0 else 'bend-right',
+                          advisory_speed(
+                              float(radius[over[0]:over[1]].min()),
+                              bank=float(np.abs(
+                                  bank[over[0]:over[1]]).min()))))
     return _linked(found, stations)
 
 
@@ -232,8 +353,8 @@ def _closed_up(flags: np.ndarray, stations: np.ndarray,
     return found
 
 
-def _linked(found: list[tuple[float, str]],
-            stations: np.ndarray) -> list[tuple[float, str]]:
+def _linked(found: list[tuple[float, str, int]],
+            stations: np.ndarray) -> list[tuple[float, str, int]]:
     """Bends close enough together to be one warning, merged into one.
 
     Two turning *opposite* ways within :data:`LINKED` metres are a double bend,
@@ -241,17 +362,23 @@ def _linked(found: list[tuple[float, str]],
     drive, however the geometry happens to break them up, and a second plate
     saying the same thing tells nobody anything.
     """
-    out: list[tuple[float, str]] = []
-    for at, kind in found:
+    out: list[tuple[float, str, int]] = []
+    for at, kind, speed in found:
         if out and at - out[-1][0] < LINKED:
-            if kind != out[-1][1]:
-                out[-1] = (out[-1][0], 'double-bend')
+            # One sign for both, and the slower of the two numbers: a driver
+            # told 80 who then meets the half of it that is worth 50 has been
+            # told the wrong thing.
+            out[-1] = (out[-1][0],
+                       'double-bend' if kind != out[-1][1] else out[-1][1],
+                       min(one for one in (speed, out[-1][2]) if one)
+                       if speed or out[-1][2] else 0)
             continue
-        out.append((at, kind))
+        out.append((at, kind, speed))
     return out
 
 
-def _grades(line: np.ndarray, stations: np.ndarray) -> list[tuple[float, str]]:
+def _grades(line: np.ndarray, stations: np.ndarray
+            ) -> list[tuple[float, str, int]]:
     """Where the road bottoms out or tops over, sharply enough to be worth it.
 
     A dip and a crest are *turning points*: the grade reverses. Naming them by
@@ -272,17 +399,17 @@ def _grades(line: np.ndarray, stations: np.ndarray) -> list[tuple[float, str]]:
         near = np.abs(middles - at) <= VERTICAL_WINDOW
         if float(grade[near].max() - grade[near].min()) < GRADE_SWING:
             continue
-        found.append((at, 'dip' if after > before else 'crest'))
+        found.append((at, 'dip' if after > before else 'crest', 0))
     return found
 
 
-def _bores(path: Any) -> list[tuple[float, str]]:
+def _bores(path: Any) -> list[tuple[float, str, int]]:
     """Where the road goes into the dark.
 
     Only tunnels: a driver needs no telling that a road is on a bridge, and a
     causeway is a road.
     """
-    return [(start, 'tunnel') for kind, start, _end in path.structure_runs()
+    return [(start, 'tunnel', 0) for kind, start, _end in path.structure_runs()
             if kind is Op.TUNNEL]
 
 
@@ -334,9 +461,11 @@ def _thinned(placed: list[Warning], separation: float) -> list[Warning]:
     out: list[Warning] = []
     for warning in placed:
         if out and warning.station - out[-1].station < separation:
+            speeds = [one for one in (out[-1].speed, warning.speed) if one]
             out[-1] = Warning(station=out[-1].station, hazard=warning.hazard,
                               kind=_together(out[-1].kind, warning.kind),
-                              side=warning.side)
+                              side=warning.side,
+                              speed=min(speeds) if speeds else 0)
             continue
         out.append(warning)
     return out

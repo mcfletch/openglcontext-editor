@@ -317,3 +317,49 @@ class TestHowWideTheRoadsGroundIs:
 
     def test_without_one_it_follows_the_road_s_width(self) -> None:
         assert self._across() > 0.0
+
+
+class TestNothingGrowsOnTheFloorOfABore:
+    """A bore is dug as a cutting, so the ground beside the lining is ground
+    that came out of a hill -- bare earth like any other cut. Left as whatever
+    the rules made of the hillside it comes out as grass and the cover grows on
+    it: grass on the floor of the tunnel, in plain view through the portal.
+    """
+
+    @pytest.fixture(scope='class')
+    def world(self):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=2048.0, seed=11)
+
+    @staticmethod
+    def _at(layer, found, point):
+        size = found.shape[0]
+        column = int((point[0] + layer.side / 2.0) / layer.side * (size - 1))
+        row = int((point[2] + layer.side / 2.0) / layer.side * (size - 1))
+        return float(found[row, column])
+
+    def test_the_road_layer_is_painted_inside_one(self, world) -> None:
+        from OpenGLContext_editor.world.structures import Op
+        layer = world.field_terrain()
+        circuit = world.circuit()
+        bores = [(first, last) for kind, first, last in circuit.structure_runs()
+                 if kind is Op.TUNNEL]
+        assert bores, 'this world is meant to have a bore in it'
+        painted = dict(layer._painted(world.height_fn()))
+        found = painted[layer.road_layer]
+        stations = np.asarray(circuit.stations, dtype='d')
+        line = np.asarray(circuit.points, dtype='d').reshape(-1, 3)
+        first, last = bores[0]
+        index = int(np.clip(np.searchsorted(stations, (first + last) / 2.0), 0,
+                            len(line) - 1))
+        assert self._at(layer, found, line[index]) > 0.5, (
+            'the floor of the bore is not painted as the road corridor')
+
+    def test_and_still_on_the_open_road(self, world) -> None:
+        layer = world.field_terrain()
+        circuit = world.circuit()
+        painted = dict(layer._painted(world.height_fn()))
+        found = painted[layer.road_layer]
+        line = np.asarray(circuit.points, dtype='d').reshape(-1, 3)
+        on = np.nonzero(circuit.segment_on_ground)[0]
+        assert self._at(layer, found, line[on[len(on) // 2]]) > 0.5

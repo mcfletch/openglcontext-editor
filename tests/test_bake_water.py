@@ -73,7 +73,20 @@ class TestWhatItPutsThere:
                 float(mesh.positions[:, 0].max())) == pytest.approx((-50.0, 50.0))
 
     def test_and_lies_at_the_waterline(self):
-        assert self._sheet(level=3.5).mesh.positions[:, 1] == pytest.approx(3.5)
+        """Sits at it rather than being flat on it: a lake carries a swell, so
+        what is level is the water, not each vertex of it."""
+        from OpenGLContext.scenegraph.water import LAKE
+        heights = self._sheet(level=3.5).mesh.positions[:, 1]
+        assert float(np.mean(heights)) == pytest.approx(3.5, abs=0.05)
+        # Three trains cross, so the excursion is a small multiple of one
+        # train's own amplitude rather than that amplitude exactly.
+        assert float(np.abs(heights - 3.5).max()) <= LAKE.amplitude * 2.5
+
+    def test_and_it_is_not_a_flat_plate(self):
+        """Still water is a mirror, and a mirror that size with nothing over it
+        but a pale sky is a white plate lying in the landscape."""
+        heights = self._sheet(level=3.5).mesh.positions[:, 1]
+        assert float(heights.max() - heights.min()) > 0.05
 
     def test_it_is_clipped_to_the_layer_s_own_extent(self):
         """Water is not baked over ground the world does not have."""

@@ -26,6 +26,7 @@ import numpy as np
 from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.roadsigns import (
+    SignFace,
     SignProfile,
     atlas_material,
     sign_atlas,
@@ -71,19 +72,25 @@ class SignLayer:
     _material: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        kinds = self.kinds()
+        faces = self.faces()
         self._material = atlas_material(
-            image=ExternalImage(ATLAS_IMAGE, srgb=True), kinds=kinds,
+            image=ExternalImage(ATLAS_IMAGE, srgb=True), faces=faces,
             cell=self.plate_pixels)
-        cells = sign_atlas(kinds, self.plate_pixels)[1] if kinds else {}
+        cells = sign_atlas(faces, self.plate_pixels)[1] if faces else {}
         self._prototypes = {
-            kind: sign_mesh(kind, self.profile, material=self._material,
+            face: sign_mesh(face, self.profile, material=self._material,
                             cells=cells)
-            for kind in kinds}
+            for face in faces}
 
-    def kinds(self) -> list[str]:
-        """The kinds of sign this world actually has, in a settled order."""
-        return sorted({one.kind for one in self.placements})
+    def faces(self) -> list[SignFace]:
+        """The signs this world actually has, in a settled order.
+
+        By *face* rather than by kind: a bend sign carrying a tab that says 60
+        and one carrying a tab that says 40 are two different objects, and the
+        world needs a prototype and an atlas cell for each of them.
+        """
+        return sorted({one.face for one in self.placements},
+                      key=lambda one: (one.kind, one.speed))
 
     def bounds(self) -> BoundingBox | None:
         """The ground the signs stand on, with their own height on it."""
@@ -92,7 +99,14 @@ class SignLayer:
         feet = np.asarray([one.position for one in self.placements], dtype='d')
         box = BoundingBox.of_points(feet)
         assert box is not None
-        top = float(self.profile.post_height + self.profile.plate_size)
+        # The tallest sign in the world: a plate with a tab under it stands
+        # higher than one without, and a box drawn for the short one culls the
+        # tall one away as the car reaches it.
+        plates = max((len(one.face.plates) for one in self.placements),
+                     default=1)
+        top = float(self.profile.post_height
+                    + self.profile.plate_size * plates
+                    + self.profile.plate_gap * (plates - 1))
         return BoundingBox(
             (box.minimum[0] - SIGN_REACH, box.minimum[1],
              box.minimum[2] - SIGN_REACH),
@@ -111,11 +125,11 @@ class SignLayer:
 
     def assets(self) -> dict[str, bytes]:
         """The one picture every plate in the world reads out of."""
-        kinds = self.kinds()
-        if not kinds:
+        faces = self.faces()
+        if not faces:
             return {}
         buffer = io.BytesIO()
-        sign_atlas(kinds, self.plate_pixels)[0].save(buffer, format='PNG')
+        sign_atlas(faces, self.plate_pixels)[0].save(buffer, format='PNG')
         return {ATLAS_IMAGE: buffer.getvalue()}
 
     def metadata(self) -> dict[str, Any]:
@@ -126,6 +140,7 @@ class SignLayer:
         """
         return {'signs': [
             {'kind': one.kind,
+             'speed': int(one.speed),
              'at': [round(float(v), 3) for v in one.position],
              'yaw': round(float(one.yaw), 4)}
             for one in self.placements]}
@@ -134,7 +149,7 @@ class SignLayer:
 def _placed(placements: Sequence[Placement], prototypes: dict,
             material: Any) -> PBRMesh:
     """A tile's signs, turned to face their traffic and stood in place."""
-    return gathered([placed(prototypes[one.kind], one.position, one.yaw)
+    return gathered([placed(prototypes[one.face], one.position, one.yaw)
                      for one in placements], material)
 
 

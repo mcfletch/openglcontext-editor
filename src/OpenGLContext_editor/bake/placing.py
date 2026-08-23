@@ -23,7 +23,8 @@ from typing import Any
 import numpy as np
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 
-__all__ = ['about_the_vertical', 'placed', 'gathered']
+__all__ = ['about_the_vertical', 'about_the_road', 'placed',
+           'gathered']
 
 
 def about_the_vertical(yaw: float) -> np.ndarray:
@@ -33,9 +34,29 @@ def about_the_vertical(yaw: float) -> np.ndarray:
                      [-sine, 0.0, cosine]])
 
 
-def placed(mesh: PBRMesh, position: Any, yaw: float = 0.0) -> PBRMesh:
-    """One prototype turned to ``yaw`` and stood at ``position``."""
+def about_the_road(roll: float) -> np.ndarray:
+    """The rotation that leans a prototype about the road it lies along.
+
+    A prototype is modelled with the road running along Z, so a banked road
+    rolls it about Z. Positive is the road's own sign for a lean -- right-hand
+    side down -- and the road's right hand in that frame is -X.
+    """
+    cosine, sine = np.cos(float(roll)), np.sin(float(roll))
+    return np.array([[cosine, -sine, 0.0], [sine, cosine, 0.0],
+                     [0.0, 0.0, 1.0]])
+
+
+def placed(mesh: PBRMesh, position: Any, yaw: float = 0.0,
+           roll: float = 0.0) -> PBRMesh:
+    """One prototype leaned by ``roll``, turned to ``yaw``, stood at ``position``.
+
+    ``roll`` is for what lies *on* a road rather than beside it: a line painted
+    across a banked carriageway leans with it, while the gantry over the line
+    stands upright on its two feet whatever the road under it is doing.
+    """
     turn = about_the_vertical(yaw)
+    if roll:
+        turn = turn @ about_the_road(roll)
     points = np.asarray(mesh.positions, dtype='d') @ turn.T
     return PBRMesh(
         positions=(points + np.asarray(position, dtype='d')).astype('f'),

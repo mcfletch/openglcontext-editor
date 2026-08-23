@@ -154,11 +154,12 @@ class TestThroughTheGenerator:
                             back / np.linalg.norm(back))) < -0.8
 
     def test_a_hairpin_with_room_gets_the_radius_the_speed_asks_for(self) -> None:
-        from OpenGLContext_editor.world.procedural import CIRCUIT_DESIGN_SPEED
-        from OpenGLContext_editor.world.route import cornering_radius
-        wanted = cornering_radius(CIRCUIT_DESIGN_SPEED)
-        plan = _hairpin(leg=1400.0, offset=wanted * 5.0)
-        built = self._world(plan).circuit().points[:, [0, 2]]
+        """The radius the design speed asks for **of a corner that leans**,
+        which is the corner the world builds: a superelevated hairpin holds the
+        same speed round a good deal less of the hillside."""
+        world = self._world(_hairpin(leg=1400.0, offset=4000.0))
+        wanted = world.corner_radius()
+        built = world.circuit().points[:, [0, 2]]
         assert least_radius(built) >= wanted * 0.9
 
     def test_a_hairpin_with_less_room_gets_the_best_that_fits(self) -> None:

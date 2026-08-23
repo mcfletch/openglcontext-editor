@@ -383,3 +383,46 @@ class TestTheRoadsOwnSectionTravelsWithIt:
     def test_it_is_plain_json(self) -> None:
         import json
         assert json.loads(json.dumps(self._profile()))
+
+
+class TestAPortalIsOpen:
+    """A driver arriving at a bore has to be able to see into it.
+
+    The ground a tunnel passes through is cut down to the road so the lining
+    stands in a cutting -- but a ground mesh draws straight lines between its
+    samples, so it is the sample *at the mouth* that decides what the opening
+    looks like. Left at the hillside's own height it is a wall across the road
+    with the arch in the air behind it, and the only reason a car gets through
+    is that the collider has the bore taken out of it.
+    """
+
+    @pytest.fixture(scope='class')
+    def world(self):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=2048.0, seed=11)
+
+    @staticmethod
+    def _portals(circuit):
+        return [(first, last) for kind, first, last in circuit.structure_runs()
+                if kind is Op.TUNNEL]
+
+    def test_the_world_has_bores_to_look_into(self, world) -> None:
+        assert self._portals(world.circuit())
+
+    def test_nothing_stands_over_the_arch_at_the_mouth(self, world) -> None:
+        from OpenGLContext.scenegraph.roadworks import TunnelProfile
+        circuit = world.circuit()
+        ground = world.height_fn()
+        line = np.asarray(circuit.points, dtype='d').reshape(-1, 3)
+        stations = np.asarray(circuit.stations, dtype='d')
+        clearance = TunnelProfile().clearance
+        for first, last in self._portals(circuit):
+            for at in (first, last):
+                index = int(np.clip(np.searchsorted(stations, at), 0,
+                                    len(line) - 1))
+                here = line[index]
+                over = float(np.asarray(
+                    ground(here[0], here[2])).ravel()[0]) - here[1]
+                assert over <= clearance, (
+                    'the mouth at %.0f m has %.1f m of hill over the arch'
+                    % (at, over - clearance))

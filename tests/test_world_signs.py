@@ -12,7 +12,7 @@ a bend a car can hold at the design speed is not one.
 import numpy as np
 import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
-from OpenGLContext.scenegraph.roadsigns import WARNINGS
+from OpenGLContext.scenegraph.roadsigns import LIMIT, WARNINGS
 
 from OpenGLContext_editor.world.road import RoadPath
 from OpenGLContext_editor.world.signs import (
@@ -63,7 +63,12 @@ class TestWhatIsWorthASign:
     def test_a_bend_the_car_can_hold_does_not(self) -> None:
         """There is always some speed at which a corner is too tight; the
         design speed is the answer to which corners count."""
-        assert warn_of(_path(_bend(radius=900.0)), SPEED) == []
+        assert warn_of(_path(_bend(radius=900.0)), SPEED, limit=0) == []
+
+    def test_and_the_road_is_still_posted_through_it(self) -> None:
+        """A limit sign is not about a hazard: it says what the road is."""
+        found = warn_of(_path(_bend(radius=900.0)), SPEED, limit=100)
+        assert found and all(one.kind == LIMIT for one in found)
 
     def test_which_way_it_turns_is_read_from_the_road(self) -> None:
         right = _bend(radius=45.0).copy()
@@ -190,7 +195,7 @@ class TestTheShippedCircuit:
 
     def test_every_one_is_a_kind_a_plate_can_show(self, circuit) -> None:
         for one in warn_of(circuit, SPEED):
-            assert one.kind in WARNINGS
+            assert one.face.plates
 
     def test_it_warns_of_its_tunnels(self, circuit) -> None:
         assert 'tunnel' in {one.kind for one in warn_of(circuit, SPEED)}

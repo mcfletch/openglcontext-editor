@@ -97,10 +97,17 @@ def _cast(pixels):
     Both of the things that can be overhead have a cast: sky is blue and a
     canopy is green. Tarmac has none, which is what makes this tell which way
     up the frame is without assuming which of the two is up there.
+
+    The strongest tenth of the patch rather than its average, because the two
+    casts *cancel*: blue sky between grey-green conifers averages out to a
+    neutral the same arithmetic gets from tarmac, and a frame full of both
+    then reads as a frame of road. What is being asked is whether anything up
+    there is sky or leaf, so what is measured is the pixels that are.
     """
-    average = pixels.reshape(-1, 3).mean(axis=0)
-    return float(max(average[1] - max(average[0], average[2]),
-                     average[2] - max(average[0], average[1])))
+    flat = pixels.reshape(-1, 3)
+    green = flat[:, 1] - np.maximum(flat[:, 0], flat[:, 2])
+    blue = flat[:, 2] - np.maximum(flat[:, 0], flat[:, 1])
+    return float(np.percentile(np.maximum(green, blue), 90))
 
 
 def _rows(pixels, low, high):
@@ -120,6 +127,7 @@ class TestTheFrameThatComesBack:
         this world is at its best the top of the frame is leaves. What is true
         either way is that the top of the frame is *coloured* -- blue sky or
         green canopy -- and the bottom is the neutral grey of tarmac.
+
         """
         above = _cast(_rows(rendered, 0.0, 0.08))
         below = _cast(_rows(rendered, 0.85, 1.0))

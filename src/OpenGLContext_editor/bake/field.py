@@ -98,6 +98,11 @@ class FieldTerrainLayer:
     rules: Sequence[LayerRule] = DEFAULT_RULES
     road: Any = None
     road_layer: int = 3
+    #: How far out the corridor reaches at each *segment* of the road, in
+    #: metres, for a road whose corridor is not one width all the way
+    #: along. A bore is dug as a cutting, so the bare ground beside it is
+    #: as wide as the cut rather than as wide as a carriageway.
+    road_cut: Any = None
     road_corridor: float | None = None
     name: str = 'terrain'
     _field: HeightField | None = dataclass_field(default=None, init=False,
@@ -179,14 +184,31 @@ class FieldTerrainLayer:
         x, z = np.meshgrid(axis, axis)
         corridor = (self.road_corridor if self.road_corridor is not None
                     else self.road.profile.total_width * ROAD_CORRIDOR)
-        found = self.road.sample(x, z, radius=corridor * 1.6)
+        cut = (np.asarray(self.road_cut, dtype='d')
+               if self.road_cut is not None else None)
+        reach = corridor if cut is None else float(cut.max())
+        found = self.road.sample(x, z, radius=reach * 1.6)
+        segment = found.segment.reshape(x.shape)
+        wide = corridor if cut is None else cut[segment]
         # Full strength on the road, fading out over the last quarter of the
         # corridor, so the material does not end in a line across the ground.
-        fade = corridor * 0.25
-        cover = np.clip((corridor - found.distance.reshape(x.shape))
-                        / max(fade, 1e-6), 0.0, 1.0)
-        # Only where the road is laid on the land. A deck stands over the
-        # ground and a bore runs inside it; painting a corridor of bare earth
-        # under either would draw the road's path across an untouched hillside.
-        cover *= self.road.segment_on_ground[found.segment.reshape(x.shape)]
+        fade = np.maximum(wide * 0.25, 1e-6)
+        cover = np.clip((wide - found.distance.reshape(x.shape)) / fade,
+                        0.0, 1.0)
+        # Where the road is laid on the land, and where it runs *through*
+        # it: a bore is dug as a cutting, so the ground beside the lining is
+        # ground that came out of a hill and is bare earth like any other
+        # cut. Left as whatever the rules made of the hillside, it grows
+        # grass -- on the floor of the tunnel, in plain view through the
+        # portal. A deck is the case this still leaves alone: the ground
+        # under one is forty metres down and untouched.
+        laid = self.road.segment_on_ground | self._bored()
+        cover *= laid[segment]
         return [(self.road_layer, cover)]
+
+    def _bored(self) -> Any:
+        """Which segments of the road run inside a hill."""
+        from OpenGLContext_editor.world.structures import Op
+        bore = np.array([op is Op.TUNNEL for op in self.road.ops], dtype=bool)
+        found: Any = bore[:-1] | bore[1:]
+        return found

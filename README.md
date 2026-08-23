@@ -251,6 +251,7 @@ shoulder, splits the road so each tile owns the length inside it, and writes the
 centreline into the tileset so a game can find the track in what it streams.
 
 ```python
+from OpenGLContext.scenegraph.road import bank_profile
 from OpenGLContext_editor.world.road import (
     RoadPath, RoadLayer, conform_terrain_at, follow_terrain,
 )
@@ -258,7 +259,7 @@ from OpenGLContext_editor.world.road import (
 course = follow_terrain(my_route, my_heights, spacing=5.0,
                         maximum_grade=0.075, design_speed=47.0,
                         minimum_height=2.5, closed=True)
-path = RoadPath(course)
+path = RoadPath(course, bank=bank_profile(course, speed=47.0, closed=True))
 ground = conform_terrain_at(my_heights, path)   # height fn -> height fn, per tile
 
 terrain = HeightfieldLayer(height_fn_at=ground, extent=extent, resolution=33)
@@ -278,6 +279,18 @@ print(bake_world([terrain, RoadLayer(path=path)], '/tmp/world', depth=4).summary
 - **lifted onto a causeway** where it would otherwise run below
   `minimum_height`, with its approaches raised to meet it.
 
+`bank_profile` then says how far each corner **leans**. A superelevated corner
+puts part of the car's weight to work holding it on the line, so it is faster
+than the same corner flat — or as fast round a tighter radius, which is what
+lets an alignment follow a valley instead of sweeping across it. Each corner
+gets the lean that balances a car at the speed given, capped at `MAXIMUM_BANK`
+(0.10 — the upper end of what is built into a road, not an oval's banking), and
+the change from camber to full lean is spread over a transition of some seventy
+metres on the approach rather than happening at the corner's entry. The lean
+goes into the `RoadPath`, and from there into the surface, the earthwork beside
+it, the structures carrying it and the tileset a game reads. `RoadPath()` with
+no `bank` is a road whose corners are flat.
+
 `conform_terrain_at` returns the ground *with the road built into it*, at
 whatever sample spacing the tile being baked uses -- a cut narrower than that
 spacing falls between two vertices and never appears in the mesh.
@@ -292,7 +305,8 @@ An alignment that is not on the ground and not on a causeway is on an
 **earthwork**: fill runs down
 from the shoulder to where it meets the land, a cutting runs up to it, and how
 far out that is depends on how far the road is from the ground and on nothing
-else. A road already on the land disturbs almost nothing; one carried forty
+else. Beside a banked corner the two verges are not at one height, and the
+ground meets each of them where it actually is. A road already on the land disturbs almost nothing; one carried forty
 metres over a valley builds an embankment as wide as it needs. Under the
 carriageway the ground sits a hand's breadth below the surface, because a road
 is built on a formation and surfaced on top of it.
@@ -338,6 +352,16 @@ tightest radius a car can take, or the tightest the legs have room for.
 `ease_route` to the circuit it invents for itself, which is the same
 distinction. A vertex turning less than fifteen degrees is a sample of a curve
 rather than a corner, and is left alone.
+
+**How tight "too tight" is depends on how far the corner leans.**
+`ProceduralWorld.corner_radius()` is the floor, and it is
+`cornering_radius(design_speed, bank=maximum_bank)` with a twentieth over for
+what draping and re-sampling move — 270 m for the shipped circuit, against 315 m
+if the same speed had to be held flat. `ProceduralWorld(maximum_bank=0.0)` lays
+the circuit out level and gets the wider corners back. A plan whose legs are too
+short to fit the fillet keeps its corner and loses radius instead, and such a
+corner is slower than the design speed: the road says so, since what it is
+signed at comes from the radius and the lean it ended up with.
 
 Where a lap begins travels with the road: `ProceduralWorld(start_at=(x, z))`
 puts the gantry at the station nearest that point, and the tileset's `extras`

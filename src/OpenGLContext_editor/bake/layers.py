@@ -32,7 +32,7 @@ from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
 from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
-from OpenGLContext.scenegraph.water import water_surface
+from OpenGLContext.scenegraph.water import LAKE, mesh_across, water_surface
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 
@@ -204,9 +204,17 @@ class WaterLayer:
     height_fn: HeightFn
     extent: BoundingBox
     level: float = 0.0
-    resolution: int = 9
+    #: How many vertices across the sheet is meshed at, or None to take it from
+    #: the wave it is carrying (:func:`~OpenGLContext.scenegraph.water.mesh_across`).
+    #: A fixed count over a tile hundreds of metres wide samples the ripple every
+    #: few hundred metres, which aliases the wave away and leaves a flat plate.
+    resolution: int | None = None
     probe: int = 17
     material: PBRMaterial | None = None
+    #: How the surface moves. Open water with nowhere to go is a lake: still
+    #: water is a mirror, and a mirror that size with nothing over it but a pale
+    #: sky is a white plate lying in the landscape.
+    style: Any = LAKE
     name: str = 'water'
 
     def bounds(self) -> BoundingBox:
@@ -221,12 +229,16 @@ class WaterLayer:
             return []
         if not self._flooded(footprint):
             return []
+        side = max(float(footprint.maximum[0] - footprint.minimum[0]),
+                   float(footprint.maximum[2] - footprint.minimum[2]))
+        across = (int(self.resolution) if self.resolution is not None
+                  else mesh_across(side, self.style))
         sheet = water_surface(
             float(footprint.minimum[0]), float(footprint.maximum[0]),
             float(footprint.minimum[2]), float(footprint.maximum[2]),
-            level=float(self.level), resolution=self.resolution,
+            level=float(self.level), resolution=across, style=self.style,
             material=self.material)
-        return [SceneNode(mesh=sheet, name='%s_%d' % (self.name, self.resolution))]
+        return [SceneNode(mesh=sheet, name='%s_%d' % (self.name, across))]
 
     def _flooded(self, footprint: BoundingBox) -> bool:
         """Whether the ground under this footprint goes under the waterline."""
