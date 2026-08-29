@@ -118,3 +118,12 @@ extras = ["dev"]
 # default; without this the resolver reports them "not available".
 pip_pre = true
 commands = [["pytest", { replace = "posargs", extend = true }]]
+
+# uv decides whether its cached metadata for a source tree is still current
+# from pyproject.toml, setup.py and setup.cfg alone. This project's version
+# lives in src/OpenGLContext_editor/__init__.py, so name that file too: without
+# it a version bump leaves uv answering with the previous number, and a
+# dependent requiring the new one resolves against PyPI rather than this
+# checkout.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/OpenGLContext_editor/__init__.py" }]
