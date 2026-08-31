@@ -1,4 +1,4 @@
 """Command-line entry points.
 
-``bake``   ``oglc-bake`` -- bake a world into a streamable 3D Tiles dataset
+``bake``   ``oglc-bake`` -- says that the command is now ``glisteel-bake``
 """

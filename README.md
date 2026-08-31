@@ -25,15 +25,22 @@ A game imports `OpenGLContext`. An editor imports both.
 
 ## Bake one now
 
+The shipped world is a racing circuit in hill country, so the command that
+bakes it belongs to the game's tools:
+
 ```bash
-pip install OpenGLContext-editor
-oglc-bake --output /tmp/world      # hill country, a canyon, a lake, a forest
-oglc-view /tmp/world/tileset.json  # walk around in it
+pip install glisteel-editor
+glisteel-bake --output /tmp/world   # hill country, a canyon, a lake, a forest
+oglc-view /tmp/world/tileset.json   # walk around in it
 ```
 
-`oglc-bake --view` runs both steps. `--extent`, `--depth` and `--resolution`
-set how big the world is, how deep the tile tree refines and how many ground
-samples each tile spends; `oglc-bake --help` lists the rest.
+`glisteel-bake --view` runs both steps. `--extent`, `--depth` and
+`--resolution` set how big the world is, how deep the tile tree refines and how
+many ground samples each tile spends; `glisteel-bake --help` lists the rest.
+
+The baker itself is here, and takes any layers at all:
+`OpenGLContext_editor.bake.driver.bake_world`. `oglc-bake` remains for one
+release cycle, saying where the command went.
 
 **How the ground and the trees are carried** is the choice that decides what a
 world costs to draw. `--ground field` writes the landscape once beside the
@@ -452,7 +459,7 @@ pytest
 |---|---|
 | `src/OpenGLContext_editor/bake/` | the tile baker: bounds, the octree, layers, the tileset writer, the bake driver |
 | `src/OpenGLContext_editor/world/` | world generation: the height source, presets, DEM import, sculpting, hydrology, contours, scatter, roads, and the example world |
-| `src/OpenGLContext_editor/bin/` | `oglc-bake` |
+| `src/OpenGLContext_editor/bin/` | `oglc-bake`, which says the command is now `glisteel-bake` |
 | `tests/` | the suite; `pytest` runs it |
 | `specs/` | format and interoperability facts the code cites, and the [clean-room procedure](specs/CLEAN-ROOM.md) that governs how they are gathered |
 

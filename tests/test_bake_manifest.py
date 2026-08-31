@@ -6,7 +6,7 @@ the baker decides about it.
 """
 import pytest
 
-from OpenGLContext_editor.bin.bake import world_name
+from OpenGLContext_editor.bake.manifest import world_name
 
 
 class TestNamingAWorldAfterItsDirectory:

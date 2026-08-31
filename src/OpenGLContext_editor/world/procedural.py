@@ -3,7 +3,7 @@
 The layers here describe a forested landscape -- hills, ridges, a river canyon
 and a lake basin, with conifers on the ground that will hold them -- assembled
 entirely from what the engine already generates. It is the worked example the
-toolkit ships: ``oglc-bake`` bakes it, ``oglc-view`` streams the result, and the
+toolkit ships: ``glisteel-bake`` bakes it, ``oglc-view`` streams the result, and the
 code below is the shortest honest answer to "how do I describe a world?".
 
 Every piece of it is a normal layer, so a world of your own is this file with

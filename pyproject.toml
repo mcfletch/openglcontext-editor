@@ -46,6 +46,9 @@ dependencies = [
 dev = ["pytest", "pytest-cov", "pytest-timeout", "ruff", "mypy"]
 
 [project.scripts]
+# Moved to glisteel-editor as `glisteel-bake`: the world it baked is a racing
+# circuit, and its options are that world's.  Kept for one release cycle so a
+# script that calls it is told where to go.  Removed after that.
 oglc-bake = "OpenGLContext_editor.bin.bake:main"
 
 [project.urls]

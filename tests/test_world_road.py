@@ -797,7 +797,7 @@ class TestACircuitIsRoundedAllTheWayRound:
 
 
 class TestTheShippedCircuitIsDrivable:
-    """The world ``oglc-bake`` produces is the one a player drives, so the
+    """The world ``glisteel-bake`` produces is the one a player drives, so the
     question its alignment has to answer is a driver's: at the speed it is
     built for, does the car stay on the road?
     """
