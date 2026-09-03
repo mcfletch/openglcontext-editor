@@ -31,8 +31,11 @@ def _viewer():
     ``sys.executable`` but not necessarily on PATH, and a GL test that skips
     itself reads as green while rendering nothing.
     """
-    beside = os.path.join(os.path.dirname(sys.executable), 'oglc-view')
-    if os.path.exists(beside):
+    # which() rather than joining the name on: it applies PATHEXT, and the
+    # console script is oglc-view.exe on Windows. Joining finds nothing there,
+    # and the search falls through to a PATH that a venv run this way is not on.
+    beside = shutil.which('oglc-view', path=os.path.dirname(sys.executable))
+    if beside:
         return beside
     return shutil.which('oglc-view')
 
