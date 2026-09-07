@@ -30,7 +30,6 @@ from OpenGLContext.scenegraph.road import (
     RoadProfile,
     bank_profile,
 )
-from OpenGLContext_editor.world.character import corner_radii, road_character
 from OpenGLContext.scenegraph.roadsigns import SignProfile
 from OpenGLContext.scenegraph.terrain import LayerRule
 
@@ -48,6 +47,7 @@ from OpenGLContext_editor.bake.layers import (
 from OpenGLContext_editor.bake.props import PropLayer
 from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
+from OpenGLContext_editor.world.character import corner_radii, road_character
 from OpenGLContext_editor.world.gantry import StartFinish, start_finish
 from OpenGLContext_editor.world.height import (
     DEFAULT_RELIEF,

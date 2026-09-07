@@ -36,9 +36,7 @@ import numpy as np
 from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.road import (
-    MAXIMUM_BANK,
     RoadProfile,
-    bank_profile,
     banked_sections,
     morphed_sections,
     resample_polyline,
@@ -723,7 +721,7 @@ def _per_point(value: Any, count: int, what: str) -> np.ndarray:
 
 
 def curvature_limit(design_speed: Any,
-                    weight_loss: float = CREST_WEIGHT_LOSS) -> float:
+                    weight_loss: float = CREST_WEIGHT_LOSS) -> float | np.ndarray:
     """The sharpest crest a road may have, as change of grade per metre.
 
     A vertical curve of radius ``R`` taken at ``v`` pulls a car off the road at

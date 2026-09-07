@@ -38,7 +38,12 @@ classifiers = [
 # The engine supplies the glTF/tileset writers a bake emits through and the
 # scenegraph an editor session drives; numpy is the whole geometry pipeline.
 dependencies = [
-    "OpenGLContext>=3.0.0a1",
+    # 3.0.0a3 is the floor rather than 3.0.0a1: this package imports
+    # `OpenGLContext.scenegraph.road`, `.roadworks`, `.gantry`, `.props`,
+    # `.loaders.gltf.writer` and `.loaders.tiles3d.manifest`, none of which
+    # exists in 3.0.0a2. A floor that is lower than what the code imports is a
+    # resolver that succeeds and an application that fails on the first import.
+    "OpenGLContext>=3.0.0a3",
     "numpy>=2.0",
 ]
 
@@ -105,6 +110,15 @@ ignore_missing_imports = true
 # A greenfield package, so the annotation bar the workspace asks of new code is
 # enforced by the checker rather than by review.
 disallow_untyped_defs = true
+
+# numpy arithmetic is typed to return `Any` in the shipped stubs, so
+# `warn_return_any` fires on nearly every array-returning function in the
+# geometry under `world/` and buries the genuine type errors among them. Off for
+# that package only, exactly as the engine does for `OpenGLContext.physics.*`;
+# every other check -- argument types, optionals, attributes -- stays on.
+[[tool.mypy.overrides]]
+module = "OpenGLContext_editor.world.*"
+warn_return_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

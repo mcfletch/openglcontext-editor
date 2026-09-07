@@ -837,7 +837,8 @@ class TestTheShippedCircuitIsDrivable:
         to a gentle grade across a mountainside stands off it on an embankment
         for as far as the mountainside lasts."""
         from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_MAX_GRADE, CIRCUIT_STEEP_GRADE,
+            CIRCUIT_MAX_GRADE,
+            CIRCUIT_STEEP_GRADE,
         )
         world = self._world()
         grade, _curvature = self._profile(world.circuit().points)

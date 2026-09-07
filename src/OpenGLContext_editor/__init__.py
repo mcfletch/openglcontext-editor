@@ -18,6 +18,6 @@ phases and the division of labour between the two packages are in
 <https://github.com/mcfletch/openglcontext/blob/main/plans/GLISTEEL-WORLD-AUTHORING.md>`_.
 """
 
-__version__ = "0.1.0a1"
+__version__ = "1.0.0a1"
 __author__ = "Michael Colin Fletcher"
 __license__ = "BSD-Style, see license.txt for details"

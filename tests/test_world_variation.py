@@ -156,6 +156,7 @@ class TestCornersThatDifferFromEachOther:
 
     def test_a_hairpin_is_tighter_than_the_road_it_is_on(self) -> None:
         from OpenGLContext.scenegraph.road import corner_speed
+
         from OpenGLContext_editor.world.route import hold_corners
         plan = self._square()
         wanted = np.array([45.0, 260.0, 260.0, 260.0])
@@ -264,7 +265,8 @@ class TestACircuitThatIsNotTheSameRoadAllTheWayRound:
 
     def test_it_climbs_harder_where_the_land_does(self) -> None:
         from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_MAX_GRADE, CIRCUIT_STEEP_GRADE,
+            CIRCUIT_MAX_GRADE,
+            CIRCUIT_STEEP_GRADE,
         )
         found = self._grades(self._world(1.0).circuit()).max()
         assert found > CIRCUIT_MAX_GRADE * 1.15

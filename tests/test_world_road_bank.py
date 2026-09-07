@@ -146,6 +146,7 @@ class TestWhatTheCircuitIsLaidOutFor:
         now, and a hairpin holds what a hairpin holds. What has to be true of
         each of them is that it holds the speed it was *laid out* for."""
         from OpenGLContext.scenegraph.road import plan_curvature
+
         from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         path = world.circuit()
@@ -158,8 +159,10 @@ class TestWhatTheCircuitIsLaidOutFor:
 
     def test_a_circuit_of_one_corner_holds_the_speed_it_was_laid_out_for(self) -> None:
         from OpenGLContext.scenegraph.road import plan_curvature
+
         from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED, ProceduralWorld,
+            CIRCUIT_DESIGN_SPEED,
+            ProceduralWorld,
         )
         path = ProceduralWorld(structures=False, variety=0.0).circuit()
         curvature = np.abs(plan_curvature(path.points, closed=True))
@@ -173,8 +176,10 @@ class TestWhatTheCircuitIsLaidOutFor:
         """About a fifth tighter, which is what road banking is worth. Half
         again would be an oval, and this is a road."""
         from OpenGLContext.scenegraph.road import cornering_radius
+
         from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED, CIRCUIT_MAXIMUM_BANK,
+            CIRCUIT_DESIGN_SPEED,
+            CIRCUIT_MAXIMUM_BANK,
         )
         flat = cornering_radius(CIRCUIT_DESIGN_SPEED)
         banked = cornering_radius(CIRCUIT_DESIGN_SPEED,
@@ -214,6 +219,7 @@ class TestTheStartLineOnABankedRoad:
     def test_the_legs_stay_upright(self) -> None:
         """A gantry is steel standing on two feet; the road leans, not it."""
         from OpenGLContext.scenegraph.gantry import GantryProfile
+
         from OpenGLContext_editor.bake.gantry import GantryLayer
         one = self._placement(0.10)
         top = np.asarray(GantryLayer(placement=one)._mesh.positions,

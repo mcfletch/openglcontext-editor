@@ -8,8 +8,8 @@ crossing, how far a driver has to be able to see -- rather than sprinkled about.
 """
 import numpy as np
 import pytest
-
 from OpenGLContext.scenegraph.road import corner_speed
+
 from OpenGLContext_editor.world.character import (
     RoadCharacter,
     corner_radii,
