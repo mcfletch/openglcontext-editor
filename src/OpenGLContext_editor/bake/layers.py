@@ -383,7 +383,8 @@ def node_bounds(node: SceneNode) -> BoundingBox | None:
     """
     meshes = ([node.mesh] if isinstance(node.mesh, PBRMesh)
               else list(node.mesh or ()))
-    box = BoundingBox.joined(BoundingBox.of_points(mesh.positions) for mesh in meshes)
+    box = BoundingBox.joined(BoundingBox.of_points(mesh.positions)
+                             for mesh in meshes if mesh.positions is not None)
     if box is None:
         return None
     if node.instances is not None:

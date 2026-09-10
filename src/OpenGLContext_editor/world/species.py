@@ -37,27 +37,33 @@ __all__ = ['shipped_species', 'shipped_credits', 'species_directory',
 #: maples give the valleys something broadleaf so a lap is not one tree
 #: repeated.
 SHIPPED = (
-    dict(name='fir', mesh='fir.npz', solid_texture='fir_bark.png',
-         foliage_texture='fir_branch.png', impostor='fir_imp.png',
-         card_width=0.50),
-    dict(name='noel', mesh='noel.npz', solid_texture='noel_bark.png',
-         foliage_texture='noel_branch.png', impostor='noel_imp.png',
-         card_width=0.55),
-    dict(name='maple0', mesh='maple0.npz', solid_texture='maple_bark.png',
-         foliage_texture='maple_leaves.png', impostor='maple_imp0.png',
-         solid=('bP', 'bN', 'bU', 'bI'), foliage=('cP', 'cN', 'cU', 'cI'),
-         card_width=0.72),
-    dict(name='maple2', mesh='maple2.npz', solid_texture='maple_bark.png',
-         foliage_texture='maple_leaves.png', impostor='maple_imp2.png',
-         solid=('bP', 'bN', 'bU', 'bI'), foliage=('cP', 'cN', 'cU', 'cI'),
-         card_width=0.72),
+    TreeSpecies(name='fir', mesh='fir.npz', solid_texture='fir_bark.png',
+                foliage_texture='fir_branch.png', impostor='fir_imp.png',
+                card_width=0.50),
+    TreeSpecies(name='noel', mesh='noel.npz', solid_texture='noel_bark.png',
+                foliage_texture='noel_branch.png', impostor='noel_imp.png',
+                card_width=0.55),
+    TreeSpecies(name='maple0', mesh='maple0.npz',
+                solid_texture='maple_bark.png',
+                foliage_texture='maple_leaves.png',
+                impostor='maple_imp0.png',
+                solid=('bP', 'bN', 'bU', 'bI'),
+                foliage=('cP', 'cN', 'cU', 'cI'),
+                card_width=0.72),
+    TreeSpecies(name='maple2', mesh='maple2.npz',
+                solid_texture='maple_bark.png',
+                foliage_texture='maple_leaves.png',
+                impostor='maple_imp2.png',
+                solid=('bP', 'bN', 'bU', 'bI'),
+                foliage=('cP', 'cN', 'cU', 'cI'),
+                card_width=0.72),
 )
 
 #: What the example world grows between its trees. A clump of real blades for
 #: the near field and the card it is baked into for the far one, dense enough
 #: that a driver sees ground cover rather than individual tufts.
-COVER = dict(name='grass', clump='basic-clump.glb', card='grass_clump_imp.png',
-             density=1.6, height=0.5)
+COVER = CoverSpecies(name='grass', clump='basic-clump.glb',
+                     card='grass_clump_imp.png', density=1.6, height=0.5)
 
 #: What a world baked from :data:`SHIPPED` has to say about where its trees came
 #: from. CC-BY 4.0 requires the attribution to travel with the work.
@@ -99,7 +105,7 @@ def shipped_species(directory: str | None = None) -> list[TreeSpecies]:
     where = directory or species_directory()
     found = []
     for entry in SHIPPED:
-        species = TreeSpecies(**entry).beside(where)
+        species = entry.beside(where)
         for part in (species.mesh, species.solid_texture,
                      species.foliage_texture, species.impostor):
             if not os.path.exists(part):
@@ -116,7 +122,7 @@ def shipped_cover(directory: str | None = None) -> CoverSpecies:
     ``directory`` holds the files; it defaults to :func:`species_directory`.
     """
     where = directory or species_directory()
-    cover = CoverSpecies(**COVER).beside(where)
+    cover = COVER.beside(where)
     for part in (cover.card, cover.clump):
         if part and not os.path.exists(part):
             raise LookupError(

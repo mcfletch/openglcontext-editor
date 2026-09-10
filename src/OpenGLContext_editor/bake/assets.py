@@ -67,6 +67,10 @@ def combined_mesh(meshes: list[PBRMesh], material: Any = None) -> PBRMesh:
     positions, normals, texcoords, colors, indices = [], [], [], [], []
     offset = 0
     for mesh in meshes:
+        if mesh.positions is None:
+            # A node that carries a material and no vertices contributes
+            # nothing to draw; it is not a reason to refuse the merge.
+            continue
         count = len(mesh.positions)
         positions.append(np.asarray(mesh.positions, 'f'))
         normals.append(_or_zeros(mesh.normals, count, 3))
