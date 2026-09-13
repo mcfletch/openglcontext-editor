@@ -47,7 +47,7 @@ dependencies = [
     # pre-release is named because an installer skips one it was not asked for.
     #
     # `gltf` is the loader and writer a bake reads and writes tilesets through.
-    "OpenGLContext[gltf]>=3.0.0a4",
+    "OpenGLContext[gltf]>=3.0.0a5",
     "numpy>=2.0",
 ]
 
