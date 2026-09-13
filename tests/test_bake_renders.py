@@ -54,7 +54,11 @@ def rendered(tmp_path_factory):
     """Bake a world, render one frame of it from inside, return the pixels."""
     from PIL import Image
     directory = tmp_path_factory.mktemp('rendered')
-    world = ProceduralWorld(extent=EXTENT, resolution=17, seed=11)
+    # `forest='tiles'` grows the trees from generated conifer meshes
+    # rather than from the demo's tree files, so what is rendered here is
+    # this package's own and needs no optional install.
+    world = ProceduralWorld(extent=EXTENT, resolution=17, seed=11,
+                            forest='tiles')
     result = bake_world(world.layers(), str(directory), depth=DEPTH)
     # Stand on the circuit and look along it, rather than at a pose written
     # down here: what the world looks like is the world's business, and a fixed

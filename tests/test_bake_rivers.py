@@ -128,6 +128,11 @@ class TestTheWorldThatCarriesThem:
         named.setdefault('resolution', 17)
         named.setdefault('tree_density', 0.0)
         named.setdefault('road', False)
+        # The default forest reads the demo's tree files; rivers do not
+        # need them, and `tree_density=0.0` above does not stand them
+        # down -- the species list is resolved whether or not anything
+        # stands on it.
+        named.setdefault('forest', 'tiles')
         return ProceduralWorld(channels=list(channels), **named)
 
     def test_a_world_with_no_rivers_has_no_river_layer(self) -> None:

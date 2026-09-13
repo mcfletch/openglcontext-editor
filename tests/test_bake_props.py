@@ -88,8 +88,11 @@ class TestTheShippedWorld:
     @pytest.fixture(scope='class')
     def world(self):
         from OpenGLContext_editor.world.procedural import ProceduralWorld
+        # `forest='tiles'` because this is about props, and the default
+        # forest is drawn from the demo's tree files -- an optional
+        # install, which a suite about boulders should not require.
         return ProceduralWorld(extent=1024.0, field_resolution=257,
-                               control_size=256)
+                               control_size=256, forest='tiles')
 
     def test_its_verges_have_boulders_on_them(self, world) -> None:
         layer = world.prop_layer()

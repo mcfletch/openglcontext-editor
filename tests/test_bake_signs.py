@@ -75,7 +75,7 @@ class TestTheShippedWorld:
         # A quarter of the shipped world's side, which is the same landscape and
         # the same generator at a resolution a test can afford.
         return ProceduralWorld(extent=1024.0, field_resolution=257,
-                               control_size=256)
+                               control_size=256, forest='tiles')
 
     def test_its_circuit_is_signed(self, world) -> None:
         layer = world.sign_layer()
@@ -112,7 +112,7 @@ class TestASignStandsWhereItCanBeSeen:
     def world(self):
         from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=1024.0, field_resolution=257,
-                               control_size=256)
+                               control_size=256, forest='tiles')
 
     def test_every_sign_is_inside_the_cleared_corridor(self, world) -> None:
         corridor = world._corridor()

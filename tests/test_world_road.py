@@ -554,7 +554,8 @@ class TestTheWholeBakedWorldKeepsItsRoad:
         from OpenGLContext_editor.bake.driver import bake_world
         from OpenGLContext_editor.world.procedural import ProceduralWorld
 
-        world = ProceduralWorld(extent=1024.0, resolution=17, seed=11)
+        world = ProceduralWorld(extent=1024.0, resolution=17, seed=11,
+                                forest='tiles')
         result = bake_world(world.layers(), str(tmp_path), depth=2)
         # Only where the road is laid on the land: over a bore the ground
         # stands above the carriageway by the whole depth of the hill, which is
