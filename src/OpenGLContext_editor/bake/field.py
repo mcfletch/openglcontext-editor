@@ -195,20 +195,10 @@ class FieldTerrainLayer:
         fade = np.maximum(wide * 0.25, 1e-6)
         cover = np.clip((wide - found.distance.reshape(x.shape)) / fade,
                         0.0, 1.0)
-        # Where the road is laid on the land, and where it runs *through*
-        # it: a bore is dug as a cutting, so the ground beside the lining is
-        # ground that came out of a hill and is bare earth like any other
-        # cut. Left as whatever the rules made of the hillside, it grows
-        # grass -- on the floor of the tunnel, in plain view through the
-        # portal. A deck is the case this still leaves alone: the ground
-        # under one is forty metres down and untouched.
-        laid = self.road.segment_on_ground | self._bored()
-        cover *= laid[segment]
+        # Where the road is laid on the land, and nowhere else. A deck leaves
+        # the ground under it forty metres down and untouched, and a bore
+        # leaves the hill it runs through exactly as it found it -- what a
+        # driver sees through the portal is the lining, and the hillside above
+        # is hillside.
+        cover *= self.road.segment_on_ground[segment]
         return [(self.road_layer, cover)]
-
-    def _bored(self) -> Any:
-        """Which segments of the road run inside a hill."""
-        from OpenGLContext_editor.world.structures import Op
-        bore = np.array([op is Op.TUNNEL for op in self.road.ops], dtype=bool)
-        found: Any = bore[:-1] | bore[1:]
-        return found

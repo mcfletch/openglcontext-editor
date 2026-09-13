@@ -271,41 +271,24 @@ class RoadPath:
     def reshaped_segments(self) -> np.ndarray:
         """Which segments the earthwork reshapes the ground along.
 
-        The ones standing on the land, and **every one running through a bore**.
+        The ones standing on the land, and those alone. A road carried over the
+        ground on a deck leaves it as it found it, and a road running *inside*
+        the ground leaves it as it found it too: the hill a bore passes through
+        is still a hill, and the carriageway is under it.
 
-        The ground a tunnel passes through has to come out from under it. Left
-        in, the hillside stands inside the tube: a ground mesh draws straight
-        lines between its samples, so the line from the last cut sample outside
-        the portal up to the untouched hill is a bank across the opening -- the
-        road arrives at a wall with the arch in the air behind it, and a car
-        only gets through because the collider has the bore taken out of it.
-        Cutting a sample's worth inside the portal only moves the bank a few
-        metres in, where it is a hillside seen through the mouth instead of the
-        lining.
-
-        A height field is a surface, so what "out from under it" can mean here
-        is *down to the road*: the approach cutting carries on through the hill
-        for the length of the bore, with the lining standing inside it. The
-        hill above a long bore is opened into a broad cutting, which is the
-        cost of drawing a tunnel in a surface rather than in a solid; what
-        would keep the hill whole is a hole in the ground mesh with the bore's
-        own outside plugging it, and that is a terrain feature rather than a
-        road one.
-
-        **Either end in a bore is enough.** A ground mesh draws straight lines
-        between its samples, so what the opening looks like is decided by the
-        sample *at the mouth* -- and the segment straddling a portal has one end
-        outside it. Reshape only the segments with both ends inside and that
-        sample keeps the hillside's own height: the cut starts a segment late,
-        and the line from the hill down to it is a wall across the road with the
-        arch standing in the air behind it.
+        A height field is a surface, so saying a hill is hollow takes something
+        the surface itself cannot hold. That something is ``holes`` --
+        :meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh` drops a
+        triangle whose centre is in one, which is the rule
+        :class:`~OpenGLContext.physics.heightfield.HeightFieldColliders` has
+        always used, so the surface drawn and the surface driven on agree by
+        construction. The opening at a portal is that hole; the earthwork has
+        nothing left to fake and does not try.
 
         Not a deck: under one the same move would raise a pillar of ground to
         meet a road that is forty metres up.
         """
-        on = self.segment_on_ground
-        bore = np.array([op is Op.TUNNEL for op in self.ops], dtype=bool)
-        found: np.ndarray = on | bore[:-1] | bore[1:]
+        found: np.ndarray = self.segment_on_ground
         return found
 
     def ops_at(self, stations: Any) -> np.ndarray:

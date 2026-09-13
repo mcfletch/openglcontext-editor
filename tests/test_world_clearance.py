@@ -57,23 +57,28 @@ def _kept(world, offsets):
     return np.asarray(world._away_from_the_road(points))
 
 
-class TestInsideABore:
-    """Nothing grows in a tunnel.
+class TestOverABore:
+    """A wood grows over a tunnel, because the hill it grows on is still there.
 
-    The ground a bore runs through is taken out from under it, down to the
-    road, for as far as the bore goes -- so the land a tree would have stood on
-    is not there any more, and one planted on the cut floor is a tree inside
-    the tunnel, in plain view through the portal. The cleared corridor is the
-    whole of what was dug out.
+    This class used to say the opposite: the ground a bore ran through was cut
+    out from under it down to the road, so the land a tree stood on was gone and
+    one planted on the cut floor was a tree *inside* the tunnel, in plain view
+    through the portal. The clearing was widened to the whole of what had been
+    dug out.
+
+    Nothing is dug out now -- a bore runs under the hill and the hill stays --
+    so there is no cut floor to plant on and nothing to widen the clearing for.
+    What clears a tree over a bore is the road's own corridor, the same as
+    anywhere else.
     """
 
     def _world(self, sink=30.0):
         return _World(extent=1024.0, sink=sink)
 
-    def test_a_tree_where_the_hill_was_is_dropped(self) -> None:
+    def test_a_tree_on_the_hill_over_a_bore_is_kept(self) -> None:
         world = self._world()
         corridor = PROFILE.total_width / 2.0 + ROAD_CLEARANCE
-        assert not bool(_kept(world, [corridor + 5.0])[0])
+        assert bool(_kept(world, [corridor + 5.0])[0])
 
     def test_one_out_past_the_cutting_is_kept(self) -> None:
         world = self._world(sink=30.0)
@@ -83,14 +88,20 @@ class TestInsideABore:
         world = self._world()
         corridor = PROFILE.total_width / 2.0 + ROAD_CLEARANCE
         assert list(_kept(world, [-(corridor + 5.0), corridor + 5.0])) \
-            == [False, False]
+            == [True, True]
 
-    def test_a_shallower_bore_clears_less(self) -> None:
-        shallow = float(np.sum(_kept(self._world(sink=10.0),
-                                     np.linspace(10.0, 200.0, 96))))
-        deep = float(np.sum(_kept(self._world(sink=40.0),
-                                  np.linspace(10.0, 200.0, 96))))
-        assert shallow > deep
+    def test_how_deep_the_bore_is_makes_no_difference(self) -> None:
+        """It did, and that was the tell: the clearing was the size of the
+        earthworks that are no longer cut."""
+        across = np.linspace(10.0, 200.0, 96)
+        shallow = float(np.sum(_kept(self._world(sink=10.0), across)))
+        deep = float(np.sum(_kept(self._world(sink=40.0), across)))
+        assert shallow == deep
+
+    def test_the_road_itself_is_still_clear(self) -> None:
+        """A clearing that cleared nothing would pass everything above."""
+        world = self._world()
+        assert not bool(_kept(world, [0.0])[0])
 
 
 class TestOnTheGround:

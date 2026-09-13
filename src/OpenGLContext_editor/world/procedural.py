@@ -55,7 +55,6 @@ from OpenGLContext_editor.world.height import (
     ProceduralBase,
 )
 from OpenGLContext_editor.world.road import (
-    EARTHWORK_SLOPE,
     RoadLayer,
     RoadPath,
     conform_terrain,
@@ -595,8 +594,7 @@ class ProceduralWorld:
             + ROCK_CLEARANCE
         found = circuit.sample(points[:, 0], points[:, 2],
                                radius=ROCK_REACH * 1.5)
-        dug = self._bore_corridor(circuit, clear)[found.segment]
-        keep = np.asarray((found.distance > np.maximum(clear, dug))
+        keep = np.asarray((found.distance > clear)
                           & (found.distance < ROCK_REACH))
         room: np.ndarray = keep & self._clear_of_the_gantry(points)
         return room
@@ -891,8 +889,7 @@ class ProceduralWorld:
             road=self.circuit() if self.road else None,
             road_layer=GROUND_LAYERS.index('dirt'),
             road_corridor=self._corridor(),
-            road_cut=(self._bore_corridor(self.circuit(), self._corridor())
-                      if self.road else None), name='terrain')
+            name='terrain')
 
     def _corridor(self) -> float:
         """How far out the road's own ground reaches, in metres.
@@ -1043,36 +1040,15 @@ class ProceduralWorld:
         corridor = (np.full(len(circuit.ops) - 1, self._corridor())
                     if along is None else along)
         reach = corridor + CROWN_RADIUS
-        cut = self._bore_corridor(circuit, corridor)
         found = circuit.sample(points[:, 0], points[:, 2],
-                               radius=max(reach.max(), cut.max()) * 1.5)
+                               radius=reach.max() * 1.5)
         ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
                             dtype='d')
         carried = found.height - ground > CARRIED_ABOVE
         segment = found.segment
-        cleared = np.maximum(np.where(carried, reach[segment],
-                                      corridor[segment]),
-                             cut[segment])
+        cleared = np.where(carried, reach[segment], corridor[segment])
         return np.asarray(found.distance > cleared)
 
-    def _bore_corridor(self, circuit: Any, corridor: Any) -> np.ndarray:
-        """How far out the ground is dug away at each segment of the road.
-
-        The corridor for a stretch on the land -- one figure or one per segment
-        -- and the corridor plus the earthwork's own batter for one inside a
-        hill: how deep the road is under the land, over the slope the cut stands
-        at.
-        """
-        depth = np.zeros(len(circuit.ops), dtype='d')
-        bore = np.array([op is Op.TUNNEL for op in circuit.ops], dtype=bool)
-        if bore.any():
-            points = circuit.points
-            ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
-                                dtype='d')
-            depth = np.where(bore, np.maximum(ground - points[:, 1], 0.0), 0.0)
-        along = np.maximum(depth[:-1], depth[1:]) / EARTHWORK_SLOPE
-        beside = np.broadcast_to(np.asarray(corridor, dtype='d'), along.shape)
-        return np.where(along > 0.0, beside + along, beside)
 
 
 def _rock_kind(index: int) -> str:

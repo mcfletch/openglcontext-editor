@@ -95,15 +95,20 @@ class TestGroundUnderAStructure:
         assert float(conformed(np.array([200.0]), np.array([0.0]))[0]) \
             == pytest.approx(0.0)
 
-    def test_the_hill_over_a_bore_comes_out_from_under_it(self) -> None:
-        """A ground mesh is a surface, so the only way to take a tunnel out of
-        it is to cut down to the road for the length of the bore. Left in, the
-        hillside stands inside the tube and a driver looking into the portal
-        sees the hill rather than the lining."""
+    def test_the_hill_over_a_bore_is_left_where_it_is(self) -> None:
+        """A road running *inside* the ground leaves it as it found it.
+
+        The earthwork used to cut down to the road for the length of a bore,
+        because a height field is a surface and had no other way to take a
+        tunnel out of one -- which made the tunnel a valley with a lid. Saying a
+        hill is hollow is `holes`' job now
+        (:meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh`), and the
+        earthwork has nothing left to fake.
+        """
         path, conformed = self._under(Op.TUNNEL)
         at = path.points[20]
         assert float(conformed(np.array([at[0]]), np.array([at[2]]))[0]) \
-            <= float(at[1]) + 1e-6
+            > float(at[1]) + 1.0
 
     def test_and_the_land_out_past_the_cutting_is_left_as_it_was(self) -> None:
         _path, conformed = self._under(Op.TUNNEL)
@@ -325,11 +330,12 @@ class TestWhereAStructureMeetsTheGround:
         over = float(conformed(np.array([at[0]]), np.array([aside]))[0])
         assert over == pytest.approx(float(hill(at[0], aside)), abs=0.01)
 
-    def test_and_the_bore_itself_is_cut_down_to_the_road(self) -> None:
+    def test_and_the_hill_the_bore_runs_through_is_still_there(self) -> None:
+        """The approach is cut; what the road passes under is not."""
         path, conformed, _hill = self._approach()
         at = path.points[30]
         over = float(conformed(np.array([at[0]]), np.array([at[2]]))[0])
-        assert over <= float(at[1]) + 1e-6
+        assert over > float(at[1]) + 1.0
 
     def test_a_road_all_on_the_ground_is_unchanged(self) -> None:
         path = RoadPath(_line(height=6.0))
@@ -409,20 +415,82 @@ class TestAPortalIsOpen:
     def test_the_world_has_bores_to_look_into(self, world) -> None:
         assert self._portals(world.circuit())
 
-    def test_nothing_stands_over_the_arch_at_the_mouth(self, world) -> None:
-        from OpenGLContext.scenegraph.roadworks import TunnelProfile
+    def test_a_mouth_is_a_hole_in_a_hillside(self, world) -> None:
+        """There is hill over the arch, and that is the point.
+
+        A portal is an opening *in* something. The earthwork used to remove the
+        something -- so the arch stood at the end of a trench with nothing above
+        it -- and what opens the mouth now is the `holes` the game hands to the
+        terrain and the collider alike, which covers the bore, a margin either
+        side, and the approach where a sampled cutting meets untouched hillside.
+        The editor's job is to leave the hill; glisteel's cases cover the mask.
+        """
         circuit = world.circuit()
         ground = world.height_fn()
         line = np.asarray(circuit.points, dtype='d').reshape(-1, 3)
         stations = np.asarray(circuit.stations, dtype='d')
-        clearance = TunnelProfile().clearance
         for first, last in self._portals(circuit):
-            for at in (first, last):
-                index = int(np.clip(np.searchsorted(stations, at), 0,
-                                    len(line) - 1))
-                here = line[index]
-                over = float(np.asarray(
-                    ground(here[0], here[2])).ravel()[0]) - here[1]
-                assert over <= clearance, (
-                    'the mouth at %.0f m has %.1f m of hill over the arch'
-                    % (at, over - clearance))
+            middle = (first + last) / 2.0
+            index = int(np.clip(np.searchsorted(stations, middle), 0,
+                                len(line) - 1))
+            here = line[index]
+            over = float(np.asarray(
+                ground(here[0], here[2])).ravel()[0]) - here[1]
+            assert over > 0.0, (
+                'the bore at %.0f m has no hill over it to be a bore through'
+                % (middle,))
+
+
+class TestTheHillOverABore:
+    """A tunnel runs *under* the hill; the hill stays where it is.
+
+    The ground over a bore used to be cut down to road level, because a height
+    field is a surface and had no way to say a hill was hollow -- so a bore read
+    as a valley with a lid. The engine's drawn mesh takes `holes` now, the same
+    ones its collider has always taken, so the opening is an opening and the
+    earthwork has nothing left to fake.
+    """
+
+    @pytest.fixture(scope='class')
+    def world(self):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=4096.0)
+
+    def bored(self, world):
+        circuit = world.circuit()
+        inside = np.array([op is Op.TUNNEL for op in circuit.ops], dtype=bool)
+        if not inside.any():
+            pytest.skip('this world tunnels through nothing')
+        return circuit, inside
+
+    def test_no_segment_inside_a_bore_reshapes_the_ground(self, world) -> None:
+        circuit, inside = self.bored(world)
+        both_ends = inside[:-1] & inside[1:]
+        assert not circuit.reshaped_segments()[both_ends].any()
+
+    def test_the_road_on_the_land_still_does(self, world) -> None:
+        """The approach cuttings are the whole point of an earthwork."""
+        circuit, _ = self.bored(world)
+        assert circuit.reshaped_segments()[circuit.segment_on_ground].all()
+
+    def test_the_mountain_is_still_a_mountain(self, world) -> None:
+        """The measurement the complaint was about: over a bore the conformed
+        ground used to sit at road level, tens of metres below the hill."""
+        circuit, inside = self.bored(world)
+        line = circuit.points
+        over = inside & (circuit.points[:, 1] < 1e9)
+        natural = np.asarray(world.natural()(line[:, 0], line[:, 2]), dtype='d')
+        conformed = np.asarray(world.height_fn()(line[:, 0], line[:, 2]),
+                               dtype='d')
+        dropped = natural[over] - conformed[over]
+        assert float(np.percentile(dropped, 90)) < 5.0, (
+            'the hill over a bore is still being pushed down to the road')
+
+    def test_the_ground_over_a_bore_is_above_the_road(self, world) -> None:
+        """Which is what "the road runs inside the hill" means."""
+        circuit, inside = self.bored(world)
+        line = circuit.points
+        conformed = np.asarray(world.height_fn()(line[:, 0], line[:, 2]),
+                               dtype='d')
+        cover = conformed[inside] - line[inside, 1]
+        assert float(np.median(cover)) > 2.0

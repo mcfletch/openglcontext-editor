@@ -373,16 +373,27 @@ class TestTheGroundNeverCoversTheRoad:
                 % (height - centre[1], np.round(centre, 1), spacing))
 
 
-class TestTheGroundOpensAtAPortal:
-    """A bore's mouth has to be in the open.
+class TestTheHillABoreRunsUnder:
+    """A bore runs under the hill, and the hill stays.
 
-    A ground mesh draws straight lines between its samples, so where the cut
-    stops short of a portal the line from the last cut sample up to the
-    untouched hillside is a bank standing across the opening: the road arrives
-    at a wall of ground with the arch in the air behind it, and the only reason
-    a car gets through is that the collider has the bore taken out of it. The
-    cut has to carry far enough *inside* the bore that the foot of that line is
-    behind the portal, where the lining hides the rest of it.
+    This class used to say the opposite, and said it carefully: a ground mesh
+    draws straight lines between its samples, so a cut that stopped short of a
+    portal left a bank standing across the opening, and the answer taken was to
+    carry the cut *through* the hill for the length of the bore. That made the
+    tunnel a valley with a lid -- right from the driving seat and wrong from
+    anywhere else.
+
+    What says a hill is hollow now is ``holes``:
+    :meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh` drops a triangle
+    whose centre is in one, which is the rule
+    :class:`~OpenGLContext.physics.heightfield.HeightFieldColliders` already
+    used, so the drawn surface and the collided one agree by construction. The
+    bank at the mouth goes the same way as the hillside inside the tube: the
+    mask covers the bore, a margin either side, and the approach where a
+    sampled cutting meets untouched ground. That mask is the game's --
+    ``glisteel.world.RaceWorld._bores`` -- and its cases live there.
+
+    What is left here is the earthwork's half: leave the hill alone.
     """
 
     def _through_a_hill(self):
@@ -402,55 +413,47 @@ class TestTheGroundOpensAtAPortal:
         assert Op.TUNNEL in set(ops), 'the hill should have been bored through'
         return hill, RoadPath(line, RoadProfile(), ops=ops)
 
-    def test_the_bore_itself_is_clear_of_ground(self) -> None:
-        """Along the whole of it, not only at the mouth: a hillside standing
-        inside the tube is what a driver sees when they look into the portal,
-        whether it is a metre in or fifty."""
+    def test_the_hill_is_still_over_the_bore(self) -> None:
+        """Along its length, between the mouths.
+
+        At a mouth the cover is nothing, and should be: that is where the
+        approach cutting has brought the ground down to the road so the portal
+        can be reached at all. What is under test is the stretch between them,
+        which used to be nothing as well.
+        """
         hill, path = self._through_a_hill()
         ground = conform_terrain(hill, path)
-        for index in np.flatnonzero(~path.on_ground):
+        inside = np.flatnonzero(~path.on_ground)[1:-1]
+        over = []
+        for index in inside:
             at = path.points[index]
             height = float(np.asarray(ground(np.array([at[0]]),
                                              np.array([at[2]])))[0])
-            assert height <= at[1] + 1e-6, (
-                'the ground is %.2f m over the road inside the bore'
-                % (height - at[1],))
+            over.append(height - at[1])
+        assert min(over) > 0.0, 'the bore has no hill over part of it'
+        assert max(over) > 10.0, 'nothing here is deep enough to be a bore'
 
-    @pytest.mark.parametrize('spacing', [2.0, 4.0, 8.0, 16.0])
-    @pytest.mark.parametrize('phase', [0.0, 0.25, 0.5, 0.75])
-    def test_the_run_up_to_the_portal_is_open_to_the_sky(self, spacing, phase,
-                                                         mesh_surface) -> None:
-        """Along the road rather than at its written points, and over every
-        alignment of the sample grid with the portal.
-
-        The mesh is only ever wrong *between* its samples, so a portal that
-        happens to fall on one is the case that was never in doubt -- and where
-        a tile's grid falls is not something a road gets to choose.
-        """
-        from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
-
-        from OpenGLContext_editor.world.road import conform_terrain_at
+    def test_the_untouched_hillside_is_what_it_always_was(self) -> None:
+        """The earthwork reaches the approaches and nothing else."""
         hill, path = self._through_a_hill()
-        ground = conform_terrain_at(hill, path)(spacing)
-        portal = int(np.flatnonzero(~path.on_ground)[0]) - 1
-        centre = path.points[portal] + np.array([0.0, 0.0, spacing * phase])
-        resolution = 65
-        span = spacing * (resolution - 1)
-        positions, _, _, indices = terrain_patch(
-            centre[0] - span / 2, centre[0] + span / 2,
-            centre[2] - span / 2, centre[2] + span / 2,
-            resolution, height_fn=ground, water_level=None)
-        along = np.linspace(path.stations[portal] - 40.0,
-                            path.stations[portal], 81)
-        for station in along:
-            at = path.points[
-                int(np.searchsorted(path.stations, station))]
-            height = mesh_surface(positions, indices, at[0], at[2])
-            assert height is not None
-            assert height <= at[1] + 1e-3, (
-                'the ground is %.2f m over the road %.0f m short of the '
-                'portal, at spacing %s'
-                % (height - at[1], path.stations[portal] - station, spacing))
+        ground = conform_terrain(hill, path)
+        aside = np.array([300.0])
+        at = path.points[int(np.flatnonzero(~path.on_ground)[0])]
+        assert float(np.asarray(ground(aside, np.array([at[2]])))[0]) \
+            == pytest.approx(float(np.asarray(hill(aside,
+                                                   np.array([at[2]])))[0]))
+
+    def test_the_approach_is_still_cut_to_the_road(self) -> None:
+        """A cutting leads up to a portal; that half of the earthwork stays."""
+        hill, path = self._through_a_hill()
+        ground = conform_terrain(hill, path)
+        first = int(np.flatnonzero(~path.on_ground)[0])
+        at = path.points[first - 3]
+        height = float(np.asarray(ground(np.array([at[0]]),
+                                         np.array([at[2]])))[0])
+        assert height <= at[1] + 1e-3, (
+            'the ground is %.2f m over the road on the approach'
+            % (height - at[1],))
 
 
 class TestTilesDivideTheRoadBetweenThem:

@@ -319,11 +319,16 @@ class TestHowWideTheRoadsGroundIs:
         assert self._across() > 0.0
 
 
-class TestNothingGrowsOnTheFloorOfABore:
-    """A bore is dug as a cutting, so the ground beside the lining is ground
-    that came out of a hill -- bare earth like any other cut. Left as whatever
-    the rules made of the hillside it comes out as grass and the cover grows on
-    it: grass on the floor of the tunnel, in plain view through the portal.
+class TestTheGroundOverABoreIsHillside:
+    """A bore has no floor to paint, because nothing was dug out for it.
+
+    This class used to say the opposite: the ground beside a lining was ground
+    that had come out of a hill, so it was painted as bare earth like any other
+    cut -- otherwise the rules made grass of it and the cover grew on the floor
+    of the tunnel, in plain view through the portal.
+
+    There is no cut floor now. A bore runs under the hill, the hill keeps its
+    own materials, and what a driver sees through the portal is the lining.
     """
 
     @pytest.fixture(scope='class')
@@ -338,7 +343,9 @@ class TestNothingGrowsOnTheFloorOfABore:
         row = int((point[2] + layer.side / 2.0) / layer.side * (size - 1))
         return float(found[row, column])
 
-    def test_the_road_layer_is_painted_inside_one(self, world) -> None:
+    def test_the_road_layer_is_not_painted_over_one(self, world) -> None:
+        """The hillside over a bore is hillside: the rules make of it whatever
+        they make of the land either side."""
         from OpenGLContext_editor.world.structures import Op
         layer = world.field_terrain()
         circuit = world.circuit()
@@ -352,8 +359,8 @@ class TestNothingGrowsOnTheFloorOfABore:
         first, last = bores[0]
         index = int(np.clip(np.searchsorted(stations, (first + last) / 2.0), 0,
                             len(line) - 1))
-        assert self._at(layer, found, line[index]) > 0.5, (
-            'the floor of the bore is not painted as the road corridor')
+        assert self._at(layer, found, line[index]) < 0.5, (
+            'the ground over the bore is painted as though it were a cutting')
 
     def test_and_still_on_the_open_road(self, world) -> None:
         layer = world.field_terrain()
