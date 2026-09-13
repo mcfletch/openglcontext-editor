@@ -153,6 +153,26 @@ extras = ["dev"]
 # OpenGLContext and its stack publish pre-release versions, which uv/pip skip by
 # default; without this the resolver reports them "not available".
 pip_pre = true
+# A variable that does not reach the child does not stop the run; it renders
+# with something else, or not at all, and reports on a configuration nobody
+# asked for. `test_bake_renders` runs `oglc-view` in a subprocess, so what
+# reaches this environment is what reaches the renderer.
+#
+# DISPLAY and XAUTHORITY: under `xvfb-run` the server is named by the first and
+# its cookie by the second, and a client arriving without the cookie is refused
+# with "Authorization required, but no authorization protocol specified".
+# Without either, GLFW reports the display variable missing and the frame is
+# never drawn.
+passenv = [
+    "DISPLAY",
+    "XAUTHORITY",
+    "XDG_RUNTIME_DIR",
+    "WAYLAND_DISPLAY",
+    "LIBGL_*",
+    "MESA_*",
+    "GALLIUM_DRIVER",
+    "OPENGLCONTEXT_*",
+]
 commands = [["pytest", { replace = "posargs", extend = true }]]
 
 # uv decides whether its cached metadata for a source tree is still current

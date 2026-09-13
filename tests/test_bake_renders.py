@@ -6,8 +6,9 @@ frame that comes out: ground where ground belongs, sky above it, and the trees
 present as their own colour. A tileset can be numerically perfect and still
 arrive inside out, and nothing but a render says so.
 
-The viewer renders offscreen (``OPENGLCONTEXT_HIDDEN``), so this needs a GPU but
-not a display.
+The viewer renders offscreen through EGL, so this needs a GL device but no
+display server. ``OPENGLCONTEXT_BACKEND`` in the environment picks a different
+one.
 """
 
 import os
@@ -71,8 +72,15 @@ def rendered(tmp_path_factory):
     eye = line[at] + np.array([0.0, 1.6, 0.0])
     aim = line[(at + 25) % len(line)] + np.array([0.0, 1.2, 0.0])
     capture = os.path.join(str(directory), 'view.png')
+    # EGL unless the caller has named a backend. The window is hidden either
+    # way, but hidden is not headless: GLFW still opens a connection to a
+    # display server to get a context at all, and a machine with none -- a CI
+    # runner, a container, a session nobody is logged into -- fails there
+    # rather than rendering. EGL takes a context off the device with no display
+    # server in the picture, which is what this fixture has always wanted.
     environment = dict(os.environ, OPENGLCONTEXT_HIDDEN='1',
                        OPENGLCONTEXT_NO_VSYNC='1')
+    environment.setdefault('OPENGLCONTEXT_BACKEND', 'egl')
     completed = subprocess.run(
         [VIEWER, result.tileset, '--capture', capture, '--capture-delay', '4',
          '--frames', '90', '--size', '640x360',

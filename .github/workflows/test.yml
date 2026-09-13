@@ -31,6 +31,21 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # `test_bake_renders` runs `oglc-view` over a world it has just baked and
+      # looks at the frame, which is the only check here that a tileset arrives
+      # the right way out. A bare runner has no GL at all, so Mesa is installed
+      # for it to rasterise with.
+      #
+      # No X server and no Xvfb: the fixture asks for the EGL backend, which
+      # takes a context off the device with no display server in the picture.
+      # libegl-mesa0 is the one that matters -- it provides the EGL device
+      # platform, and with it the software device the frame is drawn on.
+      - name: Install Mesa
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libegl-mesa0 libgl1 libglx-mesa0 libgl1-mesa-dri
+
       - name: Install tox
         run: python -m pip install --upgrade pip tox
 
@@ -38,8 +53,13 @@ jobs:
       # the [tool.tox.env_run_base] table -- so a green run says this package
       # works with an OpenGLContext somebody can actually install, rather than
       # with the checkout next door.
+      #
+      # LIBGL_ALWAYS_SOFTWARE because there is no GPU here and a driver that
+      # finds none should rasterise rather than fail.
       - name: Run tox
         run: tox run -e py$(echo "${{ matrix.python-version }}" | tr -d '.')
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
 
   lint:
     name: lint and types
