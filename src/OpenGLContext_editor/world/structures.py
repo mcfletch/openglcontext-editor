@@ -198,7 +198,7 @@ def choose_structures(line: Any, natural: Any, *,
                departure > ABUTMENT_HEIGHT, closed)
     _reach_out(kinds, station, departure, Op.TUNNEL, approach_limit,
                departure < -portal_cover, closed)
-    _close_gaps(kinds, station, closed)
+    _close_gaps(kinds, station, departure, closed)
     if waterline is not None:
         _mark_causeways(kinds, station, ground, departure, waterline, closed)
     for first, last, op in overrides:
@@ -285,15 +285,29 @@ def _reach_out(kinds: np.ndarray, station: np.ndarray, departure: np.ndarray,
                     break
 
 
-def _close_gaps(kinds: np.ndarray, station: np.ndarray, closed: bool) -> None:
+def _close_gaps(kinds: np.ndarray, station: np.ndarray, departure: np.ndarray,
+                closed: bool) -> None:
     """Give a short stretch of road between two structures to the first of them.
 
     A deck that stops ten metres short of a portal leaves ten metres of
     embankment standing inside a hillside nothing else disturbed, which is a
     wall across the road and is not how anything is built. The stretch goes to
     the structure before it, so the deck lands on the portal.
+
+    **Only a stretch that structure can carry.** A deck is the road standing
+    clear of the land and a bore is the road inside it, so ground on the wrong
+    side of the road is ground no structure spans: the terrain under a
+    structure is left undisturbed, and a deck run through a cutting is a hill
+    standing up through the carriageway. Level with the road is carried either
+    way, because that is where a deck lands and where a portal opens.
+
+    Measured on Beacon, where the ground stands 1.4 m over the road inside a
+    626 m bridge run and a car meets it at 117 km/h as a two-and-a-half metre
+    ramp across its own lane. Such a stretch stays the road it is, however
+    short it is, and the terrain is conformed to it as to any other road.
     """
     count = len(kinds)
+    carries = {Op.BRIDGE: departure >= 0.0, Op.TUNNEL: departure <= 0.0}
     for first, last in _runs_of(kinds == Op.DIRT):
         if _run_length(station, first, last, False) >= MINIMUM_APPROACH:
             continue
@@ -302,6 +316,9 @@ def _close_gaps(kinds: np.ndarray, station: np.ndarray, closed: bool) -> None:
         after = kinds[last + 1] if last + 1 < count else (
             kinds[0] if closed else Op.DIRT)
         if before is Op.DIRT or after is Op.DIRT:
+            continue
+        held = carries.get(before)
+        if held is not None and not held[first:last + 1].all():
             continue
         kinds[first:last + 1] = before
 

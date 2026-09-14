@@ -383,12 +383,78 @@ class TestStructuresThatMeet:
         assert kinds[0] is Op.DIRT and kinds[-1] is Op.DIRT
 
     def test_the_shipped_circuit_has_no_islands_of_made_ground(self) -> None:
+        """Every short stretch left between two structures is one the structure
+        before it could not have carried.
+
+        A stretch of *fill* standing inside a hillside is the island this rule
+        is about, and there are none. A stretch where the ground has come up
+        over the road is not one: it is a cutting, the terrain is conformed to
+        it because only structures are left undisturbed, and a deck built
+        through it would be the hill standing up through the carriageway.
+        """
         from OpenGLContext.loaders.tiles3d.procedural import terrain_height
 
         from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         line = world.circuit().points
         natural = np.asarray(terrain_height(line[:, 0], line[:, 2]), dtype='d')
-        for run in choose_structures(line, natural, closed=True):
-            if run.kind is Op.DIRT:
-                assert run.length(line) >= MINIMUM_APPROACH - 1.0
+        departure = line[:, 1] - natural
+        runs = choose_structures(line, natural, closed=True)
+        for before, run in zip(runs, runs[1:], strict=False):
+            if run.kind is not Op.DIRT \
+                    or run.length(line) >= MINIMUM_APPROACH - 1.0:
+                continue
+            over = departure[run.indices(len(line))]
+            assert before.kind is Op.BRIDGE and over.min() < 0.0, (
+                'a short stretch of road left where a structure could have '
+                'carried it')
+
+
+class TestAStructureOnlyTakesGroundItCanCarry:
+    """A deck is the road standing clear of the land, so a stretch where the
+    land stands *above* the road is not a stretch a deck can be built along.
+
+    Absorbing a short gap between two structures has no opinion about the
+    ground in it, and on hilly terrain that is how a bridge takes in a cutting:
+    the terrain under a structure is deliberately left undisturbed, so the hill
+    is never cut away and stands up through the carriageway. Measured on the
+    shipped Beacon world, where the ground is 1.4 m over the road inside a
+    626 m bridge run: a car meets it at 117 km/h as a two-and-a-half metre
+    ramp across its own lane.
+
+    So a run may only take in ground it can carry -- above it for a deck,
+    below it for a bore -- and a stretch it cannot carry stays the road it is.
+    """
+
+    def _hill(self):
+        """A bridge, a short cutting, and a bridge again."""
+        return _line(_flat(10) + _flat(20, 40.0) + _flat(2, -6.0)
+                     + _flat(20, 40.0) + _flat(10))
+
+    def test_a_deck_is_not_built_through_a_hill(self) -> None:
+        line, natural = self._hill()
+        departure = line[:, 1] - natural
+        for run in choose_structures(line, natural):
+            if run.kind is Op.BRIDGE:
+                assert (departure[run.indices(len(line))] >= 0.0).all(), \
+                    'a deck where the ground stands over the road'
+
+    def test_the_cutting_stays_the_road_it_is(self) -> None:
+        line, natural = self._hill()
+        assert Op.DIRT in _kinds(choose_structures(line, natural))[1:-1]
+
+    def test_a_bore_is_not_driven_through_open_air(self) -> None:
+        line, natural = _line(_flat(10) + _flat(20, -40.0) + _flat(2, 6.0)
+                              + _flat(20, -40.0) + _flat(10))
+        departure = line[:, 1] - natural
+        for run in choose_structures(line, natural):
+            if run.kind is Op.TUNNEL:
+                assert (departure[run.indices(len(line))] <= 0.0).all(), \
+                    'a bore where the road stands over the ground'
+
+    def test_a_gap_it_can_carry_is_still_absorbed(self) -> None:
+        """The rule this narrows is still there: a deck lands on the portal it
+        runs into where the ground between them allows it."""
+        line, natural = _line(_flat(10) + _flat(20, 40.0) + _flat(1, 4.0)
+                              + _flat(20, 40.0) + _flat(10))
+        assert _kinds(choose_structures(line, natural)).count(Op.BRIDGE) == 1
