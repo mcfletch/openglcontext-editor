@@ -11,9 +11,11 @@ species set. It is used when that package is installed, and
 :func:`shipped_species` says plainly what to do when it is not.
 
 The ground *cover* between the trees comes from the same place:
-:func:`shipped_cover` is the demo's grass clump and its card. The clump and the
-card baked from it are the toolkit's own work and carry no attribution
-requirement of their own.
+:func:`shipped_cover` is the set of plants the demo grows -- grass, fern,
+nettle, periwinkle and shrub -- read from the ``cover.json`` its art is baked
+with, so a world picks up whatever that demo was last baked with rather than a
+list repeated here. They are **CC0** scans from Poly Haven, which asks for no
+attribution; it is given in :data:`CREDITS` anyway.
 
 **The tree assets are CC-BY 4.0** and their attributions travel with any world
 baked from them: :func:`shipped_credits` returns them, and the bake writes them
@@ -23,6 +25,7 @@ in one module and neither is optional.
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -59,15 +62,23 @@ SHIPPED = (
                 card_width=0.72),
 )
 
-#: What the example world grows between its trees. A clump of real blades for
-#: the near field and the card it is baked into for the far one, dense enough
-#: that a driver sees ground cover rather than individual tufts.
+#: What the example world grows between its trees when its art carries no
+#: ``cover.json`` -- one grass, which is what there was before there were sets
+#: of them. :func:`shipped_cover` prefers the baked set.
 COVER = CoverSpecies(name='grass', clump='basic-clump.glb',
                      card='grass_clump_imp.png', density=1.6, height=0.5)
+
+#: What the baked set is written to, beside the models it names. Written by
+#: ``oglc-bake-plants``; see :mod:`OpenGLContext_editor.assets.plants`.
+COVER_MANIFEST = 'cover.json'
 
 #: What a world baked from :data:`SHIPPED` has to say about where its trees came
 #: from. CC-BY 4.0 requires the attribution to travel with the work.
 CREDITS = (
+    "Ground cover plants: scans from Poly Haven (https://polyhaven.com/), "
+    "CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/), which "
+    "requires no attribution; the clumps and cards here are baked from them "
+    "and are CC0 as well.",
     "Tree models: 'Fir tree' by Georgeous (https://skfb.ly/pA8TG), "
     "'Noel_Pine_Tree' by 3D Error 404 (https://skfb.ly/6XHoJ) and "
     "'Maple trees pack' by LOLIPOP (https://skfb.ly/p9tGx), all CC-BY 4.0 "
@@ -116,19 +127,32 @@ def shipped_species(directory: str | None = None) -> list[TreeSpecies]:
     return found
 
 
-def shipped_cover(directory: str | None = None) -> CoverSpecies:
+def shipped_cover(directory: str | None = None) -> list[CoverSpecies]:
     """The example world's ground cover, with its files resolved.
 
     ``directory`` holds the files; it defaults to :func:`species_directory`.
+
+    The set named by that directory's ``cover.json`` -- a forest floor is
+    several kinds of plant, each at its own density, clumping its own way and
+    growing under its own share of tree cover. A directory with no manifest
+    falls back to :data:`COVER`, so art baked before there were sets of them
+    still makes a world.
     """
     where = directory or species_directory()
-    cover = COVER.beside(where)
-    for part in (cover.card, cover.clump):
-        if part and not os.path.exists(part):
-            raise LookupError(
-                "%s is part of the '%s' ground cover and is not in %s"
-                % (os.path.basename(part), cover.name, where))
-    return cover
+    manifest = os.path.join(where, COVER_MANIFEST)
+    if os.path.exists(manifest):
+        with open(manifest, encoding='utf-8') as handle:
+            named = json.load(handle)['species']
+        found = [CoverSpecies.from_json(entry).beside(where) for entry in named]
+    else:
+        found = [COVER.beside(where)]
+    for one in found:
+        for part in (one.card, one.clump):
+            if part and not os.path.exists(part):
+                raise LookupError(
+                    "%s is part of the '%s' ground cover and is not in %s"
+                    % (os.path.basename(part), one.name, where))
+    return found
 
 
 def shipped_credits() -> tuple[str, ...]:

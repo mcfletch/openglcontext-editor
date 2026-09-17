@@ -40,3 +40,15 @@ def surface_height(positions, indices, x, z):
 def mesh_surface():
     """The helper above, as a fixture for tests that read better with one."""
     return surface_height
+
+
+@pytest.fixture(autouse=True)
+def asset_cache_is_not_the_real_one(tmp_path_factory, monkeypatch):
+    """Keep the suite out of the user's own downloaded-asset cache.
+
+    A run that wrote into it would leave the developer's cache full of test
+    fixtures, and one that *read* from it would pass or fail depending on what
+    that developer happened to have baked before.
+    """
+    monkeypatch.setenv('OPENGLCONTEXT_POLYHAVEN',
+                       str(tmp_path_factory.mktemp('polyhaven')))

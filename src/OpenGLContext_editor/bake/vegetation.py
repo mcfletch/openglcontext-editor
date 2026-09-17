@@ -73,7 +73,7 @@ class VegetationLayer:
     species: Sequence[TreeSpecies]
     yaws: Any = None
     species_id: Any = None
-    cover: CoverSpecies | None = None
+    cover: CoverSpecies | Sequence[CoverSpecies] | None = None
     cover_on: Sequence[str] | None = None
     name: str = 'trees'
 
@@ -124,15 +124,33 @@ class VegetationLayer:
             'count': self.tree_count,
             'species': [self._written(entry).to_json() for entry in self.species],
         }
-        if self.cover is not None:
-            grown = self.cover.to_json()
-            grown['card'] = self._under(self.cover.card)
-            grown['clump'] = (self._under(self.cover.clump)
-                              if self.cover.clump else None)
-            grown['on'] = list(self.cover_on if self.cover_on is not None
-                               else COVER_ON)
-            record['cover'] = grown
+        grown = self._cover_species()
+        if grown:
+            record['cover'] = {
+                'on': list(self.cover_on if self.cover_on is not None
+                           else COVER_ON),
+                'species': [self._grown(entry) for entry in grown],
+            }
         return {'vegetation': record}
+
+    def _cover_species(self) -> list[CoverSpecies]:
+        """What grows between the trees, as a list however it was given.
+
+        A world with one kind of cover should not have to say so twice, so one
+        species on its own is a set of one.
+        """
+        if self.cover is None:
+            return []
+        if isinstance(self.cover, CoverSpecies):
+            return [self.cover]
+        return list(self.cover)
+
+    def _grown(self, entry: CoverSpecies) -> dict:
+        """A cover species as the world carries it: its own copies, under it."""
+        record = entry.to_json()
+        record['card'] = self._under(entry.card)
+        record['clump'] = self._under(entry.clump) if entry.clump else None
+        return record
 
     def assets(self) -> dict[str, bytes]:
         """The table, and every file the species are drawn from.
@@ -145,9 +163,8 @@ class VegetationLayer:
         sources = [source for entry in self.species
                    for source in (entry.mesh, entry.solid_texture,
                                   entry.foliage_texture, entry.impostor)]
-        if self.cover is not None:
-            sources.extend(part for part in (self.cover.card, self.cover.clump)
-                           if part)
+        for entry in self._cover_species():
+            sources.extend(part for part in (entry.card, entry.clump) if part)
         for source in sources:
             name = self._under(source)
             if name not in written:

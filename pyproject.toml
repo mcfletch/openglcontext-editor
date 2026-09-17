@@ -52,7 +52,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# `assets.rewrap` gives a reduced mesh an atlas of its own. xatlas is MIT and
+# ships wheels for CPython and PyPy alike, but it is a bake step -- nothing a
+# game runs imports it -- so it is asked for rather than installed by default.
+#
+# `opengl_decimate` arrives anyway, underneath the engine, but this package
+# imports it by name -- the weld and the point-to-triangle projection a bake is
+# built on -- and what a module imports is its own to declare.
+rewrap = ["xatlas>=0.0.9", "opengl_decimate>=0.1.0a1"]
 dev = [
+    # The rewrap suite needs the unwrapper it is testing; without it those
+    # cases skip, and a skipped case is not a gate.
+    "xatlas>=0.0.9",
     # Nothing in this package opens a GL context, so the backend is not a
     # runtime dependency -- but `test_bake_renders` runs `oglc-view` over a
     # world it has just baked, and the viewer needs one. Without it the
@@ -67,6 +78,10 @@ dev = [
 # circuit, and its options are that world's.  Kept for one release cycle so a
 # script that calls it is told where to go.  Removed after that.
 oglc-bake = "OpenGLContext_editor.bin.bake:main"
+
+# Published plant models into the ground cover a world grows. Authoring: an
+# editor runs this once and the baked files are what ship.
+oglc-bake-plants = "OpenGLContext_editor.bin.plants:main"
 
 [project.urls]
 Homepage = "http://pyopengl.sourceforge.net/context/"

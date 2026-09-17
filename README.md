@@ -90,6 +90,81 @@ detail policy, the geometric-error ladder, and the limits -- is in the engine's
 [Baking a world](https://github.com/mcfletch/openglcontext/blob/main/docs/baking.html)
 page.
 
+## A reduced scan needs its own texture
+
+A photogrammetry scan arrives unwrapped by the scanner, into thousands of small
+charts. That is the right answer for the dense mesh — small charts distort least
+— and the wrong one for anything reduced from it. A texture coordinate means
+something only inside one chart, so once a reduced triangle covers more surface
+than a chart holds, its three corners point at unrelated places in the image and
+what it draws is the stripe between them. On a museum scan of lekking ruffs that
+is the ground the birds stand on, and it starts at eight thousand triangles,
+which is a level a game ships.
+
+No decimator mends it: the fault is in the unwrap rather than the surface, and a
+reducer can only carry the coordinates it was given. What mends it is the step
+every scan pipeline takes — unwrap the reduced mesh afresh, then bake the
+original into the new atlas:
+
+```python
+from OpenGLContext_editor.assets.rewrap import unwrap, bake
+
+laid = unwrap(level_positions, level_indices)
+image = bake(laid, source_positions, source_indices, source_uv, source_image)
+```
+
+`unwrap` welds the surface first — a mesh split by the atlas it arrived with is
+not a torn surface, and an unwrapper handed it unwelded gives thousands of
+charts back — then lays out charts made of whole triangles, so the failure above
+cannot happen to the result at any triangle count. It says in `source` which of
+the caller's vertices each new one came from, which is how normals, colours and
+weights follow the vertex splits an unwrap makes.
+
+`bake` fills that atlas by asking the original what it shows at each texel: the
+place on the reduced surface is projected onto the nearest original triangle,
+the original's own texture coordinate is read there, and the source image is
+sampled. Charts are grown `BLEED` texels outwards so a renderer filtering at a
+chart edge finds the chart rather than the black the atlas started as. The
+result is bytes of the source's own channel count, `DEFAULT_SIZE` being 2048 to
+a side.
+
+Where a texel reads from depends on the two surfaces and nothing else, so a
+model carrying base colour, roughness, occlusion and normals asks the same
+question four times. `project` asks it once and `sample` spends the answer per
+map:
+
+```python
+shot = project(laid, source_positions, source_indices, source_uv)
+colour = sample(shot, base_colour_image)
+rough = sample(shot, roughness_image)
+```
+
+A **tangent-space normal map** cannot be resampled that way. Each texel is a
+direction relative to the frame the texture coordinates define at that point, so
+a fresh unwrap turns the frame and the same bytes then mean a different
+direction — lighting that leans the wrong way, with nothing odd about the image
+to say so. `sample_normals` takes each texel the whole way round instead,
+decoding against the original's frame and encoding against the new one:
+
+```python
+onto = frames(source_positions, source_indices, source_uv, source_normals)
+into = frames(laid.positions, laid.indices, laid.uv, level_normals[laid.source])
+bumps = sample_normals(shot, normal_image, onto, into, source_indices, laid.indices)
+```
+
+`frames` builds those from the engine's own `estimate_tangents`, per vertex and
+interpolated across each face — the frame a fragment is given — so a map baked
+here means what the shader reads. A per-face frame instead would step at every
+triangle edge and the mesh would draw its own wireframe in the lighting.
+
+This needs [xatlas](https://pypi.org/project/xatlas/), which is MIT and ships
+wheels for CPython and PyPy alike. It is an extra, because it is a bake step and
+nothing a game runs imports it:
+
+```bash
+pip install "OpenGLContext-editor[rewrap]"
+```
+
 ## Where the ground comes from
 
 A world's height is a **base** and an ordered stack of **edits** on it:
@@ -459,6 +534,7 @@ pytest
 |---|---|
 | `src/OpenGLContext_editor/bake/` | the tile baker: bounds, the octree, layers, the tileset writer, the bake driver |
 | `src/OpenGLContext_editor/world/` | world generation: the height source, presets, DEM import, sculpting, hydrology, contours, scatter, roads, and the example world |
+| `src/OpenGLContext_editor/assets/` | turning published art into assets: Poly Haven fetching, plant baking, billboards, and the unwrap-and-rebake for reduced scans |
 | `src/OpenGLContext_editor/bin/` | `oglc-bake`, which says the command is now `glisteel-bake` |
 | `tests/` | the suite; `pytest` runs it |
 | `specs/` | format and interoperability facts the code cites, and the [clean-room procedure](specs/CLEAN-ROOM.md) that governs how they are gathered |
