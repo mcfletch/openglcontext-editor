@@ -99,13 +99,14 @@ TREE_DENSITY = 0.148
 TREE_SPACING = 0.55
 TREE_SPACING_PER_METRE = 0.085
 
-#: Where trees will grow: above the waterline, below the treeline, and off
-#: anything a tree would slide down. The treeline is quoted against the shipped
-#: landscape's full relief and scales with it, so a gentler world keeps the same
-#: proportion of bare tops rather than losing them. Trees hold ground steeper
-#: than a road can climb, so the limit is what a root system gives up on, not
-#: what a vehicle does.
-TREE_ELEVATION = (WATER_LEVEL + 1.0, 330.0)
+#: Where trees will grow: this far above the world's own waterline, below the
+#: treeline, and off anything a tree would slide down. The treeline is quoted
+#: against the shipped landscape's full relief and scales with it, so a gentler
+#: world keeps the same proportion of bare tops rather than losing them. Trees
+#: hold ground steeper than a road can climb, so the limit is what a root system
+#: gives up on, not what a vehicle does.
+TREE_FREEBOARD = 1.0
+TREELINE = 330.0
 TREE_SLOPE_LIMIT = 52.0
 
 #: The tile error at which a conifer becomes two crossed cards. Roughly the
@@ -262,9 +263,10 @@ ROCK_SHAPES = 4
 ROCK_CLEARANCE = 0.6
 ROCK_REACH = 26.0
 
-#: Boulders will not lie on ground steeper than this, in degrees, nor below the
-#: waterline.
+#: Boulders will not lie on ground steeper than this, in degrees, nor nearer
+#: the world's own waterline than this, in metres.
 ROCK_SLOPE_LIMIT = 38.0
+ROCK_FREEBOARD = 0.5
 
 #: How far a mature crown reaches from its own trunk, in metres. Where the road
 #: is on the land a crown over the carriageway is the point -- it is what closes
@@ -332,14 +334,24 @@ COVER_ON = ('grass', 'forest_floor')
 #: told where the water is.
 SHORE_ABOVE = 1.5
 SHORE_FEATHER = 2.5
-GROUND_RULES = (
-    LayerRule(height=(WATER_LEVEL + SHORE_ABOVE, 1.0e9), feather=SHORE_FEATHER),
-    LayerRule(height=(WATER_LEVEL + SHORE_ABOVE, 1.0e9),
-              slope=(0.16, 0.55), weight=1.5, feather=SHORE_FEATHER),
-    LayerRule(slope=(0.5, 1.0e9), weight=3.0),
-    LayerRule(height=(-1.0e9, WATER_LEVEL + SHORE_ABOVE), weight=4.0,
-              feather=SHORE_FEATHER),
-)
+
+
+def ground_rules(water_level: float = WATER_LEVEL) -> tuple[LayerRule, ...]:
+    """Where each ground material belongs, for a world with its water there.
+
+    Taken from the world rather than written down once, because every one of
+    these rules is quoted against the shore: a world that floods its valleys
+    and paints the shore at sea level has a beach forty metres under water and
+    grass growing over the whole of the sea bed.
+    """
+    shore = float(water_level) + SHORE_ABOVE
+    return (
+        LayerRule(height=(shore, 1.0e9), feather=SHORE_FEATHER),
+        LayerRule(height=(shore, 1.0e9),
+                  slope=(0.16, 0.55), weight=1.5, feather=SHORE_FEATHER),
+        LayerRule(slope=(0.5, 1.0e9), weight=3.0),
+        LayerRule(height=(-1.0e9, shore), weight=4.0, feather=SHORE_FEATHER),
+    )
 
 CREDITS = (
     "Terrain and road surface: generated procedurally by OpenGLContext "
@@ -423,8 +435,13 @@ class ProceduralWorld:
     #: How many pixels across the splat control map.
     control_size: int = CONTROL_SIZE
     #: Where the water sits, in metres. Ground below it is a lake bed with a
-    #: sheet of water over it; the circuit is held clear of it by
-    #: :data:`CAUSEWAY_FREEBOARD`. Raise it to flood the valleys.
+    #: sheet of water over it. Raise it to flood the valleys, and the whole
+    #: world moves with it: the circuit is held :data:`CAUSEWAY_FREEBOARD`
+    #: above it and the fill it crosses the drowned ground on is built as a
+    #: causeway, the forest starts at :meth:`treeline`, the boulders lie no
+    #: lower, and the shore is painted round the new coast
+    #: (:func:`ground_rules`), which is what keeps the ground cover out of the
+    #: sea.
     water_level: float = WATER_LEVEL
     #: How far the circuit's corners lean, at most, as a fraction
     #: (:data:`CIRCUIT_MAXIMUM_BANK`). Zero lays it out flat, which gives the
@@ -482,9 +499,15 @@ class ProceduralWorld:
         return HeightSource(base=ProceduralBase(relief=self.relief))
 
     def treeline(self) -> tuple[float, float]:
-        """The band trees grow in, scaled with the world's own relief."""
-        low, high = TREE_ELEVATION
-        return (low, high * self.relief)
+        """The band trees grow in: from this world's waterline to its treeline.
+
+        The floor is :attr:`water_level` and not a number written down, because
+        a world that floods its valleys has its forest on the islands. Taken
+        from the default instead, a raised sea leaves three quarters of the
+        trees standing on the sea bed. The ceiling scales with the world's own
+        relief.
+        """
+        return (self.water_level + TREE_FREEBOARD, TREELINE * self.relief)
 
     def footprint(self) -> BoundingBox:
         """The ground the world covers, as a footprint with no height.
@@ -558,7 +581,7 @@ class ProceduralWorld:
             self.height_fn(), self.footprint(), density=ROCK_DENSITY,
             seed=self.seed + 101, scale_range=ROCK_RADIUS,
             slope_limit=ROCK_SLOPE_LIMIT, slope_fn=self.slope_fn(),
-            height_range=(WATER_LEVEL + 0.5, 1.0e9),
+            height_range=(self.water_level + ROCK_FREEBOARD, 1.0e9),
             keep=self._beside_the_road)
         return Scatter(placed.positions, placed.yaws, placed.scales)
 
@@ -724,7 +747,8 @@ class ProceduralWorld:
                                   smoothing=character.smoothing,
                                   maximum_grade=character.grade_limit,
                                   design_speed=character.design_speed,
-                                  minimum_height=WATER_LEVEL + CAUSEWAY_FREEBOARD,
+                                  minimum_height=(self.water_level
+                                                  + CAUSEWAY_FREEBOARD),
                                   closed=self.closed)
             self._circuit = RoadPath(
                 line, profile=CIRCUIT_PROFILE, ops=self._ops(line),
@@ -805,7 +829,7 @@ class ProceduralWorld:
         if not self.structures:
             return None
         natural = np.asarray(self.natural()(line[:, 0], line[:, 2]), dtype='d')
-        chosen = choose_structures(line, natural, waterline=WATER_LEVEL,
+        chosen = choose_structures(line, natural, waterline=self.water_level,
                                    closed=self.closed)
         ops = np.full(len(line), Op.DIRT, dtype=object)
         for structure in chosen:
@@ -885,7 +909,8 @@ class ProceduralWorld:
             height_fn=self.height_fn(), height_fn_at=self.height_fn_at(),
             extent=self.footprint(), resolution=self.field_resolution,
             control_size=self.control_size,
-            layers=list(GROUND_LAYERS), rules=list(GROUND_RULES),
+            layers=list(GROUND_LAYERS),
+            rules=list(ground_rules(self.water_level)),
             road=self.circuit() if self.road else None,
             road_layer=GROUND_LAYERS.index('dirt'),
             road_corridor=self._corridor(),
@@ -992,10 +1017,11 @@ class ProceduralWorld:
     def ground_cover(self) -> Any:
         """What grows on the ground between the trees, or None for bare ground.
 
-        A recipe rather than a scatter: see
-        :class:`~OpenGLContext.scenegraph.vegetation.cover.GroundCover`. It comes
-        from the same place the species do, so a world pointed at its own art
-        gets its own grass.
+        The kinds of plant rather than a scatter of them: where each one stands
+        is worked out as the camera moves, not baked -- see
+        :class:`~OpenGLContext.scenegraph.vegetation.cover.GroundCover`. They
+        come from the same place the tree species do, so a world pointed at its
+        own art gets its own undergrowth.
         """
         try:
             return shipped_cover(self.species_directory)
