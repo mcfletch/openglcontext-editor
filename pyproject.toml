@@ -49,17 +49,18 @@ dependencies = [
     # `gltf` is the loader and writer a bake reads and writes tilesets through.
     "OpenGLContext[gltf]>=3.0.0a5",
     "numpy>=2.0",
+    # The reducer `meshlod` builds a chain with, and the weld and
+    # point-to-triangle projection a bake is built on. A core dependency
+    # because making levels of detail is what this package does; the engine
+    # draws them and needs none of it.
+    "opengl_decimate>=0.1.0a1",
 ]
 
 [project.optional-dependencies]
 # `assets.rewrap` gives a reduced mesh an atlas of its own. xatlas is MIT and
 # ships wheels for CPython and PyPy alike, but it is a bake step -- nothing a
 # game runs imports it -- so it is asked for rather than installed by default.
-#
-# `opengl_decimate` arrives anyway, underneath the engine, but this package
-# imports it by name -- the weld and the point-to-triangle projection a bake is
-# built on -- and what a module imports is its own to declare.
-rewrap = ["xatlas>=0.0.9", "opengl_decimate>=0.1.0a1"]
+rewrap = ["xatlas>=0.0.9"]
 dev = [
     # The rewrap suite needs the unwrapper it is testing; without it those
     # cases skip, and a skipped case is not a gate.
@@ -149,7 +150,9 @@ warn_return_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# The engine ships its GL fixtures as a pytest plugin (`gl_context`, `gl_window`);
+# `meshlod.quality` measures a level by rendering it, so its cases ask for one.
+addopts = "-ra -p OpenGLContext.testing.plugin"
 # Backstop so a single hung bake or GL smoke test cannot wedge a session.
 timeout = 300
 

@@ -90,6 +90,44 @@ detail policy, the geometric-error ladder, and the limits -- is in the engine's
 [Baking a world](https://github.com/mcfletch/openglcontext/blob/main/docs/baking.html)
 page.
 
+## Levels of detail, made once and shipped
+
+A model arrives at whatever density its author left it, and a game cannot afford
+that density at every distance. `meshlod` makes the coarser versions:
+
+```python
+from OpenGLContext_editor.meshlod import build_chain, measure_chain, write_chain
+
+chain = build_chain(attributes, indices, levels=5)
+write_chain('bust.glb', chain)          # bust.glb + bust.lod0.bin, ...
+```
+
+The whole reduction is decimated **once** — `opengl_decimate` records the
+ordered contractions and each level is a prefix of that record — so five levels
+cost one reduction and a sixth afterwards costs nothing. Normals are carried
+through rather than recomputed, so a flattened triangle still shades the way the
+surface it replaced did.
+
+`write_chain` writes the levels as a glTF the whole ecosystem reads:
+`MSFT_lod` names them, the coarsest rides inside the glb so the file always
+draws something, and each finer level is a sidecar the operating system never
+opens until it is wanted. The engine reads that back on its own — see
+[Levels of detail](https://github.com/mcfletch/openglcontext/blob/main/docs/gltf.html)
+— so a baked chain needs nothing of this package at play time. Nothing here is:
+decimating two hundred assets when a player opens a door is not a thing that can
+be done, which is why it is a bake.
+
+**A level is judged by rendering it.** A geometric error is a length, and a
+length says nothing on its own — a millimetre is invisible on a building and
+ruinous on a face. `measure_chain` draws each level against the original over a
+sweep of distances and reports the share of the object's own pixels that change,
+split into the part whose outline moved and the part that merely shaded
+differently. The two want different remedies: a moved outline needs triangles, a
+changed shading needs a normal map baked from the fine mesh. `tools/lod_quality.py`
+runs that sweep over a model and writes a contact sheet;
+`tools/lod_transitions.py` draws each switch at the distance it would happen,
+which is the frame a player would actually see.
+
 ## A reduced scan needs its own texture
 
 A photogrammetry scan arrives unwrapped by the scanner, into thousands of small
@@ -535,7 +573,9 @@ pytest
 | `src/OpenGLContext_editor/bake/` | the tile baker: bounds, the octree, layers, the tileset writer, the bake driver |
 | `src/OpenGLContext_editor/world/` | world generation: the height source, presets, DEM import, sculpting, hydrology, contours, scatter, roads, and the example world |
 | `src/OpenGLContext_editor/assets/` | turning published art into assets: Poly Haven fetching, plant baking, billboards, and the unwrap-and-rebake for reduced scans |
+| `src/OpenGLContext_editor/meshlod/` | levels of detail: one recorded reduction sliced into rungs, what each rung costs to look at, and the `MSFT_lod` glb they ship in |
 | `src/OpenGLContext_editor/bin/` | `oglc-bake`, which says the command is now `glisteel-bake` |
+| `tools/` | authoring scripts run by hand: the level-of-detail quality sweep and the transition sheet |
 | `tests/` | the suite; `pytest` runs it |
 | `specs/` | format and interoperability facts the code cites, and the [clean-room procedure](specs/CLEAN-ROOM.md) that governs how they are gathered |
 

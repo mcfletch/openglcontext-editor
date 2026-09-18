@@ -30,8 +30,8 @@ in it that is its own.
 
 Normals are *carried* through the reduction rather than recomputed, so a
 flattened triangle still shades the way the surface it replaced did -- the
-finding recorded in :mod:`OpenGLContext.meshlod.chain`, which is the runtime
-side of the same reduction.
+finding recorded in :mod:`OpenGLContext_editor.meshlod.chain`, which builds a
+whole chain from the same reduction.
 """
 from __future__ import annotations
 
