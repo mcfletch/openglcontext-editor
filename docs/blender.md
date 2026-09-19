@@ -10,16 +10,28 @@ author installs it into Blender and never installs this toolkit at all.
 
 ## Install it
 
+`MSFT_lod` is a Khronos vendor extension rather than anything of this project's,
+so the add-on installs into Blender the ordinary way and needs none of this
+toolkit. From a release, or from a zip you build yourself:
+
 ```bash
-python -c "from OpenGLContext_editor import blender; print(blender.install())"
+python -m OpenGLContext_editor.blender --package        # writes the zip
 ```
 
-That copies the add-on into the user add-on directory for whatever Blender is on
-the path, after which *Edit > Preferences > Add-ons* has **OpenGLContext levels
-of detail** to switch on. To install into a Blender somewhere else, pass
-`into=` a directory, or zip
-`src/OpenGLContext_editor/blender/openglcontext_lod` and use Blender's own
-*Install from Disk*.
+Then in Blender, *Edit > Preferences > Get Extensions > Install from Disk*, or
+from a command line:
+
+```bash
+blender --command extension install-file -r user_default -e openglcontext_lod-1.0.0.zip
+```
+
+It carries a `blender_manifest.toml`, so Blender 4.2 and later install it as an
+**extension**; the `bl_info` beside it is the same add-on described for 4.0 and
+4.1, which read that instead.
+
+From a checkout, `python -m OpenGLContext_editor.blender --install` copies it
+straight into the user add-on directory for whatever Blender is on the path,
+which saves a step while working on it.
 
 The directory is a complete add-on as it stands, so a checkout is enough:
 
@@ -46,11 +58,21 @@ UVs, so the levels keep the material they came with — names them
 |---|---|
 | Levels | How many levels the chain has, counting the original |
 | Ratio | What share of the triangles each level keeps of the one before it |
+| Finest level at most | A triangle budget for LOD0: a denser mesh is decimated down to it before the chain starts. 0 leaves the mesh as it came |
 | Hide the coarse levels | Puts the alternatives out of the viewport. They are still exported — the export takes them out of the *scene* instead |
 
 The ratio is measured against the original, which is what the modifier does:
 asking for a half twice is a quarter of the first mesh, not a quarter of the
 second.
+
+**Budgets, not ratios.** Blender's Decimate modifier takes a `ratio` and
+nothing else — its `face_count` is read-only and only reports what came out —
+but an author has a budget: *the finest level is not to exceed twenty
+thousand*. **Finest level at most** is that, and the rest of the chain follows
+from it, so a 500,000-triangle scan and a 30,000-triangle game asset both start
+their chains in the same place. The arithmetic is
+`openglcontext_lod/budget.py`, which holds no Blender; a collapse removes whole
+edges, so the result lands near the budget rather than exactly on it.
 
 **Check before you export.** *Check LOD chains* reports what the scene would
 write — how many chains, how many levels — and refuses the two mistakes that

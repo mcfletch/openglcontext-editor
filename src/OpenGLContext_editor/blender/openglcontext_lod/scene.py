@@ -19,13 +19,14 @@ from collections.abc import Iterable, Sequence
 
 import bpy
 
+from . import budget, msftlod
 from . import gallery as layout
-from . import msftlod
 from .content import MaterialMaps
 
 __all__ = [
     'MaterialMaps',
     'box_mesh',
+    'triangle_count',
     'build_gallery',
     'clear',
     'decimation_chain',
@@ -194,27 +195,47 @@ def mark_level(obj: bpy.types.Object, group: str, level: int,
         obj[msftlod.COVERAGE_PROPERTY] = float(coverage)
 
 
+def triangle_count(mesh: bpy.types.Mesh) -> int:
+    """How many triangles ``mesh`` draws as, whatever its faces are.
+
+    A quad mesh draws as twice its face count, and a budget is in triangles
+    because that is what a renderer pays.
+    """
+    mesh.calc_loop_triangles()
+    return len(mesh.loop_triangles)
+
+
 def decimation_chain(obj: bpy.types.Object, levels: int,
-                     ratio: float = 0.5) -> list[bpy.types.Mesh]:
+                     ratio: float = 0.5,
+                     max_triangles: int | None = None) -> list[bpy.types.Mesh]:
     """``levels`` meshes from ``obj``, each ``ratio`` of the triangles before.
 
     Blender's own Decimate modifier in collapse mode, which every Blender has
     and which interpolates the UVs, so the levels keep the material they came
-    with. The first mesh returned is the original, untouched.
+    with.
 
-    The ratio is measured against the original rather than the level before,
-    because that is what the modifier does: asking for a half twice is a
-    quarter of the first mesh, not a quarter of the second.
+    ``max_triangles`` caps the **finest** level, which is the budget an author
+    actually has: a model arrives at whatever density its author left it, and a
+    chain whose first rung is half a million triangles has not begun to help.
+    Without it the finest level is the mesh as it came, returned untouched.
+
+    Every ratio is measured against the original rather than against the level
+    before, because that is what the modifier does -- see :mod:`budget`, which
+    works the ratios out and holds no Blender.
     """
-    if levels < 1:
-        raise ValueError('a chain needs at least one level')
-    made = [obj.data]
+    ratios = budget.ratios_for(triangle_count(obj.data), levels, ratio,
+                               max_triangles)
+    made: list[bpy.types.Mesh] = []
     modifier = obj.modifiers.new('LevelOfDetail', 'DECIMATE')
     modifier.decimate_type = 'COLLAPSE'
     modifier.use_collapse_triangulate = True
     try:
-        for level in range(1, levels):
-            modifier.ratio = ratio ** level
+        for level, wanted in enumerate(ratios):
+            if wanted >= 1.0:
+                # Nothing to take off it: the mesh itself is the level.
+                made.append(obj.data)
+                continue
+            modifier.ratio = wanted
             depsgraph = bpy.context.evaluated_depsgraph_get()
             reduced = bpy.data.meshes.new_from_object(
                 obj.evaluated_get(depsgraph), depsgraph=depsgraph)
@@ -292,7 +313,8 @@ def import_mesh(path: str) -> bpy.types.Object:
 def build_gallery(plan: layout.Gallery, bust: str,
                   materials: dict[str, MaterialMaps],
                   levels: int = 6, ratio: float = 0.5,
-                  coverage: Sequence[float] | None = None) -> dict[str, int]:
+                  coverage: Sequence[float] | None = None,
+                  max_triangles: int | None = None) -> dict[str, int]:
     """Build the whole world; return what was made, by kind.
 
     ``materials`` is keyed by the names :class:`~gallery.Gallery` uses for its
@@ -337,7 +359,7 @@ def build_gallery(plan: layout.Gallery, bust: str,
         counted['plinths'] += 1
 
     original = import_mesh(bust)
-    chain = decimation_chain(original, levels, ratio)
+    chain = decimation_chain(original, levels, ratio, max_triangles)
     bpy.data.objects.remove(original, do_unlink=True)
     thresholds = list(coverage) if coverage else msftlod.coverage_series(levels)
 

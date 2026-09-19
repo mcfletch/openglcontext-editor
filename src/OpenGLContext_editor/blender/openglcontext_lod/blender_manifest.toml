@@ -1,0 +1,27 @@
+schema_version = "1.0.0"
+
+# What Blender 4.2 and later install this as: an extension, from a zip or from
+# a repository, with no Python packaging of ours anywhere near it. `bl_info` in
+# __init__.py is the same add-on described for Blender 4.0 and 4.1, which read
+# that instead.
+id = "openglcontext_lod"
+version = "1.0.0"
+name = "Levels of Detail (MSFT_lod)"
+tagline = "Author LOD chains and export them as glTF MSFT_lod"
+maintainer = "Mike C. Fletcher <mcfletch@vrplumber.com>"
+type = "add-on"
+
+website = "https://github.com/mcfletch/openglcontext-editor"
+
+tags = ["Import-Export", "Mesh", "Pipeline"]
+
+blender_version_min = "4.2.0"
+
+# BSD, which is GPL-compatible, so the add-on may be distributed alongside
+# Blender's own GPL code. Nothing of Blender's is copied into it.
+license = [
+  "SPDX:BSD-3-Clause",
+]
+copyright = [
+  "2026 Mike C. Fletcher",
+]

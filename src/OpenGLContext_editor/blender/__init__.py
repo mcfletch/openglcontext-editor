@@ -42,8 +42,10 @@ __all__ = [
     'ADDON',
     'BlenderMissing',
     'addon_directory',
+    'addon_version',
     'executable',
     'install',
+    'package',
     'run',
     'user_addon_directory',
     'version',
@@ -137,3 +139,47 @@ def install(blender_version: str | None = None,
     shutil.copytree(addon_directory(), target,
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     return target
+
+
+def addon_version() -> str:
+    """What the add-on calls itself, read from its own manifest.
+
+    From the manifest rather than from anything of this package's: the add-on
+    is versioned as the thing Blender installs, and a zip named for a release
+    of the toolkit around it would be naming the wrong thing.
+    """
+    manifest = os.path.join(addon_directory(), 'blender_manifest.toml')
+    with open(manifest, 'rb') as handle:
+        import tomllib
+
+        return str(tomllib.load(handle)['version'])
+
+
+def package(into: str | None = None) -> str:
+    """Write the add-on as a zip Blender installs on its own; return its path.
+
+    This is how somebody who has never heard of this toolkit gets it: Blender's
+    *Install from Disk*, or ``blender --command extension install-file``, over a
+    file that carries the add-on and nothing else. ``MSFT_lod`` is a Khronos
+    vendor extension rather than anything of ours, and an author exporting to
+    some other engine should not have to install a renderer to write one.
+
+    The zip holds the add-on directory at its root, which is the shape both
+    Blender's legacy installer and its extension installer read.
+    """
+    import zipfile
+
+    into = os.path.abspath(into or os.getcwd())
+    os.makedirs(into, exist_ok=True)
+    path = os.path.join(into, '%s-%s.zip' % (ADDON, addon_version()))
+    source = addon_directory()
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
+        for root, directories, files in os.walk(source):
+            directories[:] = [d for d in directories if d != '__pycache__']
+            for leaf in sorted(files):
+                if leaf.endswith(('.pyc', '.pyo')):
+                    continue
+                whole = os.path.join(root, leaf)
+                archive.write(whole, os.path.join(
+                    ADDON, os.path.relpath(whole, source)))
+    return path

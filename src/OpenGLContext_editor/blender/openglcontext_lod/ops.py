@@ -13,8 +13,8 @@ import bpy
 from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Operator, Panel
 
+from . import budget, msftlod, scene
 from . import gallery as layout
-from . import msftlod, scene
 
 __all__ = ['classes', 'register', 'unregister']
 
@@ -35,6 +35,12 @@ class OBJECT_OT_make_lod_chain(Operator):
         description='What share of the triangles each level keeps of the one '
                     'before it',
     )
+    max_triangles: IntProperty(
+        name='Finest level at most', default=0, min=0, soft_max=200_000,
+        description='Triangle budget for the finest level: a denser mesh is '
+                    'decimated down to it before the chain starts. 0 leaves '
+                    'the mesh as it came',
+    )
     hide_coarse: BoolProperty(
         name='Hide the coarse levels', default=True,
         description='Put the alternatives out of the viewport. They are still '
@@ -51,7 +57,8 @@ class OBJECT_OT_make_lod_chain(Operator):
         group = msftlod.named_level(original.name)
         group = group[0] if group else original.name
         try:
-            meshes = scene.decimation_chain(original, self.levels, self.ratio)
+            meshes = scene.decimation_chain(original, self.levels, self.ratio,
+                                            self.max_triangles or None)
         except (RuntimeError, ValueError) as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
@@ -72,16 +79,9 @@ class OBJECT_OT_make_lod_chain(Operator):
             if found is not None:
                 found.hide_viewport = True
 
-        self.report({'INFO'}, '%s: %d levels, %d to %d triangles'
-                    % (group, len(meshes),
-                       len(meshes[0].loop_triangles) or _triangles(meshes[0]),
-                       _triangles(meshes[-1])))
+        self.report({'INFO'}, '%s: %s' % (group, budget.describe(
+            [scene.triangle_count(mesh) for mesh in meshes])))
         return {'FINISHED'}
-
-
-def _triangles(mesh) -> int:
-    mesh.calc_loop_triangles()
-    return len(mesh.loop_triangles)
 
 
 class OBJECT_OT_check_lod_chains(Operator):

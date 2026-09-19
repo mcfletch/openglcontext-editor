@@ -194,3 +194,85 @@ class TestWhereTheLevelsAreWritten:
                   for node in document['nodes']]
 
         assert len(set(map(str, places))) == 1
+
+
+BUDGETED = '''
+bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32)
+dense = bpy.context.active_object
+meshes = scene.decimation_chain(dense, 4, 0.5, max_triangles=500)
+counts = [scene.triangle_count(m) for m in meshes]
+print('MARK ' + json.dumps({'enabled': True, 'counts': counts,
+                            'source': scene.triangle_count(dense.data)}))
+'''
+
+
+@pytest.fixture(scope='module')
+def counted(tmp_path_factory, have_blender):
+    """A dense sphere cut to a 500-triangle budget, measured inside Blender."""
+    tmp_path = tmp_path_factory.mktemp('budget')
+    return run_in_blender(BUILD % {
+        'addon': blender.addon_directory().rsplit(os.sep, 1)[0],
+        'body': textwrap.indent(textwrap.dedent(BUDGETED), '    ').strip(),
+        'out': str(tmp_path / 'unused.glb'),
+    }, tmp_path, have_blender)
+
+
+class TestATriangleBudget:
+    """Blender's Decimate takes a ratio and reports a read-only face count, so
+    a budget in triangles has to be turned into ratios. Whether the arithmetic
+    lands where it says it does is a question only Blender can answer."""
+
+    def test_the_source_really_is_denser_than_the_budget(self, counted):
+        assert counted['source'] > 500
+
+    def test_the_finest_level_is_brought_down_to_the_budget(self, counted):
+        """Within what a collapse can land on -- it removes whole edges."""
+        assert counted['counts'][0] == pytest.approx(500, rel=0.1)
+
+    def test_the_chain_halves_from_there(self, counted):
+        first, second = counted['counts'][0], counted['counts'][1]
+
+        assert second == pytest.approx(first / 2, rel=0.15)
+
+    def test_every_level_is_coarser_than_the_one_before(self, counted):
+        assert counted['counts'] == sorted(counted['counts'], reverse=True)
+
+
+class TestTheAddOnInstallsOnItsOwn:
+    """`MSFT_lod` is a Khronos extension rather than anything of ours, so the
+    add-on has to reach Blender without this toolkit: a zip, and Blender's own
+    installer."""
+
+    def test_blender_installs_the_zip_and_finds_the_export_hook(
+            self, tmp_path, have_blender):
+        zipped = blender.package(str(tmp_path))
+        script = tmp_path / 'install.py'
+        script.write_text(textwrap.dedent('''
+            import bpy, json
+            bpy.ops.extensions.package_install_files(
+                filepath=%r, repo='user_default', enable_on_install=True)
+            import sys
+            named = [k for k in bpy.context.preferences.addons.keys()
+                     if 'openglcontext_lod' in k]
+            module = sys.modules.get(named[0]) if named else None
+            print('MARK ' + json.dumps({
+                'enabled': bool(named),
+                'hook': hasattr(module, 'glTF2ExportUserExtension'),
+                'operator': hasattr(bpy.ops.object, 'make_lod_chain'),
+            }))
+        ''') % (zipped,))
+        done = subprocess.run(
+            [have_blender, '--background', '--factory-startup', '-P',
+             str(script)], capture_output=True, text=True, timeout=600)
+        said = json.loads(done.stdout.split('MARK ', 1)[1].splitlines()[0])
+
+        assert said == {'enabled': True, 'hook': True, 'operator': True}
+
+    def test_the_zip_carries_the_add_on_and_nothing_else(self, tmp_path):
+        import zipfile
+
+        held = zipfile.ZipFile(blender.package(str(tmp_path))).namelist()
+
+        assert all(name.startswith('openglcontext_lod/') for name in held)
+        assert 'openglcontext_lod/blender_manifest.toml' in held
+        assert not [name for name in held if '__pycache__' in name]

@@ -46,6 +46,9 @@ def arguments(argv: list[str]) -> argparse.Namespace:
                         help='how many plinths there are down the hall')
     parser.add_argument('--levels', type=int, default=6,
                         help='how many levels each bust is given')
+    parser.add_argument('--max-triangles', type=int, default=0,
+                        help='triangle budget for each bust\'s finest level; '
+                             '0 leaves the model as it came')
     parser.add_argument('--ratio', type=float, default=0.5,
                         help='what share of the triangles a level keeps of '
                              'the one before it')
@@ -76,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
                 if options.coverage else None)
     counted = scene.build_gallery(
         plan, *content.gallery_content(options.content),
-        levels=options.levels, ratio=options.ratio, coverage=coverage)
+        levels=options.levels, ratio=options.ratio, coverage=coverage,
+        max_triangles=options.max_triangles or None)
     print('BUILT: %s' % (gallery.describe(plan),))
     print('BUILT: %(slabs)d slabs, %(plinths)d plinths, %(busts)d busts, '
           '%(levels)d level objects, %(lights)d lights' % counted)

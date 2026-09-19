@@ -135,16 +135,25 @@ wants to cut the levels there and export them, and the add-on in
 `src/OpenGLContext_editor/blender/openglcontext_lod` is that:
 
 ```bash
-python -c "from OpenGLContext_editor import blender; print(blender.install())"
+python -m OpenGLContext_editor.blender --package   # a zip Blender installs
 ```
 
 Blender then has **Object > Make LOD chain**, which cuts a chain from the
 selected mesh with Blender's own Decimate modifier and marks the levels, and a
 glTF export extension that writes them as `MSFT_lod` — so the ordinary
 *File > Export > glTF 2.0* produces a file a viewer switches levels in, and one
-that has never heard of the extension draws the finest level. The add-on needs
-only Blender's own Python; an author installs it and never installs this
-toolkit. [docs/blender.md](docs/blender.md) is the guide.
+that has never heard of the extension draws the finest level.
+
+The zip carries a `blender_manifest.toml` and installs as a Blender 4.2+
+**extension**, with nothing of this toolkit in it. That is deliberate:
+`MSFT_lod` is a Khronos vendor extension, and somebody exporting to three.js or
+Babylon should not have to install a renderer to write one.
+[docs/blender.md](docs/blender.md) is the guide.
+
+The chain is cut to a **triangle budget** rather than to a ratio — *the finest
+level is not to exceed twenty thousand* — because that is what an author has.
+Blender's Decimate takes only a ratio and reports a read-only face count, so
+`openglcontext_lod/budget.py` turns one into the other.
 
 The demo world for the whole mechanism is built this way:
 
