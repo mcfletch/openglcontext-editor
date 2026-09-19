@@ -48,6 +48,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from OpenGLContext.loaders.resolver import (
+    DEFAULT_MAX_RESOURCE_BYTES,
+    Resolver,
+    check_size,
+    decode_data_uri,
+)
 
 __all__ = ["LODAsset", "LODEntry", "write_chain", "sidecar_name"]
 
@@ -105,16 +111,30 @@ class LODAsset:
     :meth:`open` parses the JSON chunk and nothing else. :meth:`load` reads one
     level's byte ranges and returns the arrays for it, so a level that is never
     asked for is never read, never decoded and never in memory.
+
+    **Where a level's bytes may be is not the file's decision.** A ``uri`` in
+    the document is data, and a document may come from anywhere, so every one
+    goes through :class:`~OpenGLContext.loaders.resolver.Resolver` -- the same
+    policy every loader in the engine is held to. A sidecar must be under the
+    directory the glb is in; ``../``, an absolute path and a URL are all
+    refused, and how many bytes an accessor may ask for is bounded by
+    ``max_resource_bytes``.
     """
 
-    def __init__(self, path: str, document: dict[str, Any], binary_offset: int) -> None:
+    def __init__(self, path: str, document: dict[str, Any], binary_offset: int,
+                 max_resource_bytes: int | None = DEFAULT_MAX_RESOURCE_BYTES) -> None:
         self.path = path
         self.document = document
         self._binary_offset = binary_offset
+        self.max_resource_bytes = max_resource_bytes
+        #: Confines every ``uri`` in the document to the glb's own directory.
+        self.resolver = Resolver(base_dir=os.path.dirname(os.path.abspath(path)) or ".",
+                                 max_resource_bytes=max_resource_bytes)
         self.levels = tuple(_describe(path, document))
 
     @classmethod
-    def open(cls, path: str) -> LODAsset:
+    def open(cls, path: str,
+             max_resource_bytes: int | None = DEFAULT_MAX_RESOURCE_BYTES) -> LODAsset:
         """Read the JSON chunk of a glb and stop there."""
         with open(path, "rb") as handle:
             magic, _version, _length = struct.unpack("<III", handle.read(12))
@@ -130,7 +150,7 @@ class LODAsset:
                 _chunk_length, chunk_kind = struct.unpack("<II", header)
                 if chunk_kind == _BIN_CHUNK:
                     binary_offset += 8
-        return cls(path, document, binary_offset)
+        return cls(path, document, binary_offset, max_resource_bytes)
 
     def load(self, level: int) -> tuple[dict[str, np.ndarray], np.ndarray]:
         """The arrays for one level, read from wherever that level's bytes are.
@@ -153,14 +173,23 @@ class LODAsset:
         start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
         count = accessor["count"] * width * dtype.itemsize
 
+        # What the document asks to be read, checked before anything is read:
+        # a length in the JSON is a claim, not a measurement.
+        check_size(count, self.max_resource_bytes, "accessor %d" % (index,))
+
         uri = buffer.get("uri")
-        if uri is None:
-            source, start = self.path, start + self._binary_offset
+        if uri is not None and uri.startswith("data:"):
+            # A buffer that carries its own bytes reaches no file at all.
+            whole = decode_data_uri(uri, self.max_resource_bytes)
+            source, raw = "data: URI", whole[start:start + count]
         else:
-            source = os.path.join(os.path.dirname(self.path), uri)
-        with open(source, "rb") as handle:
-            handle.seek(start)
-            raw = handle.read(count)
+            if uri is None:
+                source, start = self.path, start + self._binary_offset
+            else:
+                source = self.resolver.resolve(uri)
+            with open(source, "rb") as handle:
+                handle.seek(start)
+                raw = handle.read(count)
         if len(raw) != count:
             raise ValueError("%s is short: wanted %d bytes at %d" % (source, count, start))
         values = np.frombuffer(raw, dtype=dtype)

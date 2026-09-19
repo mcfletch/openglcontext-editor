@@ -60,6 +60,16 @@ MASK_FORMATS = ('png', 'jpg')
 USER_AGENT = ('OpenGLContext-editor '
               '(+https://github.com/mcfletch/openglcontext-editor)')
 
+#: Where Poly Haven publishes from: the library that answers questions, and the
+#: host its files come from. The answers name the URLs to fetch, and an answer
+#: is not permission to fetch from anywhere -- see
+#: :func:`OpenGLContext.loaders.resolver.require_host`.
+HOSTS = ('api.polyhaven.com', 'dl.polyhaven.org', 'polyhaven.com')
+
+#: Ceiling on one fetched file. An 8k model with its maps is tens of megabytes;
+#: this is room for the largest thing published and a bound on the rest.
+MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+
 Transport = Callable[[str], bytes]
 
 
@@ -79,12 +89,25 @@ def cache_dir(directory: str | None = None) -> str:
     return directory
 
 
-def _get(url: str) -> bytes:
-    """One URL's bytes, over the network."""
+def _open_capped(url: str, max_bytes: int) -> bytes:
+    """``url``'s bytes, reading no more than ``max_bytes`` of them."""
     from urllib.request import Request, urlopen
+
+    from OpenGLContext.loaders import resolver
     with urlopen(Request(url, headers={'User-Agent': USER_AGENT}),  # noqa: S310
                  timeout=120) as answer:
-        return bytes(answer.read())
+        return resolver.stream_capped(answer, max_bytes)
+
+
+def _get(url: str) -> bytes:
+    """One URL's bytes, over the network, from somewhere Poly Haven publishes.
+
+    The URLs fetched here come out of the library's own answers, so they are
+    checked before a socket is opened rather than trusted for having arrived
+    over TLS: an answer says where a file is, and that is a claim.
+    """
+    from OpenGLContext.loaders import resolver
+    return _open_capped(resolver.require_host(url, HOSTS), MAX_DOWNLOAD_BYTES)
 
 
 def _asked(kind: str, slug: str, transport: Transport | None,
@@ -157,6 +180,18 @@ class Download:
                            credit=self.credit)
 
 
+def _under(directory: str, relative: str) -> str:
+    """Where ``relative`` lands under ``directory``, refusing to leave it.
+
+    The layout of a download is the library's to describe -- ``textures/x.jpg``
+    beside the model that names it -- so the names come from the answer, and a
+    name is data. ``../../.bashrc`` as a key would otherwise write bytes the
+    same answer chose wherever this process can write.
+    """
+    from OpenGLContext.loaders.resolver import Resolver
+    return Resolver(base_dir=directory).resolve(relative)
+
+
 def _save(url: str, path: str, transport: Transport | None) -> str:
     """``url`` at ``path``, unless it is already there."""
     if os.path.exists(path) and os.path.getsize(path):
@@ -202,11 +237,11 @@ def fetch(slug: str, directory: str | None = None, resolution: str = '1k',
                           % (slug, resolution, ', '.join(sorted(sizes))))
     entry = sizes[resolution]['gltf']
     here = os.path.join(directory, slug)
-    document = _save(entry['url'], os.path.join(here, os.path.basename(
+    document = _save(entry['url'], _under(here, os.path.basename(
         entry['url'])), transport)
     diffuse = None
     for relative, named in (entry.get('include') or {}).items():
-        saved = _save(named['url'], os.path.join(here, relative), transport)
+        saved = _save(named['url'], _under(here, relative), transport)
         if '_diff' in relative or 'diffuse' in relative.lower():
             diffuse = saved
     if diffuse is None:
@@ -214,8 +249,7 @@ def fetch(slug: str, directory: str | None = None, resolution: str = '1k',
                           % (slug, ', '.join(entry.get('include') or ())))
     url = _mask_url(published, resolution)
     mask = (None if url is None
-            else _save(url, os.path.join(here, os.path.basename(url)),
-                       transport))
+            else _save(url, _under(here, os.path.basename(url)), transport))
     return Download(slug=slug, directory=here, gltf=document, diffuse=diffuse,
                     mask=mask,
                     credit=credit(slug, transport=transport, directory=directory))
