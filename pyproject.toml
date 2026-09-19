@@ -84,6 +84,11 @@ oglc-bake = "OpenGLContext_editor.bin.bake:main"
 # editor runs this once and the baked files are what ship.
 oglc-bake-plants = "OpenGLContext_editor.bin.plants:main"
 
+# The level-of-detail demo world: fetch the CC0 art, build the gallery in
+# Blender, export the glB with MSFT_lod on every bust.  Needs Blender on the
+# path; see docs/blender.html.
+oglce-gallery = "OpenGLContext_editor.bin.gallery:main"
+
 [project.urls]
 Homepage = "http://pyopengl.sourceforge.net/context/"
 Repository = "https://github.com/mcfletch/openglcontext-editor"
@@ -148,6 +153,25 @@ disallow_untyped_defs = true
 module = "OpenGLContext_editor.world.*"
 warn_return_any = false
 
+# The Blender add-on's `bpy` half. These modules run inside Blender's own
+# Python against an API that is not installed here and has no stubs, and
+# Blender declares an operator's properties with `levels: IntProperty(...)` --
+# a call in annotation position, which is not a type and cannot be made into
+# one. Checking them here reports the idiom rather than a defect.
+#
+# The add-on's other half carries no Blender and *is* checked: `msftlod` (what
+# a chain becomes in a document), `gallery` (where the room's parts go) and
+# `content` (which files a material is built from) are where its logic lives,
+# which is why they are kept free of `bpy` in the first place.
+[[tool.mypy.overrides]]
+module = [
+    "OpenGLContext_editor.blender.openglcontext_lod",
+    "OpenGLContext_editor.blender.openglcontext_lod.exporter",
+    "OpenGLContext_editor.blender.openglcontext_lod.ops",
+    "OpenGLContext_editor.blender.openglcontext_lod.scene",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The engine ships its GL fixtures as a pytest plugin (`gl_context`, `gl_window`);
@@ -155,6 +179,12 @@ testpaths = ["tests"]
 addopts = "-ra -p OpenGLContext.testing.plugin"
 # Backstop so a single hung bake or GL smoke test cannot wedge a session.
 timeout = 300
+markers = [
+    # Runs a headless Blender, which is a separate application rather than a
+    # dependency: these cases run where one is on the path and are skipped
+    # where none is.  `-m 'not blender'` leaves them out deliberately.
+    "blender: needs a Blender on the path (or $BLENDER)",
+]
 
 # These environments resolve the toolkit's dependencies from an index, so they
 # build only once the versions `[project] dependencies` names are published --

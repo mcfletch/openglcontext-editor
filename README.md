@@ -128,6 +128,36 @@ runs that sweep over a model and writes a contact sheet;
 `tools/lod_transitions.py` draws each switch at the distance it would happen,
 which is the frame a player would actually see.
 
+## Or author them in Blender
+
+Not every chain is baked from a scan. An artist with a model open in Blender
+wants to cut the levels there and export them, and the add-on in
+`src/OpenGLContext_editor/blender/openglcontext_lod` is that:
+
+```bash
+python -c "from OpenGLContext_editor import blender; print(blender.install())"
+```
+
+Blender then has **Object > Make LOD chain**, which cuts a chain from the
+selected mesh with Blender's own Decimate modifier and marks the levels, and a
+glTF export extension that writes them as `MSFT_lod` — so the ordinary
+*File > Export > glTF 2.0* produces a file a viewer switches levels in, and one
+that has never heard of the extension draws the finest level. The add-on needs
+only Blender's own Python; an author installs it and never installs this
+toolkit. [docs/blender.md](docs/blender.md) is the guide.
+
+The demo world for the whole mechanism is built this way:
+
+```bash
+oglce-gallery --output gallery/gallery.glb
+```
+
+A hall of 120 marble busts on plinths, each a six-level chain, with a polished
+parquet floor and dark beams overhead — CC0 art fetched from Poly Haven and
+ambientCG, assembled and exported in Blender. It is what the engine ships as
+its level-of-detail demo, so what a release carries is what this add-on makes
+rather than a second path that might disagree with it.
+
 ## A reduced scan needs its own texture
 
 A photogrammetry scan arrives unwrapped by the scanner, into thousands of small
@@ -467,6 +497,17 @@ metres over a valley builds an embankment as wide as it needs. Under the
 carriageway the ground sits a hand's breadth below the surface, because a road
 is built on a formation and surfaced on top of it.
 
+A **portal is dug**. The cutting stops where a bore begins and the hillside
+takes over, so left alone the ground steps from the carriageway to the hill
+between one sample and the next — a face one sample thick with the arch cut out
+of it. The ground around each portal is held down to the top of the portal's
+face, with `PORTAL_SOIL` of ground over it, and rises from there at the same
+batter the rest of the cutting uses, out to `PORTAL_CUT`. An ordinary hillside
+is met well inside that and nothing is cut past where it is met; a hill too
+steep to meet there is a hill rather than a doorway, and is left alone. The
+funnel only ever takes ground away, so the cutting the road arrives in is
+untouched and so is the hill the bore runs under.
+
 ### What the road puts beside itself
 
 A generated road knows what it is about to do, so the roadside is derived rather
@@ -574,8 +615,10 @@ pytest
 | `src/OpenGLContext_editor/world/` | world generation: the height source, presets, DEM import, sculpting, hydrology, contours, scatter, roads, and the example world |
 | `src/OpenGLContext_editor/assets/` | turning published art into assets: Poly Haven fetching, plant baking, billboards, and the unwrap-and-rebake for reduced scans |
 | `src/OpenGLContext_editor/meshlod/` | levels of detail: one recorded reduction sliced into rungs, what each rung costs to look at, and the `MSFT_lod` glb they ship in |
-| `src/OpenGLContext_editor/bin/` | `oglc-bake`, which says the command is now `glisteel-bake` |
+| `src/OpenGLContext_editor/blender/` | the Blender add-on: LOD chains from the Decimate modifier, `MSFT_lod` on glTF export, and the bust gallery it builds |
+| `src/OpenGLContext_editor/bin/` | `oglce-gallery`, which builds the demo world; and `oglc-bake`, which says the command is now `glisteel-bake` |
 | `tools/` | authoring scripts run by hand: the level-of-detail quality sweep and the transition sheet |
+| `docs/` | [authoring levels of detail in Blender](docs/blender.md) |
 | `tests/` | the suite; `pytest` runs it |
 | `specs/` | format and interoperability facts the code cites, and the [clean-room procedure](specs/CLEAN-ROOM.md) that governs how they are gathered |
 
