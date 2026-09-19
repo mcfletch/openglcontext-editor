@@ -135,18 +135,19 @@ three per cent of a 720-line window the model is twenty-odd pixels tall, so 256
 pixels at 8 views a side — 32 pixels a view — covers it. Twice as many views is
 four times the texture for angles a distant object does not resolve.
 
-**It is worth having because it lets you stop decimating early.** Measured on
-the demo hall with 108 busts on screen:
+**It lets a chain stop decimating early**: four mesh levels and a card carry a
+model further than six mesh levels do. On the demo hall with 108 busts on
+screen that is 62% of the triangles and one draw call fewer — 39,460 against
+103,536, in 10 draws against 11.
 
-| Chain | Bust triangles | Draws |
-|---|---|---|
-| 6 mesh levels | 103,536 | 11 |
-| 6 mesh levels + impostor | 90,620 | 12 |
-| **4 mesh levels + impostor** | **39,460** | **10** |
-
-Adding a card to the end of a chain that already reduces to 546 triangles saves
-an eighth of them and costs a draw call. Replacing the last two mesh levels with
-one saves 62% and a draw, and there are two fewer levels to bake and ship.
+**Bake one only when geometry is what a frame is waiting on.** On a
+discrete-class GPU that change made the gallery *no faster at all*: 4.93 ms a
+frame against 4.96, which is noise, because the frame was spending its time on
+processor work per object rather than on vertices. The same two worlds on a
+software rasteriser — which is roughly how a weak integrated part behaves —
+went **46.8 ms to 19.1 ms, 2.4× faster**. Same change, nothing on one machine
+and a different game on the other. Measure which yours is before baking
+anything.
 
 Two things the bake settles that are easy to get wrong, and that this does for
 you: Blender views a render through **AgX** by default, and a card baked through

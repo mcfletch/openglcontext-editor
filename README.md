@@ -152,9 +152,12 @@ Babylon should not have to install a renderer to write one.
 
 The chain's last level does not have to be a mesh: `--impostor 8` bakes an
 **octahedral impostor** — one view of the model per direction in a single
-texture, on a card turned to the viewer. It is worth having because it lets you
-stop decimating early: on the demo hall, four mesh levels and a card draw 62%
-fewer triangles than six mesh levels, in one fewer draw call.
+texture, on a card turned to the viewer. It lets a chain stop
+decimating early: on the demo hall, four mesh levels and a card draw 62% fewer
+triangles than six mesh levels, in one fewer draw call. Whether that is *faster*
+depends on what the frame is waiting on — it bought nothing on a discrete GPU
+and 2.4× on a software rasteriser; [docs/blender.md](docs/blender.md) has the
+numbers.
 
 The chain is cut to a **triangle budget** rather than to a ratio — *the finest
 level is not to exceed twenty thousand* — because that is what an author has.
