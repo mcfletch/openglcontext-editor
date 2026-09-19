@@ -21,6 +21,7 @@ import bpy
 
 from . import budget, msftlod
 from . import gallery as layout
+from . import impostor as impostors
 from .content import MaterialMaps
 
 __all__ = [
@@ -314,7 +315,9 @@ def build_gallery(plan: layout.Gallery, bust: str,
                   materials: dict[str, MaterialMaps],
                   levels: int = 6, ratio: float = 0.5,
                   coverage: Sequence[float] | None = None,
-                  max_triangles: int | None = None) -> dict[str, int]:
+                  max_triangles: int | None = None,
+                  impostor: int = 0, impostor_image: int = 256,
+                  impostor_into: str | None = None) -> dict[str, int]:
     """Build the whole world; return what was made, by kind.
 
     ``materials`` is keyed by the names :class:`~gallery.Gallery` uses for its
@@ -360,8 +363,18 @@ def build_gallery(plan: layout.Gallery, bust: str,
 
     original = import_mesh(bust)
     chain = decimation_chain(original, levels, ratio, max_triangles)
+    if impostor:
+        # Baked before the original is let go of, and once: every bust shares
+        # the card, which is what lets the ones drawing it be one draw.
+        baked = impostors.bake_atlas(
+            original,
+            os.path.join(impostor_into or os.path.dirname(os.path.abspath(bust)),
+                         'bust_impostor.png'),
+            grid=impostor, image=impostor_image)
+        chain = list(chain) + [impostors.impostor_mesh(baked, 'bust_impostor')]
     bpy.data.objects.remove(original, do_unlink=True)
-    thresholds = list(coverage) if coverage else msftlod.coverage_series(levels)
+    thresholds = (list(coverage) if coverage
+                  else msftlod.coverage_series(len(chain)))
 
     for placement in plan.busts():
         lod_chain(chain, placement.group, placement.position, placement.turn,
@@ -369,6 +382,7 @@ def build_gallery(plan: layout.Gallery, bust: str,
                   coarse_collection=coarse)
         counted['busts'] += 1
         counted['levels'] += len(chain)
+    counted['impostor'] = 1 if impostor else 0
 
     for lamp in plan.lights():
         light = bpy.data.lights.new(lamp.name, type='POINT')

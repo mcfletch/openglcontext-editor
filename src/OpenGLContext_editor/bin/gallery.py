@@ -105,12 +105,15 @@ def _write_credits(directory: str, notices: Sequence[str]) -> None:
 def build(content: str, output: str, bays: int = 30, levels: int = 6,
           ratio: float = 0.5, coverage: Sequence[float] | None = None,
           blend: str | None = None, blender_binary: str | None = None,
+          impostor: int = 0, impostor_image: int = 256,
           timeout: float = 3600.0) -> str:
     """Drive Blender over the content directory; return the glB written."""
     script = os.path.join(blender.addon_directory(), 'build.py')
     argv = ['-P', script, '--',
             '--content', content, '--output', os.path.abspath(output),
-            '--bays', str(bays), '--levels', str(levels), '--ratio', str(ratio)]
+            '--bays', str(bays), '--levels', str(levels), '--ratio', str(ratio),
+            '--impostor', str(impostor),
+            '--impostor-image', str(impostor_image)]
     if coverage:
         argv += ['--coverage', ','.join('%g' % value for value in coverage)]
     if blend:
@@ -149,6 +152,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--coverage', default=None,
                         help='measured switching thresholds, comma separated, '
                              'finest first')
+    parser.add_argument('--impostor', type=int, default=0, metavar='VIEWS',
+                        help='make the coarsest level an octahedral impostor '
+                             'with this many baked views a side (8 is a good '
+                             'start); 0 leaves the chain all meshes')
+    parser.add_argument('--impostor-image', type=int, default=256,
+                        help='pixels across the impostor atlas (default: '
+                             '%(default)s)')
     parser.add_argument('--blender', default=None,
                         help='which Blender to use (default: $BLENDER, or one '
                              'on the path)')
@@ -168,7 +178,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if options.coverage else None)
     build(content, options.output, bays=options.bays, levels=options.levels,
           ratio=options.ratio, coverage=coverage, blend=options.blend,
-          blender_binary=options.blender)
+          blender_binary=options.blender, impostor=options.impostor,
+          impostor_image=options.impostor_image)
     print(layout.describe(layout.Gallery(bays=options.bays)))
     return 0
 

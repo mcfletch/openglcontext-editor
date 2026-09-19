@@ -150,6 +150,12 @@ The zip carries a `blender_manifest.toml` and installs as a Blender 4.2+
 Babylon should not have to install a renderer to write one.
 [docs/blender.md](docs/blender.md) is the guide.
 
+The chain's last level does not have to be a mesh: `--impostor 8` bakes an
+**octahedral impostor** — one view of the model per direction in a single
+texture, on a card turned to the viewer. It is worth having because it lets you
+stop decimating early: on the demo hall, four mesh levels and a card draw 62%
+fewer triangles than six mesh levels, in one fewer draw call.
+
 The chain is cut to a **triangle budget** rather than to a ratio — *the finest
 level is not to exceed twenty thousand* — because that is what an author has.
 Blender's Decimate takes only a ratio and reports a read-only face count, so

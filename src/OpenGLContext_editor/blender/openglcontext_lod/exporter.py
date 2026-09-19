@@ -23,7 +23,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from . import msftlod
+from . import impostorspec, msftlod
 
 __all__ = ['MSFTLODExtension']
 
@@ -50,6 +50,37 @@ class MSFTLODExtension:
             return
         if level is not None:
             self._levels[id(gltf2_node)] = level
+
+    def gather_material_hook(self, material: Any, blender_material: Any,
+                             export_settings: dict) -> None:
+        """Carry an octahedral impostor's own numbers onto its material.
+
+        A card that shows one of many baked views has to say how many there
+        are and how they are folded, or a reader has a texture and no way to
+        read it. It goes in the material's ``extras``: only a reader that
+        understood ``MSFT_lod`` reaches this level at all -- it is the coarsest,
+        and a reader that did not draws the finest -- so a key of ours here is
+        read by exactly the readers that can use it and stepped over by the
+        rest.
+        """
+        if blender_material is None or not hasattr(blender_material, 'get'):
+            return
+        stated = impostorspec.of(blender_material)
+        if stated is None:
+            return
+        extras = getattr(material, 'extras', None)
+        if extras is None:
+            extras = {}
+            material.extras = extras
+        extras.update(stated)
+        # An impostor is **cut out**, not blended: it is opaque where the model
+        # was and absent where it was not, and one pixel of edge is not worth
+        # sorting the card against every other transparent thing in the world
+        # for. Said here rather than left to the material's own settings
+        # because Blender has had no alpha-clip blend mode since 4.2, so a
+        # cut-out material exports as BLEND and is drawn as glass.
+        material.alpha_mode = 'MASK'
+        material.alpha_cutoff = 0.5
 
     def gather_gltf_extensions_hook(self, gltf: Any,
                                     export_settings: dict) -> None:

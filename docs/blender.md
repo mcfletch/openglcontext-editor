@@ -109,6 +109,57 @@ draws each level against the original over a sweep of distances and reports the
 share of pixels that change. See the level-of-detail section of the
 [README](../README.md).
 
+## The last level does not have to be a mesh
+
+Past a certain distance a mesh is the wrong thing entirely: a bust twenty pixels
+tall spends five hundred triangles on a silhouette a picture would draw exactly.
+An **octahedral impostor** is that picture — one view of the model per
+direction, baked into a single square texture, drawn on a card turned to the
+viewer that shows whichever view matches where they are standing.
+
+```python
+from openglcontext_lod import impostor
+
+baked = impostor.bake_atlas(bust, '/tmp/bust_impostor.png', grid=8, image=256)
+card  = impostor.impostor_mesh(baked, 'bust_LOD4')   # a level like any other
+```
+
+`bake_atlas` renders `grid × grid` views of the object in Blender — EEVEE,
+orthographic, on a transparent film — and lays them out by the octahedral fold
+in `octahedral.py`. The scene's render settings, camera and world are put back
+afterwards, so it can be run on the file you are working in.
+
+**How big to make it** is a question about how small the model will be on screen
+when the impostor takes over, and nothing else. At a switching threshold of
+three per cent of a 720-line window the model is twenty-odd pixels tall, so 256
+pixels at 8 views a side — 32 pixels a view — covers it. Twice as many views is
+four times the texture for angles a distant object does not resolve.
+
+**It is worth having because it lets you stop decimating early.** Measured on
+the demo hall with 108 busts on screen:
+
+| Chain | Bust triangles | Draws |
+|---|---|---|
+| 6 mesh levels | 103,536 | 11 |
+| 6 mesh levels + impostor | 90,620 | 12 |
+| **4 mesh levels + impostor** | **39,460** | **10** |
+
+Adding a card to the end of a chain that already reduces to 546 triangles saves
+an eighth of them and costs a draw call. Replacing the last two mesh levels with
+one saves 62% and a draw, and there are two fewer levels to bake and ship.
+
+Two things the bake settles that are easy to get wrong, and that this does for
+you: Blender views a render through **AgX** by default, and a card baked through
+a film curve is a paler, flatter version of the model at the moment it appears —
+the bake pins `Standard`. And Blender has had no **alpha-clip** blend mode since
+4.2, so a cut-out material exports as `BLEND` and is drawn as glass; the export
+hook writes `MASK`, which is what keeps impostors in the opaque batch.
+
+What it does not do: it shows its nearest view rather than a blend of the
+nearest few, so turning past the angle between two baked views swaps one picture
+for another; and it carries the lighting it was baked under — an even white
+surround — rather than the lighting around it.
+
 ## Export
 
 **File > Export > glTF 2.0** as normal. The add-on's export extension turns
@@ -146,6 +197,7 @@ The demo world is built by this add-on, driven headlessly:
 
 ```bash
 oglce-gallery --output gallery/gallery.glb --blend gallery/gallery.blend
+oglce-gallery --output gallery/gallery.glb --levels 4 --impostor 8
 ```
 
 That fetches the CC0 art — the bust from Poly Haven, the surfaces from ambientCG

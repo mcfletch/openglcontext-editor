@@ -52,6 +52,12 @@ def arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument('--ratio', type=float, default=0.5,
                         help='what share of the triangles a level keeps of '
                              'the one before it')
+    parser.add_argument('--impostor', type=int, default=0,
+                        help='add an octahedral impostor as the coarsest '
+                             'level, with this many baked views a side; '
+                             '0 leaves the chain all meshes')
+    parser.add_argument('--impostor-image', type=int, default=256,
+                        help='how many pixels across the impostor atlas is')
     parser.add_argument('--coverage', default=None,
                         help='the thresholds the levels switch at, comma '
                              'separated, finest first; measured figures where '
@@ -80,10 +86,15 @@ def main(argv: list[str] | None = None) -> int:
     counted = scene.build_gallery(
         plan, *content.gallery_content(options.content),
         levels=options.levels, ratio=options.ratio, coverage=coverage,
-        max_triangles=options.max_triangles or None)
+        max_triangles=options.max_triangles or None,
+        impostor=options.impostor, impostor_image=options.impostor_image,
+        impostor_into=os.path.dirname(os.path.abspath(options.output)))
     print('BUILT: %s' % (gallery.describe(plan),))
     print('BUILT: %(slabs)d slabs, %(plinths)d plinths, %(busts)d busts, '
           '%(levels)d level objects, %(lights)d lights' % counted)
+    if counted.get('impostor'):
+        print('BUILT: the coarsest level of each bust is an octahedral '
+              'impostor, %d views a side' % (options.impostor,))
 
     output = os.path.abspath(options.output)
     os.makedirs(os.path.dirname(output), exist_ok=True)
