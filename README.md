@@ -46,7 +46,17 @@ release cycle, saying where the command went.
 world costs to draw. `--ground field` writes the landscape once beside the
 tileset as a height image and a splat control map, which a viewer draws as one
 mesh with detail materials blended per pixel; `--ground tiles` meshes it into
-the tile tree instead, which is what a world too large to hold at once needs.
+the tile tree instead, so the ground gets finer as the tree refines — which is
+what a world too large to hold at once needs, and where geometry a bake made
+(rather than a surface dressed up at draw time) belongs.
+
+The landscape is written beside the tileset **either way**, and
+`extras.terrain.drawn` says which of the two draws it. A tiled ground is blended
+and lit from that landscape — its primitives are named `ground`, and a viewer
+that knows the name draws them with the world's own ground materials — and it is
+the surface a game collides against, clamps a camera to and seats a plant on,
+which is the surface that must not change resolution under a wheel as a tile
+refines.
 `--forest field` writes the trees as one table and lets the runtime choose what
 to draw from how far each is from the camera; `--forest tiles` puts them in the
 tiles. Both default to `field`, which is what the shipped world wants.
@@ -288,6 +298,70 @@ A source is JSON, so a designer's landscape survives being saved:
 A `kind` this version does not know is **refused rather than dropped**: reading
 half of a file loses work without saying so. Declare a new kind with
 `register_base` / `register_edit`.
+
+## Detail the tiles carry
+
+A world whose ground is meshed into its tiles (`ground='tiles'`) gets more out
+of refining than a denser sampling of the same smooth function. Two things are
+added as the tree descends, and both are bounded by what the level can show:
+
+- **The grain in the ground.** `OpenGLContext.scenegraph.terrain.Relief` is a
+  band of noise per feature size; a tile carries the bands its own samples can
+  resolve, and the whole displacement is scaled to fit inside the tile's
+  geometric error. `ProceduralWorld.grain` is which grain a world has, and
+  `None` leaves the tiles smooth. Keep the features small: a band is as tall as
+  its `roughness` times its own width, so a coarse band is a dune rather than a
+  hummock, and what a landscape is *shaped* like is the height function's job.
+
+  **How much detail can be felt is set by `field_resolution`.** The grain goes
+  into the landscape, and the landscape is a grid: a band finer than it can
+  hold is cut before anything draws it. At a sample every two metres that
+  leaves one swell of about half a metre across sixteen — modulation across a
+  hillside rather than hummocks and ruts.
+- **Loose stone.** `bake.stones.StoneLayer` strews knee-high rock over the
+  hillsides and writes what a tile can show as placements of a handful of
+  shapes — one node per shape, however many stones the tile holds. A stone
+  appears once the tile's error is within `DETAIL` times its radius, so a
+  hillside fills in by size rather than switching on. `STONE_DENSITY`,
+  `STONE_RADIUS` and `STONE_SLOPE_LIMIT` on the world are the knobs, and
+  `MOST_PER_TILE` caps what one tile draws.
+
+**The cleared corridor takes everything.** A road is a strip of ground that was
+cleared to build it, and nothing a machine went through is still standing on it:
+trees, boulders and loose stone are all kept off the same strip
+(`ProceduralWorld.outside_the_clearing`, widened where a driver has to see round
+a bend and again over a bore), each by its own size on top of it.
+
+**What is drawn is what is collided against.** Both go into the landscape
+written beside the tileset, not only into the pictures:
+
+- the grain is added to the height function the landscape is sampled from, so
+  the field a car is driven on, a camera is clamped to and a tree is planted on
+  is the same surface the finest tile draws. A band the field's own grid cannot
+  hold is cut before anything draws it (`Relief.no_finer_than`), so there is no
+  relief a player can see and walk through. Ground the road *cleared* keeps
+  none of it: `ProceduralWorld.grain_applies` fades it from 0 on the made
+  ground to 1 beyond the corridor, because a hummock in the carriageway is one
+  a grader took out;
+- every stone travels in the tileset's `extras.stones` and a game stands the
+  ones near it up as *domes* — a wheel rides over one, a walker stands on one,
+  and a block the size of a stone would be a kerb across the hillside. Its own
+  channel rather than the world's `props`, because a boulder has to stop a car
+  from a long way off and a stone only has to be there where the wheel is.
+
+**How much of it is seen is the tree's depth.** A world of `extent` metres
+meshed at 33 samples a tile has a finest spacing of `extent / 2**depth / 32`, and
+nothing finer than that is drawn. Two kilometres at `depth = 3` is a sample every
+7.8 m, which carries none of the grain and none of the stone; at `depth = 5` it
+is a sample every 2 m, which carries both. Each level is four times the tiles, so
+it is a decision per world rather than a default.
+
+The world is **told** that depth (`ProceduralWorld.depth`), because the same
+number decides what a portal has to cover. A bore's mouth is cut on the drawn
+ground's own grid, so the face has to be at least a cell wide or there is
+daylight down each side of it, and the road's own space is cleared for a few
+cells in front of it. Measured against the root tile instead of the finest, that
+is a sixty-metre headwall and a trench down the approach.
 
 ## Start from a landscape
 

@@ -193,9 +193,14 @@ class TestMeasuringTheSlopeCheaply:
                                 control_size=256)
         assert world.slope_fn() is not None
 
-    def test_a_world_meshed_into_tiles_has_no_field_to_ask(self) -> None:
+    def test_a_world_meshed_into_tiles_has_one_too(self) -> None:
+        """Which of the two carries what is *drawn* says nothing about the
+        landscape: a world whose ground is meshed into its tiles still writes
+        the landscape beside them, because that is what the tiles are blended
+        from and what the world is collided against."""
         from OpenGLContext_editor.world.procedural import ProceduralWorld
-        assert ProceduralWorld(ground='tiles', extent=512.0).slope_fn() is None
+        assert ProceduralWorld(ground='tiles',
+                               extent=512.0).slope_fn() is not None
 
 
 class TestAskingForNone:

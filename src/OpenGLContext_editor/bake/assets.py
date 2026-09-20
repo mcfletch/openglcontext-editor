@@ -64,28 +64,40 @@ def combined_mesh(meshes: list[PBRMesh], material: Any = None) -> PBRMesh:
                 "%d meshes of %d different materials cannot be combined into "
                 "one; keep them apart, or say which material the result wears"
                 % (len(meshes), len(wearing)))
-    positions, normals, texcoords, colors, indices = [], [], [], [], []
+    # A node that carries a material and no vertices contributes nothing to
+    # draw; it is not a reason to refuse the merge.
+    drawn = [(mesh, np.asarray(mesh.positions, 'f')) for mesh in meshes
+             if mesh.positions is not None]
+    indices = []
     offset = 0
-    for mesh in meshes:
-        if mesh.positions is None:
-            # A node that carries a material and no vertices contributes
-            # nothing to draw; it is not a reason to refuse the merge.
-            continue
-        count = len(mesh.positions)
-        positions.append(np.asarray(mesh.positions, 'f'))
-        normals.append(_or_zeros(mesh.normals, count, 3))
-        texcoords.append(_or_zeros(mesh.texcoords, count, 2))
-        colors.append(_or_ones(mesh.colors, count))
+    for mesh, points in drawn:
         if mesh.indices is not None:
             indices.append(np.asarray(mesh.indices, np.uint32) + offset)
         else:
-            indices.append(np.arange(count, dtype=np.uint32) + offset)
-        offset += count
+            indices.append(np.arange(len(points), dtype=np.uint32) + offset)
+        offset += len(points)
+    # An attribute nothing carried is left off rather than filled in: a zero
+    # texture coordinate on every vertex of a merged mesh is bytes in every
+    # tile it rides in and says nothing.
     return PBRMesh(
-        positions=np.vstack(positions), normals=np.vstack(normals),
-        texcoords=np.vstack(texcoords), colors=np.vstack(colors),
+        positions=np.vstack([points for _mesh, points in drawn]),
+        normals=_gathered(drawn, 'normals', _or_zeros, 3),
+        texcoords=_gathered(drawn, 'texcoords', _or_zeros, 2),
+        colors=_gathered(drawn, 'colors', _or_ones),
         indices=np.concatenate(indices),
         material=material if material is not None else meshes[0].material)
+
+
+def _gathered(drawn: list[tuple[PBRMesh, np.ndarray]], attribute: str,
+              fill: Any, width: int | None = None) -> np.ndarray | None:
+    """One vertex attribute over several meshes, or None if none carries it."""
+    found = [getattr(mesh, attribute) for mesh, _points in drawn]
+    if all(one is None for one in found):
+        return None
+    rows = [fill(one, len(points)) if width is None
+            else fill(one, len(points), width)
+            for one, (_mesh, points) in zip(found, drawn, strict=True)]
+    return np.vstack(rows)
 
 
 def _or_zeros(array: Any, count: int, width: int) -> np.ndarray:

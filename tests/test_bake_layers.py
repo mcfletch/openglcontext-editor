@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from OpenGLContext.loaders.gltf.writer import SceneNode
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.terrain import Relief
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.layers import HeightfieldLayer, InstanceLayer, MeshLayer
@@ -94,6 +95,118 @@ class TestAHeightfieldLayer:
         layer = self._layer(material=material)
         mesh = layer.content(_footprint(0, 50, 0, 50), error=8.0)[0].mesh
         assert mesh.material is material
+
+
+class TestAHoleCutInTheGround:
+    """Ground a road runs inside is ground that is not there, and a tiled world
+    cuts the opening at bake time (:func:`OpenGLContext.scenegraph.terrain.holes.cut`)
+    rather than leaving the runtime to do it to a mesh it was handed."""
+
+    def _square(self, half=12.0):
+        def holes(x, z):
+            return (np.abs(np.asarray(x)) <= half) \
+                & (np.abs(np.asarray(z)) <= half)
+        return holes
+
+    def _layer(self, **kwargs):
+        return HeightfieldLayer(height_fn=_slope,
+                                extent=_footprint(-100, 100, -100, 100),
+                                resolution=17, skirt=0.0, **kwargs)
+
+    def _region(self):
+        return _footprint(-50, 50, -50, 50)
+
+    def test_the_ground_inside_the_opening_is_gone(self) -> None:
+        mesh = self._layer(holes=self._square()).content(self._region(), 4.0)[0].mesh
+        at = mesh.positions[np.asarray(mesh.indices).reshape(-1, 3)]
+        middle = at.mean(axis=1)
+        assert not ((np.abs(middle[:, 0]) < 11.0)
+                    & (np.abs(middle[:, 2]) < 11.0)).any()
+
+    def test_and_the_ground_outside_it_is_still_there(self) -> None:
+        mesh = self._layer(holes=self._square()).content(self._region(), 4.0)[0].mesh
+        assert float(np.abs(mesh.positions[:, 0]).max()) > 40.0
+
+    def test_the_cut_follows_the_opening_rather_than_the_grid(self) -> None:
+        """Whole cells removed would leave the hole square to the samples; the
+        edge is where the opening says it is."""
+        mesh = self._layer(holes=self._square(half=7.3)).content(
+            self._region(), 4.0)[0].mesh
+        edge = mesh.positions[np.abs(np.abs(mesh.positions[:, 0]) - 7.3) < 0.01]
+        assert len(edge) > 0
+
+    def test_a_tile_the_opening_swallows_whole_holds_no_ground(self) -> None:
+        assert self._layer(holes=self._square(half=500.0)).content(
+            self._region(), 4.0) == []
+
+    def test_the_colours_and_normals_come_through_the_cut(self) -> None:
+        mesh = self._layer(holes=self._square()).content(self._region(), 4.0)[0].mesh
+        assert len(mesh.normals) == len(mesh.positions)
+        assert len(mesh.colors) == len(mesh.positions)
+        assert np.isfinite(mesh.normals).all()
+
+    def test_nothing_is_written_that_no_triangle_uses(self) -> None:
+        mesh = self._layer(holes=self._square()).content(self._region(), 4.0)[0].mesh
+        assert len(np.unique(mesh.indices)) == len(mesh.positions)
+
+    def test_a_tile_the_opening_misses_is_meshed_as_it_was(self) -> None:
+        away = _footprint(60, 100, 60, 100)
+        cut = self._layer(holes=self._square()).content(away, 4.0)[0].mesh
+        plain = self._layer().content(away, 4.0)[0].mesh
+        assert np.array_equal(cut.positions, plain.positions)
+
+
+class TestTheGrainInATilesGround:
+    """Micro-relief (:class:`OpenGLContext.scenegraph.terrain.Relief`) meshed
+    into a tile, so refining the tree buys detail and not only a denser
+    sampling of the same smooth function."""
+
+    def _layer(self, **kwargs):
+        return HeightfieldLayer(height_fn=_slope,
+                                extent=_footprint(-100, 100, -100, 100),
+                                resolution=33, skirt=0.0, **kwargs)
+
+    def _surface(self, layer, error, region=None):
+        nodes = layer.content(region or _footprint(0, 16, 0, 16), error=error)
+        return nodes[0].mesh.positions
+
+    def test_a_tile_with_no_relief_asked_for_sits_on_the_function(self) -> None:
+        found = self._surface(self._layer(), error=0.5)
+        assert np.allclose(found[:, 1], _slope(found[:, 0], found[:, 2]),
+                           atol=1e-4)
+
+    def test_a_close_tile_stands_off_it(self) -> None:
+        found = self._surface(self._layer(relief=Relief()), error=0.5)
+        moved = found[:, 1] - _slope(found[:, 0], found[:, 2])
+        assert float(np.abs(moved).max()) > 0.01
+
+    def test_and_never_by_more_than_the_tile_may_be_wrong_by(self) -> None:
+        for error in (0.05, 0.5, 4.0):
+            found = self._surface(self._layer(relief=Relief()), error=error)
+            moved = found[:, 1] - _slope(found[:, 0], found[:, 2])
+            assert float(np.abs(moved).max()) <= error + 1e-6
+
+    def test_a_distant_tile_is_left_smooth(self) -> None:
+        """Its samples are hundreds of metres apart, and a two-metre hummock
+        drawn there is speckle rather than ground."""
+        layer = self._layer(relief=Relief())
+        found = self._surface(layer, error=90.0,
+                              region=_footprint(-100, 100, -100, 100))
+        assert np.allclose(found[:, 1], _slope(found[:, 0], found[:, 2]),
+                           atol=1e-4)
+
+    def test_the_normals_follow_the_ground_that_is_drawn(self) -> None:
+        """Relief nothing is shaded by is relief nobody sees: the surface is
+        lit from what it was meshed as, not from the smooth function under it."""
+        smooth = self._layer().content(_footprint(0, 16, 0, 16), 0.5)[0].mesh
+        grained = self._layer(relief=Relief()).content(
+            _footprint(0, 16, 0, 16), 0.5)[0].mesh
+        assert not np.allclose(smooth.normals, grained.normals, atol=1e-3)
+
+    def test_the_relief_is_the_same_grain_each_bake(self) -> None:
+        one = self._surface(self._layer(relief=Relief()), error=0.5)
+        two = self._surface(self._layer(relief=Relief()), error=0.5)
+        assert np.array_equal(one, two)
 
 
 def _prototype(name='tree'):

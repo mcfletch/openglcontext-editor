@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -24,17 +24,22 @@ from OpenGLContext.loaders.tiles3d.procedural import (
 )
 from OpenGLContext.scenegraph.gantry import GantryProfile
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
-from OpenGLContext.scenegraph.props import Prop, rock_mesh
+from OpenGLContext.scenegraph.props import Prop, RockProfile, rock_mesh
 from OpenGLContext.scenegraph.road import (
     MAXIMUM_BANK,
     RoadProfile,
     bank_profile,
 )
 from OpenGLContext.scenegraph.roadsigns import SignProfile
-from OpenGLContext.scenegraph.terrain import LayerRule
+from OpenGLContext.scenegraph.roadworks import (
+    BORE_APPROACH_CELLS,
+    TunnelProfile,
+)
+from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, LayerRule, Relief
 
 from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.bake.driver import root_error_for
 from OpenGLContext_editor.bake.field import FieldTerrainLayer
 from OpenGLContext_editor.bake.gantry import GantryLayer
 from OpenGLContext_editor.bake.layers import (
@@ -256,10 +261,62 @@ ROCK_RADIUS = (0.45, 1.7)
 #: driver seeing the same stone twice in a lap is not what anybody notices.
 ROCK_SHAPES = 4
 
-#: Where a boulder may lie: off the carriageway by its own size and this much
-#: more, and no further out than this from the road. The near limit is what
-#: makes it an obstacle rather than scenery -- something a car leaving the road
-#: meets -- and the far one is what stops the whole landscape being strewn.
+#: Loose stone per square metre, how big one is in metres, and how many shapes
+#: are cut. This is what a hillside is made of rather than what a car runs into:
+#: knee-high at most, meshed into the tiles that are close enough to draw it
+#: (:class:`~OpenGLContext_editor.bake.stones.StoneLayer`), and carrying no
+#: collider, so the surface a car is driven on is the landscape and not a field
+#: of pebbles.
+#:
+#: Dense enough that a hillside seen from a standing start has stone in it, and
+#: sparse enough that the world is a landscape and not a scree slope: about one
+#: every sixteen metres square.
+STONE_DENSITY = 0.004
+STONE_RADIUS = (0.10, 0.35)
+STONE_SHAPES = 5
+
+#: How rough a hillside a stone lies on, in degrees, and how much room it
+#: keeps outside the cleared corridor, in metres. Steeper than that and it
+#: would have rolled; inside the clearing it would be stone a machine took
+#: away when the road was built.
+STONE_SLOPE_LIMIT = 46.0
+STONE_CLEARANCE = 1.5
+
+#: Over how many metres the ground's own grain comes back beyond the road's
+#: edge. A grader leaves a batter and not a cliff, and grain that switches on
+#: across one cell is a ridge down the length of the road.
+GRAIN_FADE = 12.0
+
+#: How far the ground has to stand clear of the road, in metres, before it
+#: counts as ground the road merely passes rather than ground it was built on.
+#: A bore's hill and a deck's valley are tens of metres clear; a portal and an
+#: abutment are not, and those are where a hummock stands in the carriageway.
+#: Ground within :data:`GRAIN_AT_GRADE` of the road is all of it graded, which
+#: is what makes the carriageway exactly smooth rather than nearly so -- the
+#: formation a road is built on sits a little under its surface, and a fade
+#: measured from the surface would leave a trace of grain on the road.
+GRAIN_ABOVE = 8.0
+GRAIN_AT_GRADE = 2.0
+
+#: How far a stone is bedded into the ground, as a share of its own size.
+#: Stone lying on a hillside is settled into it; one resting on the surface at
+#: a single point reads as scenery dropped from above. What is drawn and what
+#: is stood on are both measured from the bedded foot, so this moves the two
+#: together.
+STONE_SETTLE = 0.2
+
+#: What a loose stone is cut as. No subdivision at all, against a boulder's
+#: two: a stone is drawn flat-faceted, so every triangle carries its own three
+#: vertices, and at knee height twenty faces is a stone while eighty is eighty
+#: faces nobody counts. A tile carrying fifty of them pays the difference
+#: fifty times.
+STONE_PROFILE = RockProfile(facets=0, roughness=0.4, settled=0.4)
+
+#: Where a boulder may lie: outside the strip cleared for the road by its own
+#: size and this much more, and no further out than this from it. The near
+#: limit is what makes it an obstacle rather than scenery -- something a car
+#: leaving the road meets -- and the far one is what stops the whole landscape
+#: being strewn.
 ROCK_CLEARANCE = 0.6
 ROCK_REACH = 26.0
 
@@ -430,6 +487,22 @@ class ProceduralWorld:
     structures: bool = True
     #: How the ground is carried: 'field' (one splat terrain) or 'tiles'.
     ground: str = 'field'
+    #: The grain in tiled ground: the hummocks and ruts a landscape has that a
+    #: height function a kilometre wide does not carry
+    #: (:class:`~OpenGLContext.scenegraph.terrain.Relief`). Each tile is meshed
+    #: with as much of it as its own samples can show and no more than its
+    #: geometric error allows, so refining the tree buys detail rather than a
+    #: denser sampling of the same smooth surface. None leaves the tiles smooth.
+    #: The landscape beside the tileset -- what a car is driven on and a tree is
+    #: planted on -- carries none of it.
+    grain: Relief | None = GROUND_RELIEF
+    #: How many times the tile tree subdivides when this world is baked. It is
+    #: the bake's setting, and the world is told it because a tiled world's
+    #: ground is only as fine as its deepest tile: how wide a portal's face has
+    #: to be, and how far in front of one the ground is cleared, are measured
+    #: against a cell of the finest ground the world will carry
+    #: (:meth:`ground_spacing`).
+    depth: int = 4
     #: How many samples across the field's height grid.
     field_resolution: int = FIELD_RESOLUTION
     #: How many pixels across the splat control map.
@@ -479,6 +552,8 @@ class ProceduralWorld:
     wetness: float = 0.0
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
     _terrain: Layer | None = field(default=None, init=False, repr=False)
+    _landscape: FieldTerrainLayer | None = field(default=None, init=False,
+                                                 repr=False)
     _scatter: Any = field(default=None, init=False, repr=False)
     _character: Any = field(default=None, init=False, repr=False)
     _start_line: StartFinish | None = field(default=None, init=False,
@@ -528,7 +603,13 @@ class ProceduralWorld:
         kept clear. A tree placed before the earthworks would stand in a cutting
         with its roots in the air.
         """
-        layers: list[Layer] = [self.terrain(), self.water(), self.trees()]
+        layers: list[Layer] = [self.terrain()]
+        if self.landscape() is not self.terrain():
+            # The ground is meshed into the tiles, and the landscape goes with
+            # it: what the tiles are blended and lit from, and the surface the
+            # world is collided against, walked on and planted on.
+            layers.append(self.landscape())
+        layers.extend([self.water(), self.trees()])
         rivers = self.rivers()
         if rivers is not None:
             layers.append(rivers)
@@ -541,6 +622,9 @@ class ProceduralWorld:
         props = self.prop_layer()
         if props is not None:
             layers.append(props)
+        stones = self.stone_layer()
+        if stones is not None:
+            layers.append(stones)
         return layers
 
     def water(self) -> Layer:
@@ -578,12 +662,79 @@ class ProceduralWorld:
         """
         from OpenGLContext.loaders.tiles3d.scatter import Scatter
         placed = scatter_on_heightfield(
-            self.height_fn(), self.footprint(), density=ROCK_DENSITY,
+            self.seated_on(), self.footprint(), density=ROCK_DENSITY,
             seed=self.seed + 101, scale_range=ROCK_RADIUS,
             slope_limit=ROCK_SLOPE_LIMIT, slope_fn=self.slope_fn(),
             height_range=(self.water_level + ROCK_FREEBOARD, 1.0e9),
             keep=self._beside_the_road)
         return Scatter(placed.positions, placed.yaws, placed.scales)
+
+    def stones(self) -> Any:
+        """The loose stone on the hillsides: everywhere but on the road.
+
+        Seated on the landscape's own surface (:meth:`seated_on`) -- grain
+        included, since the landscape carries the grain the tiles draw. So a
+        stone lies on the hillside in the picture and on the hillside
+        underfoot, from the one number.
+
+        Kept out of the strip that was cleared to build the road, the same
+        strip the trees and the boulders are kept out of: a machine went
+        through it and nothing on it is still standing. Kept off nothing else,
+        because a landscape has stone in it.
+        """
+        from OpenGLContext.loaders.tiles3d.scatter import Scatter
+        placed = scatter_on_heightfield(
+            self.seated_on(), self.footprint(), density=STONE_DENSITY,
+            seed=self.seed + 307, scale_range=STONE_RADIUS,
+            slope_limit=STONE_SLOPE_LIMIT, slope_fn=self.slope_fn(),
+            height_range=(self.water_level + ROCK_FREEBOARD, 1.0e9),
+            keep=self._off_the_road)
+        return Scatter(placed.positions, placed.yaws, placed.scales)
+
+    def seated_on(self) -> Any:
+        """The surface anything standing on the ground is placed on.
+
+        The landscape's own grid, which is what the world is collided against
+        and clamped to -- not the height function it was sampled from. The two
+        differ by however much a cell's interpolation differs from the function
+        across it, which on wide cells over real relief is a boulder floating
+        half a metre over the hillside it is lying on.
+        """
+        ground = self.landscape().field()
+        return ground.sample
+
+    def stone_shapes(self) -> dict:
+        """The handful of stones this world's loose rock is cut from."""
+        return {_stone_kind(index): rock_mesh(radius=1.0, seed=100 + index,
+                                              profile=STONE_PROFILE)
+                for index in range(STONE_SHAPES)}
+
+    def stone_layer(self) -> Any:
+        """The loose stone, or None for a world with none to strew.
+
+        Each stone is bedded into the ground by a share of its own size, so it
+        lies in the hillside rather than resting on it at a point, and the
+        bedded foot is what is both drawn and stood on.
+        """
+        placed = self.stones()
+        if not len(placed.positions):
+            return None
+        from OpenGLContext_editor.bake.stones import StoneLayer
+        prototypes = self.stone_shapes()
+        stones = [
+            Prop.of(prototypes[_stone_kind(index % STONE_SHAPES)],
+                    kind=_stone_kind(index % STONE_SHAPES),
+                    position=(point[0], point[1] - STONE_SETTLE * float(scale),
+                              point[2]),
+                    yaw=float(yaw), scale=float(scale), shape='dome')
+            for index, (point, yaw, scale) in enumerate(
+                zip(placed.positions, placed.yaws, placed.scales, strict=True))]
+        return StoneLayer(stones=stones, prototypes=prototypes, name='stones')
+
+    def _off_the_road(self, points: np.ndarray) -> np.ndarray:
+        """Which placements are outside the strip cleared for the road."""
+        return self.outside_the_clearing(
+            points, margin=STONE_RADIUS[1] + STONE_CLEARANCE)
 
     def prop_layer(self) -> PropLayer | None:
         """The world's obstacles, or None for a world with nothing in the way."""
@@ -613,12 +764,11 @@ class ProceduralWorld:
         if not self.road:
             return np.ones(len(points), dtype=bool)
         circuit = self.circuit()
-        clear = circuit.profile.carriageway_width / 2.0 + ROCK_RADIUS[1] \
-            + ROCK_CLEARANCE
         found = circuit.sample(points[:, 0], points[:, 2],
                                radius=ROCK_REACH * 1.5)
-        keep = np.asarray((found.distance > clear)
-                          & (found.distance < ROCK_REACH))
+        keep = self.outside_the_clearing(
+            points, margin=ROCK_RADIUS[1] + ROCK_CLEARANCE)
+        keep = keep & np.asarray(found.distance < ROCK_REACH)
         room: np.ndarray = keep & self._clear_of_the_gantry(points)
         return room
 
@@ -697,7 +847,8 @@ class ProceduralWorld:
         """The ground as the world finally has it, earthworks included."""
         if not self.road:
             return self.natural()
-        return conform_terrain(self.natural(), self.circuit())
+        return conform_terrain(self.natural(), self.circuit(),
+                               tunnel=self.tunnel_profile())
 
     def circuit(self) -> RoadPath:
         """The race circuit: laid out on the natural ground, smoothed, and told
@@ -839,27 +990,186 @@ class ProceduralWorld:
     def circuit_layer(self) -> RoadLayer:
         return RoadLayer(self.circuit(), wetness=self.wetness,
                          ground=self.natural(), shade=self.canopy_shade(),
-                         start=self.start_station(), posted=self.posted)
+                         start=self.start_station(), posted=self.posted,
+                         tunnel=self.tunnel_profile())
+
+    def ground_spacing(self) -> float:
+        """How far apart the ground is sampled, in metres.
+
+        The field's own spacing where the world carries one, and the *finest
+        tile's* where it tiles its ground instead -- which is the resolution
+        anything cut out of the ground is cut at. A tiled world's finest tile
+        covers ``extent / 2**depth`` metres at ``resolution`` samples, so the
+        depth of the tree is half the answer: measured against the root tile
+        instead, a portal's face comes out sixty metres across and the ground
+        cleared in front of it is a trench down the approach.
+        """
+        if self.ground == 'field':
+            return self.extent / max(self.field_resolution - 1, 1)
+        return (self.extent / float(1 << max(int(self.depth), 0))
+                / max(self.resolution - 1, 1))
+
+    def tunnel_profile(self) -> TunnelProfile:
+        """The bore this world builds, with a face wide enough for its ground.
+
+        A portal's face is what covers the edge of the hole its mouth is cut in
+        (:func:`~OpenGLContext.scenegraph.roadworks.bore_opening`), and the hole
+        is cut on the ground's own grid: a triangle the opening reaches into
+        goes whole, which takes ground most of a cell past it. A face narrower
+        than that leaves daylight down each side of the portal, so on coarse
+        ground the border is as wide as a cell rather than as wide as it looks
+        best.
+        """
+        border = max(TunnelProfile().portal_border, self.ground_spacing())
+        return TunnelProfile(portal_border=border)
 
     def terrain(self) -> Layer:
-        """The ground, as whichever kind of terrain layer the world asked for."""
+        """The ground as it is *drawn*: the landscape itself, or the tiles.
+
+        One layer either way, and for a world whose ground is its field it is
+        the same object :meth:`landscape` answers.
+        """
         if self._terrain is None:
             self._terrain = self._build_terrain()
         return self._terrain
 
+    def field_spacing(self) -> float:
+        """How far apart the landscape's own height grid is sampled, in metres.
+
+        The landscape is what the world is *collided* against, walked on and
+        planted on, so this is the finest detail a world can be made to feel --
+        whatever its tiles draw.
+        """
+        return self.extent / max(self.field_resolution - 1, 1)
+
+    def detail_error(self) -> float:
+        """The geometric error of the finest tile this world will be baked to.
+
+        The root's error halves at every level
+        (:func:`~OpenGLContext_editor.bake.driver.root_error_for`), and the
+        finest tile is the one whose surface has to agree with the landscape,
+        so its error is what the grain in both is held inside.
+        """
+        return root_error_for(self.extent, self.resolution) \
+            / float(1 << max(int(self.depth), 0))
+
+    def grain_drawn(self) -> Relief | None:
+        """The grain the tiles carry, held to what the landscape can hold too.
+
+        None for a world with no grain and for one that draws its own field,
+        which has no tiles to put detail in.
+
+        A band finer than the landscape's grid is relief a player would see and
+        walk straight through, so it is cut from what is drawn as well
+        (:meth:`~OpenGLContext.scenegraph.terrain.Relief.no_finer_than`). What
+        is left, the landscape carries: :meth:`field_terrain` builds it with the
+        same grain at the same figures, so the finest tile and the surface under
+        it are one surface.
+        """
+        if self.grain is None or self.ground != 'tiles':
+            return None
+        held = self.grain.no_finer_than(self.field_spacing())
+        return replace(held, where=self.grain_applies())
+
+    def grain_applies(self) -> Any:
+        """How much grain each place gets, from 0 on the road to 1 clear of it.
+
+        A road is built by *clearing and levelling* a strip of ground, so the
+        grain stops at the edge of that strip (:meth:`corridor_along`) and not
+        at the edge of the tarmac -- the same strip the trees, the boulders and
+        the loose stone are kept off. Grain inside it is ground standing up
+        where a machine levelled it, and where a car that has run wide is
+        trying to recover. It comes back over :data:`GRAIN_FADE` metres beyond
+        the clearing, because a grader leaves a batter and not a cliff.
+
+        Ground the road *passes* rather than sits on keeps its grain: the
+        hillside a bore runs under, the valley a deck crosses. What separates
+        them is height, not which structure carries the road -- the ground at a
+        portal and at a deck's abutment comes up to meet the carriageway
+        whatever the stretch is called, and that is exactly where a hummock
+        would stand in the way. So the fade is full where the ground is at the
+        road's own level and gone by :data:`GRAIN_ABOVE` metres clear of it.
+        """
+        if not self.road:
+            return None
+        circuit = self.circuit()
+        graded = self.corridor_along()
+        ground = self.height_fn()
+        radius = (float(graded.max()) + GRAIN_FADE) * 1.5
+
+        def applies(x: Any, z: Any) -> Any:
+            found = circuit.sample(x, z, radius=radius)
+            away = np.asarray(found.distance, dtype='d')
+            reached = np.isfinite(away)
+            edge = graded[found.segment]
+            out = np.clip((away - edge) / GRAIN_FADE, 0.0, 1.0)
+            rise = np.abs(np.asarray(ground(x, z), dtype='d')
+                          - np.where(reached, found.height, 0.0))
+            beside = np.clip((GRAIN_ABOVE - rise)
+                             / (GRAIN_ABOVE - GRAIN_AT_GRADE), 0.0, 1.0)
+            worked = np.where(reached, (1.0 - out) * beside, 0.0)
+            return 1.0 - worked
+        return applies
+
+    def detailed(self, ground: HeightFn) -> HeightFn:
+        """``ground`` with this world's grain in it, at the finest tile's figures.
+
+        What the landscape is sampled from and what anything standing on the
+        ground is seated on. Fixed figures rather than per-tile ones: a tile
+        picks its bands by its own spacing because that is level of detail, and
+        the surface everything else agrees about has one answer.
+        """
+        grain = self.grain_drawn()
+        if grain is None:
+            return ground
+        return grain.over(ground, spacing=self.ground_spacing(),
+                          error=self.detail_error())
+
+    def landscape(self) -> FieldTerrainLayer:
+        """The landscape as a height image and a control map.
+
+        Written beside the tileset whichever way the ground is drawn. It is what
+        the ground is blended from and lit by, and the surface a game collides
+        against, clamps a camera to and seats a plant on -- which is the surface
+        that must not change resolution under a wheel as a tile refines.
+        """
+        if self._landscape is None:
+            self._landscape = self.field_terrain()
+        return self._landscape
+
     def _build_terrain(self) -> Layer:
         if self.ground == 'field':
-            return self.field_terrain()
+            return self.landscape()
         if self.ground != 'tiles':
             raise ValueError("a world's ground is 'field' or 'tiles', not %r"
                              % (self.ground,))
         return HeightfieldLayer(
             height_fn=self.height_fn(), height_fn_at=self.height_fn_at(),
             extent=self.footprint(), resolution=self.resolution,
+            holes=self.bore_openings(),
             # No clamp: the ground is meshed as it is and the water is laid
             # over it, so the shoreline is where the land actually passes
             # through the surface.
-            color_fn=terrain_colors, water_level=None, name='terrain')
+            color_fn=terrain_colors, water_level=None,
+            relief=self.grain_drawn(), name='terrain')
+
+    def bore_openings(self) -> Any:
+        """Where a bore's mouth breaks the ground, or None if none does.
+
+        A hill a road runs inside is drawn as a hill, which at the portal puts
+        the hillside where the carriageway is. This is what comes out of it
+        (:meth:`OpenGLContext_editor.world.road.RoadPath.bore_openings`), cut
+        into the tiles at bake time where the tiles are what is drawn.
+
+        The surface it is measured against is the conformed ground -- the land
+        with the road's own earthworks already in it -- because that is the
+        surface being cut.
+        """
+        if not self.road:
+            return None
+        return self.circuit().bore_openings(
+            self.height_fn(), tunnel=self.tunnel_profile(),
+            approach=BORE_APPROACH_CELLS * self.ground_spacing())
 
     def _tree_slopes(self, positions: Any) -> Any:
         """How steep the ground is under each tree, as rise over run."""
@@ -878,10 +1188,7 @@ class ProceduralWorld:
         also answers the question a tree asks -- whether the hillside is too
         steep to hold one -- rather than whether the metre it stands on is.
         """
-        layer = self.terrain()
-        if not isinstance(layer, FieldTerrainLayer):
-            return None
-        field = layer.field()
+        field = self.landscape().field()
 
         def steepness(x: Any, z: Any) -> Any:
             return np.arctan(np.asarray(field.slope(x, z), dtype='d'))
@@ -897,16 +1204,19 @@ class ProceduralWorld:
         or no forest to shade it with.
         """
         from OpenGLContext.scenegraph.terrain.splat import SplatTerrain
-        layer = self.terrain()
-        if not isinstance(layer, FieldTerrainLayer) or self.forest != 'field':
+        if self.forest != 'field':
             return None
-        return SplatTerrain(layer.field(), list(GROUND_LAYERS), control=None,
+        return SplatTerrain(self.landscape().field(), list(GROUND_LAYERS),
+                            control=None,
                             canopy=self.scatter().positions).shade
 
     def field_terrain(self) -> FieldTerrainLayer:
         """The landscape as one height field and one splat control map."""
+        at_spacing = self.height_fn_at()
         return FieldTerrainLayer(
-            height_fn=self.height_fn(), height_fn_at=self.height_fn_at(),
+            height_fn=self.detailed(self.height_fn()),
+            height_fn_at=(None if at_spacing is None
+                          else lambda spacing: self.detailed(at_spacing(spacing))),
             extent=self.footprint(), resolution=self.field_resolution,
             control_size=self.control_size,
             layers=list(GROUND_LAYERS),
@@ -914,6 +1224,7 @@ class ProceduralWorld:
             road=self.circuit() if self.road else None,
             road_layer=GROUND_LAYERS.index('dirt'),
             road_corridor=self._corridor(),
+            drawn=self.ground,
             name='terrain')
 
     def _corridor(self) -> float:
@@ -948,7 +1259,8 @@ class ProceduralWorld:
         """
         if not self.road:
             return None
-        return conform_terrain_at(self.natural(), self.circuit())
+        return conform_terrain_at(self.natural(), self.circuit(),
+                                  tunnel=self.tunnel_profile())
 
     def scatter(self) -> Any:
         """Where the trees stand: on the finished ground, clear of the road.
@@ -1042,44 +1354,73 @@ class ProceduralWorld:
                      else TILE_TREE_CREDITS)
         return found
 
-    def _away_from_the_road(self, points: np.ndarray) -> np.ndarray:
-        """Which placements are outside the road's cleared corridor.
+    def outside_the_clearing(self, points: np.ndarray, margin: float = 0.0,
+                             carried: float = 0.0) -> np.ndarray:
+        """Which placements are outside the strip cleared for the road.
 
-        Wider where the road is carried above the land the tree stands on: the
-        crown of a tree rooted at the foot of an embankment grows through the
-        side of it rather than over the carriageway, and a wood growing out of
-        a causeway's concrete is what that looks like from the road.
+        A road is not only a surface: it is a strip of ground that was cleared
+        to build it, and nothing a machine went through is still standing on
+        it. One answer for everything scattered -- trees, boulders, loose stone
+        -- so a world does not carry three ideas of where its road is.
 
-        Wider again over a bore, where the corridor is the whole of what was
-        dug out (:meth:`~OpenGLContext_editor.world.road.RoadPath.reshaped_segments`).
-        The land a tree would have stood on is not there any more, and one
-        planted on the floor of the cut is a tree inside the tunnel, in plain
-        view through the portal.
+        The corridor is the road's own (:meth:`_corridor`), opened out where a
+        driver has to see round the bend they are on, so a fast corner is a
+        clearing and the straight after it is a road through trees. Over a bore
+        it is the whole of what was dug out
+        (:meth:`~OpenGLContext_editor.world.road.RoadPath.reshaped_segments`):
+        the land is not there any more, and something standing on the floor of
+        the cut is inside the tunnel, in plain view through the portal.
+
+        ``margin`` is how much room the thing being placed needs of its own --
+        a boulder's own radius, say. ``carried`` is extra room where the road
+        stands above the land the thing is rooted in: the crown of a tree at
+        the foot of an embankment grows through the side of it rather than over
+        the carriageway.
         """
         if not self.road:
             return np.ones(len(points), dtype=bool)
         circuit = self.circuit()
-        # The corridor the road is built inside, opened out where a driver has
-        # to see round the bend they are on -- so a fast corner is a clearing
-        # and the straight after it is a road through trees.
-        along = circuit.clearance_along()
-        corridor = (np.full(len(circuit.ops) - 1, self._corridor())
-                    if along is None else along)
-        reach = corridor + CROWN_RADIUS
+        corridor = self.corridor_along() + float(margin)
+        reach = corridor + float(carried)
         found = circuit.sample(points[:, 0], points[:, 2],
                                radius=reach.max() * 1.5)
         ground = np.asarray(self.natural()(points[:, 0], points[:, 2]),
                             dtype='d')
-        carried = found.height - ground > CARRIED_ABOVE
+        above = found.height - ground > CARRIED_ABOVE
         segment = found.segment
-        cleared = np.where(carried, reach[segment], corridor[segment])
+        cleared = np.where(above, reach[segment], corridor[segment])
         return np.asarray(found.distance > cleared)
+
+    def corridor_along(self) -> np.ndarray:
+        """How far the clearing reaches from the centreline, per segment.
+
+        The road's own corridor, opened out where a driver has to see round the
+        bend they are on and wider again over a bore, where the whole of what
+        was dug out is corridor. This is the strip a machine went through: what
+        is scattered is kept off it (:meth:`outside_the_clearing`) and the
+        ground's own grain stops at it (:meth:`grain_applies`), because ground
+        that was cleared and levelled has no hummocks left in it.
+        """
+        circuit = self.circuit()
+        along = circuit.clearance_along()
+        if along is None:
+            return np.full(len(circuit.ops) - 1, self._corridor())
+        return np.asarray(along, dtype='d')
+
+    def _away_from_the_road(self, points: np.ndarray) -> np.ndarray:
+        """Which placements leave the cleared corridor room for a crown."""
+        return self.outside_the_clearing(points, carried=CROWN_RADIUS)
 
 
 
 def _rock_kind(index: int) -> str:
     """The name of one of the cut boulders, as a prop's kind."""
     return 'rock%d' % (index,)
+
+
+def _stone_kind(index: int) -> str:
+    """The name of one of the cut stones, as a prop's kind."""
+    return 'stone%d' % (index,)
 
 
 def _slopes(height_fn: Any, positions: np.ndarray, step: float = 8.0

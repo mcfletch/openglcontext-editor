@@ -98,12 +98,9 @@ class TestGroundUnderAStructure:
     def test_the_hill_over_a_bore_is_left_where_it_is(self) -> None:
         """A road running *inside* the ground leaves it as it found it.
 
-        The earthwork used to cut down to the road for the length of a bore,
-        because a height field is a surface and had no other way to take a
-        tunnel out of one -- which made the tunnel a valley with a lid. Saying a
-        hill is hollow is `holes`' job now
-        (:meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh`), and the
-        earthwork has nothing left to fake.
+        Saying a hill is hollow is ``holes``' job
+        (:meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh`), so the
+        earthwork has nothing to fake: it digs the portal and leaves the hill.
         """
         path, conformed = self._under(Op.TUNNEL)
         at = path.points[20]
@@ -212,6 +209,17 @@ class TestTheLayerWritesTheStructures:
         coarse = layer.content(self._tile(), 40.0)
         assert sum(len(n.mesh.positions) for n in coarse) \
             < sum(len(n.mesh.positions) for n in fine)
+
+    def test_and_no_fewer_than_a_swept_structure_can_hold(self) -> None:
+        """A bore and a deck are *swept* along the tile's own resampling of the
+        line, and a tube swept along points a hundred metres apart is not a
+        coarse tunnel but a shape nothing in the world has. The error ladder of
+        a tiled world starts at ninety-odd metres, so the spacing is held."""
+        from OpenGLContext_editor.world.road import COARSEST_SPACING
+        layer = self._layer(Op.BRIDGE, 60.0)
+        assert layer.spacing_for(4000.0) == pytest.approx(COARSEST_SPACING)
+        assert layer.spacing_for(94.0) == pytest.approx(COARSEST_SPACING)
+        assert layer.spacing_for(1.0) < COARSEST_SPACING
 
     def test_without_ground_the_deck_is_still_written(self) -> None:
         line = _line(height=60.0, count=41)
@@ -344,6 +352,143 @@ class TestWhereAStructureMeetsTheGround:
             == pytest.approx(6.0, abs=0.3)
 
 
+class TestTheGroundAtAPortal:
+    """A bore opens into a cut face, not into a knife edge of hillside.
+
+    The cutting the road runs in stops where the bore begins and the hill takes
+    over, so between one sample and the next the ground steps from the
+    carriageway to the hillside -- ten or twenty metres, across a cell two
+    metres wide. What stands there is a wall one sample thick with the arch cut
+    out of it, and slivers of it either side of the arch read as spikes over the
+    portal. The earthwork cuts the ground back around the mouth instead: down to
+    the crown of the portal, and rising from there at the batter the rest of the
+    cutting uses.
+    """
+
+    #: Which points of the line the bore runs between.
+    FIRST, LAST = 20, 60
+
+    def _approach(self, slope=0.35, start=30.0):
+        """A road running level into a hillside, with a bore through it."""
+        line = _line(height=0.0, count=81)
+        path = RoadPath(line, ops=_spanning(Op.TUNNEL, self.FIRST, self.LAST,
+                                            count=81))
+        portal = float(line[self.FIRST][0])
+
+        def hill(x, z):
+            return np.clip((np.asarray(x, 'd') - portal + start) * slope,
+                           0.0, 300.0)
+        return path, conform_terrain(hill, path), hill, portal
+
+    def crown(self):
+        """How much ground the funnel leaves over the road at the mouth."""
+        from OpenGLContext.scenegraph.roadworks import TunnelProfile
+        tunnel = TunnelProfile()
+        return tunnel.clearance + tunnel.portal_border
+
+    def test_the_hillside_at_the_mouth_is_cut_back_to_the_portal(self) -> None:
+        _path, conformed, hill, portal = self._approach(slope=1.5)
+        at = portal + 4.0
+        assert float(hill(at, 0.0)) > self.crown() + 10.0, 'a hill to cut'
+        assert float(conformed(np.array([at]), np.array([0.0]))[0]) \
+            == pytest.approx(self.crown(), abs=0.01)
+
+    def test_what_it_leaves_stands_behind_the_face_rather_than_in_it(self) -> None:
+        """A game cuts the drawn ground back to just inside the portal's face,
+        so ground left at the height of the face is behind it and ground left
+        above the face stands in front of it. The funnel leaves it level with
+        the top of the face and no higher."""
+        from OpenGLContext.scenegraph.roadworks import TunnelProfile, bore_opening
+        path, conformed, _hill, portal = self._approach(slope=1.5)
+        run = path.points[self.FIRST:self.LAST + 1]
+        mouth = bore_opening(run, conformed, profile=path.profile,
+                             tunnel=TunnelProfile(), inset=0.3)
+        over = np.asarray(run[1:6])
+        assert not mouth(over[:, 0], over[:, 2]).any()
+        # Level with the top of the face where the funnel is flat, and above it
+        # where the cut has started to rise.
+        found = conformed(over[:, 0], over[:, 2]) - over[:, 1]
+        assert float(np.min(found)) >= self.crown() - 0.01
+        at_the_face = np.asarray(path.points[self.FIRST]) \
+            + (np.asarray(run[1]) - np.asarray(run[0])) * 0.2
+        assert float(conformed(np.array([at_the_face[0]]),
+                               np.array([at_the_face[2]]))[0]) \
+            == pytest.approx(self.crown(), abs=0.2)
+
+    def test_the_cut_face_rises_at_the_batter(self) -> None:
+        """No step between two samples steeper than the earthwork allows, from
+        the face of the portal out to where the hillside takes over again.
+
+        The first step is the face itself: the ground goes from the carriageway
+        to the crown of the portal in one, because that is what a portal is, and
+        the face is what stands in it.
+        """
+        _path, conformed, _hill, portal = self._approach()
+        along = np.arange(portal + 2.0, portal + 80.0, 2.0)
+        found = conformed(along, np.zeros_like(along))
+        assert float(np.abs(np.diff(found)).max()) <= 2.0 * 0.6 + 0.01
+
+    def test_it_meets_an_ordinary_hillside_inside_the_cut(self) -> None:
+        """Which is why there is no step where the digging stops."""
+        from OpenGLContext_editor.world.road import PORTAL_CUT
+        _path, conformed, hill, portal = self._approach()
+        at = portal + PORTAL_CUT - 4.0
+        assert float(conformed(np.array([at]), np.array([0.0]))[0]) \
+            == pytest.approx(float(hill(at, 0.0)), abs=0.01)
+
+    def test_the_hill_the_bore_runs_through_is_still_a_hill(self) -> None:
+        """Past the cut the mountain is the mountain, however steep it is: what
+        is dug is the mouth, not the tunnel."""
+        _path, conformed, hill, portal = self._approach(slope=1.5)
+        at = portal + 200.0
+        assert float(conformed(np.array([at]), np.array([0.0]))[0]) \
+            == pytest.approx(float(hill(at, 0.0)), abs=0.01)
+
+    def test_nothing_is_left_standing_over_the_carriageway(self) -> None:
+        """What a car arrives at. The cutting stops where the bore begins, and
+        a sample beside the carriageway a step before the face is nearer to the
+        bore than to the road on the ground: left at the hillside's own height
+        it is a wall across the road, and the driver hits it at speed.
+        """
+        path, conformed, _hill, portal = self._approach(slope=1.5)
+        at = path.points[self.FIRST]
+        ahead = path.points[self.FIRST] - path.points[self.FIRST - 1]
+        ahead = ahead / np.hypot(ahead[0], ahead[2])
+        side = np.array([-ahead[2], 0.0, ahead[0]])
+        half = path.profile.total_width / 2.0
+        for back in np.arange(0.5, 24.0, 0.5):
+            across = np.linspace(-half, half, 9)
+            points = at[None, :] - ahead[None, :] * back + side[None, :] * across[:, None]
+            found = conformed(points[:, 0], points[:, 2]) - at[1]
+            assert float(np.max(found)) < 0.5, (
+                'ground %.1f m over the carriageway %.1f m before the portal'
+                % (float(np.max(found)), back))
+
+    def test_the_cutting_the_road_arrives_in_is_untouched(self) -> None:
+        """In front of the portal the ground is what the road is laid on, and
+        the funnel only ever takes ground away from above."""
+        path, conformed, _hill, portal = self._approach()
+        at = portal - 20.0
+        assert float(conformed(np.array([at]), np.array([0.0]))[0]) \
+            == pytest.approx(float(path.points[0][1]), abs=0.5)
+
+    def test_it_leaves_the_country_either_side_alone(self) -> None:
+        _path, conformed, hill, portal = self._approach()
+        aside = 400.0
+        assert float(conformed(np.array([portal]), np.array([aside]))[0]) \
+            == pytest.approx(float(hill(portal, aside)), abs=0.01)
+
+    def test_a_road_with_no_bore_has_no_funnel(self) -> None:
+        line = _line(height=0.0, count=41)
+        path = RoadPath(line)
+
+        def hill(x, z):
+            return np.full(np.shape(np.asarray(x, 'd')), 200.0)
+        conformed = conform_terrain(hill, path)
+        assert float(conformed(np.array([200.0]), np.array([600.0]))[0]) \
+            == pytest.approx(200.0)
+
+
 class TestTheRoadsOwnSectionTravelsWithIt:
     """A game that builds its own collider for the carriageway -- because tile
     geometry changes resolution under a car and the surface must not -- needs
@@ -394,12 +539,11 @@ class TestTheRoadsOwnSectionTravelsWithIt:
 class TestAPortalIsOpen:
     """A driver arriving at a bore has to be able to see into it.
 
-    The ground a tunnel passes through is cut down to the road so the lining
-    stands in a cutting -- but a ground mesh draws straight lines between its
-    samples, so it is the sample *at the mouth* that decides what the opening
-    looks like. Left at the hillside's own height it is a wall across the road
-    with the arch in the air behind it, and the only reason a car gets through
-    is that the collider has the bore taken out of it.
+    Two things make that true and they are in two places: the hill over the
+    bore is left standing here, and the mouth is taken out of the drawn ground
+    by the ``holes`` mask the game builds from
+    :func:`OpenGLContext.scenegraph.roadworks.bore_opening`. What is checked
+    here is the first -- that there is a hillside for the mouth to be a hole in.
     """
 
     @pytest.fixture(scope='class')
@@ -418,12 +562,10 @@ class TestAPortalIsOpen:
     def test_a_mouth_is_a_hole_in_a_hillside(self, world) -> None:
         """There is hill over the arch, and that is the point.
 
-        A portal is an opening *in* something. The earthwork used to remove the
-        something -- so the arch stood at the end of a trench with nothing above
-        it -- and what opens the mouth now is the `holes` the game hands to the
-        terrain and the collider alike, which covers the bore, a margin either
-        side, and the approach where a sampled cutting meets untouched hillside.
-        The editor's job is to leave the hill; glisteel's cases cover the mask.
+        A portal is an opening *in* something. What opens it is the ``holes``
+        mask a game hands to the terrain and the collider alike
+        (:func:`OpenGLContext.scenegraph.roadworks.bore_opening`); the editor's
+        job is to leave the something for it to be an opening in.
         """
         circuit = world.circuit()
         ground = world.height_fn()
@@ -444,11 +586,10 @@ class TestAPortalIsOpen:
 class TestTheHillOverABore:
     """A tunnel runs *under* the hill; the hill stays where it is.
 
-    The ground over a bore used to be cut down to road level, because a height
-    field is a surface and had no way to say a hill was hollow -- so a bore read
-    as a valley with a lid. The engine's drawn mesh takes `holes` now, the same
-    ones its collider has always taken, so the opening is an opening and the
-    earthwork has nothing left to fake.
+    A height field is a surface, so what says a hill is hollow is ``holes`` --
+    taken by the drawn mesh and the collider alike. The earthwork digs the
+    portals and leaves the hill between them, which is what makes the bore a
+    bore rather than a valley with a lid.
     """
 
     @pytest.fixture(scope='class')
@@ -474,11 +615,21 @@ class TestTheHillOverABore:
         assert circuit.reshaped_segments()[circuit.segment_on_ground].all()
 
     def test_the_mountain_is_still_a_mountain(self, world) -> None:
-        """The measurement the complaint was about: over a bore the conformed
-        ground used to sit at road level, tens of metres below the hill."""
+        """Over a bore the ground is the ground: what a tunnel runs through is
+        a hill, and the road is under it.
+
+        Measured away from the portals, since a portal *is* dug -- see
+        :class:`TestTheGroundAtAPortal` for the funnel and how far it reaches.
+        """
+        from OpenGLContext_editor.world.road import PORTAL_CUT
         circuit, inside = self.bored(world)
         line = circuit.points
-        over = inside & (circuit.points[:, 1] < 1e9)
+        portals = circuit.portals().points
+        gap = np.hypot(line[:, None, 0] - portals[None, :, 0],
+                       line[:, None, 2] - portals[None, :, 2]).min(axis=1)
+        over = inside & (gap > PORTAL_CUT)
+        if not over.any():
+            pytest.skip('every bore here is shorter than its own portal cuts')
         natural = np.asarray(world.natural()(line[:, 0], line[:, 2]), dtype='d')
         conformed = np.asarray(world.height_fn()(line[:, 0], line[:, 2]),
                                dtype='d')
@@ -494,3 +645,58 @@ class TestTheHillOverABore:
                                dtype='d')
         cover = conformed[inside] - line[inside, 1]
         assert float(np.median(cover)) > 2.0
+
+
+class TestTheOpeningsABoresMouthNeeds:
+    """A tiled world's ground is meshed at bake time, so the hole a portal
+    needs is cut there rather than by the game
+    (:func:`OpenGLContext.scenegraph.roadworks.bore_opening`)."""
+
+    def _path(self, kind=Op.TUNNEL):
+        return RoadPath(_line(height=-40.0), ops=_spanning(kind, 10, 30))
+
+    def _ridge(self):
+        """A hill the road runs under: the surface passes through each portal
+        and closes right over the middle of the bore."""
+        def at(x, z):
+            x = np.asarray(x, dtype='d')
+            over = 60.0 * np.clip(1.0 - np.abs(x - 200.0) / 100.0, 0.0, 1.0)
+            return np.broadcast_to(
+                -38.0 + over,
+                np.broadcast(x, np.asarray(z, dtype='d')).shape)
+        return at
+
+    def test_a_road_with_no_bore_opens_nothing(self) -> None:
+        assert self._path(Op.BRIDGE).bore_openings(self._ridge()) is None
+
+    def test_a_bore_opens_at_its_mouths(self) -> None:
+        holes = self._path().bore_openings(self._ridge())
+        assert holes is not None
+        mouth = self._path().points[10]
+        assert bool(np.asarray(holes(np.array([mouth[0]]),
+                                     np.array([mouth[2]])))[0])
+
+    def test_and_nowhere_the_hill_has_closed_over_it(self) -> None:
+        """The hillside over the middle of a bore is hillside."""
+        holes = self._path().bore_openings(self._ridge())
+        middle = self._path().points[20]
+        assert not bool(np.asarray(holes(np.array([middle[0]]),
+                                         np.array([middle[2]])))[0])
+
+    def test_nor_out_on_the_open_ground(self) -> None:
+        holes = self._path().bore_openings(self._ridge())
+        assert not np.asarray(holes(np.array([200.0]), np.array([400.0]))).any()
+
+    def test_the_answer_keeps_the_shape_it_was_asked_in(self) -> None:
+        holes = self._path().bore_openings(self._ridge())
+        assert np.asarray(holes(np.zeros((3, 4)), np.zeros((3, 4)))).shape \
+            == (3, 4)
+
+    def test_a_wider_approach_clears_more_of_the_cutting(self) -> None:
+        path = self._path()
+        near = path.bore_openings(self._ridge(), approach=1.0)
+        far = path.bore_openings(self._ridge(), approach=30.0)
+        x = np.linspace(0.0, 400.0, 401)
+        z = np.zeros_like(x)
+        assert int(np.asarray(far(x, z)).sum()) \
+            > int(np.asarray(near(x, z)).sum())

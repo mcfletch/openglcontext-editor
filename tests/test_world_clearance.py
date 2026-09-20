@@ -171,3 +171,56 @@ class TestTheShippedWorld:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-v']))
+
+
+class TestTheClearingTakesEverything:
+    """A road is a strip of ground that was cleared to build it, and nothing a
+    machine went through is still standing on it. Trees, boulders and loose
+    stone are all kept out of the same strip, so a world does not carry three
+    ideas of where its road is."""
+
+    def _world(self):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=1024.0, seed=11, tree_density=0.02,
+                               field_resolution=513, control_size=128)
+
+    def _outside(self, world, points, margin=0.0):
+        return world.outside_the_clearing(np.asarray(points, dtype='d'),
+                                          margin=margin)
+
+    def test_no_tree_stands_in_it(self) -> None:
+        world = self._world()
+        trees = world.scatter().positions
+        assert bool(self._outside(world, trees).all())
+
+    def test_no_boulder_lies_in_it(self) -> None:
+        world = self._world()
+        found = world.prop_layer()
+        assert found is not None
+        at = np.asarray([one.position for one in found.props], dtype='d')
+        assert bool(self._outside(world, at).all())
+
+    def test_no_stone_lies_in_it(self) -> None:
+        world = self._world()
+        found = world.stone_layer()
+        assert found is not None
+        at = np.asarray([one.position for one in found.stones], dtype='d')
+        assert bool(self._outside(world, at).all())
+
+    def test_and_each_keeps_its_own_room_outside_it(self) -> None:
+        """A boulder is not a point: it is cleared by its own radius as well,
+        or the clearing ends halfway through it."""
+        from OpenGLContext_editor.world.procedural import (
+            ROCK_CLEARANCE,
+            ROCK_RADIUS,
+        )
+        world = self._world()
+        at = np.asarray([one.position for one in world.prop_layer().props],
+                        dtype='d')
+        assert bool(self._outside(
+            world, at, margin=ROCK_RADIUS[1] + ROCK_CLEARANCE).all())
+
+    def test_a_world_with_no_road_clears_nothing(self) -> None:
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        bare = ProceduralWorld(extent=512.0, road=False, tree_density=0.0)
+        assert bool(bare.outside_the_clearing(np.zeros((4, 3))).all())

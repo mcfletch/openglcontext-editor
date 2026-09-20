@@ -112,8 +112,11 @@ class TestCombiningMeshes:
         assert merged.material is material
 
     def test_a_mesh_without_colours_gets_white_ones(self) -> None:
-        merged = combined_mesh([_triangle(), _triangle()])
-        assert np.allclose(merged.colors, 1.0)
+        """Beside one that has them. White is what multiplies a base colour by
+        nothing, so a part with no colours of its own keeps its material's."""
+        coloured = _triangle(colors=np.array([(1, 0, 0)] * 3, 'f'))
+        merged = combined_mesh([coloured, _triangle()])
+        assert np.allclose(merged.colors[3:], 1.0)
 
     def test_three_component_colours_gain_an_alpha(self) -> None:
         coloured = _triangle(colors=np.array([(1, 0, 0)] * 3, 'f'))
@@ -151,3 +154,28 @@ class TestReadingAVRMLTransform:
 
         from OpenGLContext_editor.bake.assets import _local_matrix
         assert np.allclose(_local_matrix(Transform()), np.identity(4))
+
+
+class TestMergingDoesNotInventAttributes:
+    """A merged mesh carries what its parts carried. Filling in zero texture
+    coordinates for geometry that has none writes eight bytes a vertex into
+    every tile it rides in, and a vertex count in the thousands per tile is
+    where a streamed world's bandwidth goes."""
+
+    def _plain(self, **kwargs):
+        return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
+                       indices=np.array([0, 1, 2], np.uint32), **kwargs)
+
+    def test_texture_coordinates_nothing_had_are_not_written(self) -> None:
+        assert combined_mesh([self._plain(), self._plain()]).texcoords is None
+
+    def test_nor_normals(self) -> None:
+        assert combined_mesh([self._plain(), self._plain()]).normals is None
+
+    def test_but_one_part_carrying_them_gives_them_to_the_whole(self) -> None:
+        uv = np.zeros((3, 2), 'f') + 0.5
+        found = combined_mesh([self._plain(texcoords=uv), self._plain()])
+        assert found.texcoords is not None
+        assert len(found.texcoords) == 6
+        assert np.allclose(found.texcoords[:3], 0.5)
+        assert np.allclose(found.texcoords[3:], 0.0)

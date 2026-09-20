@@ -200,6 +200,17 @@ def _grow(node: OctreeNode, depth: int, axes: tuple[bool, ...]) -> None:
         _grow(child, depth, axes)
 
 
+def root_error_for(width: float, resolution: int) -> float:
+    """The error a root tile of this width stands in for, at this sampling.
+
+    How far apart its ground samples are, near enough. A world that has to know
+    its own error ladder before it has any layers to measure -- to decide how
+    much detail is worth putting in the finest tile, say -- asks this rather
+    than repeating the arithmetic.
+    """
+    return float(width) / float(resolution) * 1.5
+
+
 def _default_root_error(region: BoundingBox, layers: Sequence[Layer]) -> float:
     """The root's error: how far apart its ground samples are, near enough.
 
@@ -212,7 +223,7 @@ def _default_root_error(region: BoundingBox, layers: Sequence[Layer]) -> float:
     for layer in layers:
         resolution = getattr(layer, 'resolution', None)
         if resolution:
-            return width / float(resolution) * 1.5
+            return root_error_for(width, int(resolution))
     return region.diagonal * 0.5
 
 

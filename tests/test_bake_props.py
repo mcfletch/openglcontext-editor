@@ -112,11 +112,19 @@ class TestTheShippedWorld:
             assert float(found.distance[0]) > half + prop.radius
 
     def test_they_stand_on_the_ground(self, world) -> None:
-        ground = world.height_fn()
+        """On the *landscape*, which is the surface the world is collided
+        against and the one the ground is drawn from -- not on the height
+        function it was sampled from. The two differ by however much a cell's
+        interpolation differs from the function across it, and a boulder
+        measured against the function floats over the hillside it lies on by
+        that much.
+        """
+        ground = world.landscape().field()
         for prop in world.prop_layer().props:
-            at = float(np.asarray(ground(np.array([prop.position[0]]),
-                                         np.array([prop.position[2]]))).ravel()[0])
-            assert abs(float(prop.position[1]) - at) < 0.6
+            at = float(np.asarray(ground.sample(
+                np.array([prop.position[0]]),
+                np.array([prop.position[2]]))).ravel()[0])
+            assert abs(float(prop.position[1]) - at) < 0.05
 
     def test_a_world_with_no_road_still_has_some(self) -> None:
         """A landscape has rocks in it whether or not anyone built a road."""

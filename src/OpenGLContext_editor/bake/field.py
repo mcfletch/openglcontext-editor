@@ -104,11 +104,22 @@ class FieldTerrainLayer:
     #: as wide as the cut rather than as wide as a carriageway.
     road_cut: Any = None
     road_corridor: float | None = None
+    #: Who draws this landscape. ``'field'`` is this layer's own two images,
+    #: built into one mesh and drawn with detail materials blended per pixel.
+    #: ``'tiles'`` says the ground is meshed into the tile tree instead -- so
+    #: what is written here is read for the materials it is blended from, for
+    #: the light baked into it, and as the surface the world is collided
+    #: against, walked on and planted on, and the tiles carry what is drawn.
+    drawn: str = 'field'
     name: str = 'terrain'
     _field: HeightField | None = dataclass_field(default=None, init=False,
                                                  repr=False)
 
     def __post_init__(self) -> None:
+        if self.drawn not in ('field', 'tiles'):
+            raise ValueError(
+                "a landscape is drawn as its own 'field' or in the world's "
+                "'tiles', not as %r" % (self.drawn,))
         if len(self.layers) != len(self.rules):
             raise ValueError(
                 "%d ground materials need %d rules, not %d"
@@ -154,6 +165,7 @@ class FieldTerrainLayer:
         return {'terrain': {
             'height': self._filename('height'),
             'control': self._filename('control'),
+            'drawn': self.drawn,
             'extent': round(self.side, 4),
             'base': round(ground.base, 4),
             'relief': round(ground.relief, 4),

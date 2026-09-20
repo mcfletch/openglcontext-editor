@@ -46,10 +46,12 @@ from OpenGLContext.scenegraph.road import (
     widened_sections,
 )
 from OpenGLContext.scenegraph.roadworks import (
+    BORE_INSET,
     BridgeProfile,
     CausewayProfile,
     TunnelProfile,
     barrier_material,
+    bore_opening,
     bridge_meshes,
     causeway_meshes,
     concrete_material,
@@ -61,6 +63,8 @@ from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.structures import Op
 
 HeightFn = Callable[[Any, Any], Any]
+#: ``holes(x, z) -> mask``: where a surface is not there.
+Holes = Callable[[Any, Any], Any]
 
 #: The operations under which the road does not stand on the land, so the
 #: terrain beneath (or above) it is left as it was found.
@@ -89,6 +93,20 @@ class RoadSample(NamedTuple):
     bank: np.ndarray
 
 
+class Portals(NamedTuple):
+    """Where a road's bores open, and which way each one runs from there.
+
+    ``points`` are the centreline points the faces stand on and ``inward`` the
+    unit direction, in plan, from each face into its hill. What is in front of a
+    face is the cutting the road arrives in and what is behind it is the hill
+    the road runs under, and nothing else tells the two apart: both are ground
+    beside a stretch of road that is not laid on the land.
+    """
+
+    points: np.ndarray
+    inward: np.ndarray
+
+
 #: Below this many samples a query is answered in one go: grouping them by
 #: cell costs a sort, and a handful of points is not worth sorting.
 INDEX_THRESHOLD = 256
@@ -109,6 +127,25 @@ EARTHWORK_SLOPE = 0.6
 #: a bridge or a tunnel belongs.
 MAXIMUM_EARTHWORK = 250.0
 
+#: How wide the shelf held at the verge may get, as a multiple of the road's own
+#: width. The shelf is there so that a sample lands *inside* the corridor
+#: however coarsely the ground is sampled, and a few widths of road does that.
+#: Past it the shelf stops being a road and starts being a plateau: the ground
+#: within it is held at the height of the nearest stretch of road, so on a
+#: coarse tile of a climbing or doubling-back road that is a shelf tens of
+#: metres wide pinned to a stretch far above -- a landscape inflated around its
+#: own road. A tile too coarse to show a road shows the hill it is cut into,
+#: which is the honest answer at that distance, and the road's own surface is
+#: drawn there whatever the ground does.
+WIDEST_SHELF = 3.0
+
+#: How far back from its face a portal is dug, in metres. Far enough that the
+#: face's own height is spread over a batter a ground mesh can draw rather than
+#: standing as one step between two samples; short enough that a doorway does
+#: not excavate the hillside behind it. An ordinary hillside is met well inside
+#: it and nothing is cut at all past there.
+PORTAL_CUT = 40.0
+
 #: How far below the road's surface the ground under it sits, in metres. A road
 #: is built on a formation and surfaced on top of it, so the ground beneath is
 #: not the tarmac; and two surfaces at exactly the same height fight over which
@@ -121,6 +158,19 @@ FORMATION_DEPTH = 0.12
 #: of the vertices on the same road.
 FINEST_SPACING = 3.0
 SPACING_PER_ERROR = 1.5
+
+#: The coarsest that spacing may get, in metres, whatever error a tile claims.
+#:
+#: What is written at a tile's spacing is not only the carriageway: a bore and a
+#: deck are *swept* along the same points, and a tube swept along points a
+#: hundred metres apart is not a coarse tunnel but a shape nothing in the world
+#: has. A tiled world's error ladder starts where its ground's sampling does --
+#: ninety-odd metres on a two-kilometre world -- and a road resampled to that
+#: stops being a road. Held here instead: the sagitta of a chord this long on
+#: the tightest corner a circuit is built for is under a quarter of a metre, so
+#: the line still bends the way it was drawn, and a tile that cannot afford the
+#: vertices is a tile that should not have been drawn at that distance.
+COARSEST_SPACING = 24.0
 
 
 #: How far outside a tile the road is still looked for, as a multiple of the
@@ -277,19 +327,41 @@ class RoadPath:
         is still a hill, and the carriageway is under it.
 
         A height field is a surface, so saying a hill is hollow takes something
-        the surface itself cannot hold. That something is ``holes`` --
-        :meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh` drops a
-        triangle whose centre is in one, which is the rule
-        :class:`~OpenGLContext.physics.heightfield.HeightFieldColliders` has
-        always used, so the surface drawn and the surface driven on agree by
-        construction. The opening at a portal is that hole; the earthwork has
-        nothing left to fake and does not try.
+        the surface itself cannot hold. That something is ``holes``, which
+        :meth:`OpenGLContext.scenegraph.terrain.HeightField.mesh` and
+        :class:`~OpenGLContext.physics.heightfield.HeightFieldColliders` cut the
+        same way, so the surface drawn and the surface driven on agree by
+        construction. The opening at a portal is that hole -- the mouth, as
+        :func:`~OpenGLContext.scenegraph.roadworks.bore_opening` measures it --
+        and the earthwork has nothing left to fake and does not try.
 
         Not a deck: under one the same move would raise a pillar of ground to
         meet a road that is forty metres up.
         """
         found: np.ndarray = self.segment_on_ground
         return found
+
+    def portals(self) -> Portals:
+        """Where every bore opens, and which way it runs from there.
+
+        Both ends of each stretch that runs inside the ground. What is built at
+        one is a face standing across the road with an arch in it; what the
+        ground does about it is :func:`conform_terrain`'s funnel, and the way it
+        faces is what separates the hill behind it from the cutting in front.
+        """
+        ends = [(at, step)
+                for kind, first, last in _op_runs(self.ops)
+                if kind is Op.TUNNEL and last > first
+                for at, step in ((first, 1), (last, -1))]
+        if not ends:
+            return Portals(np.zeros((0, 3), dtype='d'),
+                           np.zeros((0, 3), dtype='d'))
+        points = np.asarray([self.points[at] for at, _step in ends], dtype='d')
+        inward = np.asarray([self.points[at + step] - self.points[at]
+                             for at, step in ends], dtype='d')
+        inward[:, 1] = 0.0
+        length = np.linalg.norm(inward, axis=1, keepdims=True)
+        return Portals(points, inward / np.where(length > 0.0, length, 1.0))
 
     def ops_at(self, stations: Any) -> np.ndarray:
         """What is built at each of these distances along the road.
@@ -338,6 +410,43 @@ class RoadPath:
         if self.clearance is None:
             return None
         return np.maximum(self.clearance[:-1], self.clearance[1:])
+
+    def bore_openings(self, ground: HeightFn,
+                      tunnel: TunnelProfile | None = None,
+                      inset: float = BORE_INSET,
+                      approach: float = 0.0) -> Holes | None:
+        """Where this road's bores break the surface of the ground.
+
+        ``holes(x, z) -> mask``, true where the ground stands inside a bore, or
+        None for a road with no bore in it. Every mouth in one answer, since a
+        surface is cut once
+        (:func:`~OpenGLContext.scenegraph.roadworks.bore_opening`, which each
+        stretch is measured by).
+
+        ``ground`` is the surface being cut, ``approach`` how far in front of
+        each face the road's own width is cleared whatever the ground is doing,
+        and ``inset`` how far inside the face the opening is drawn so the face
+        covers the edge of the cut.
+        """
+        mouths = [
+            bore_opening(self.points[first:last + 1], ground,
+                         profile=self.profile, tunnel=tunnel,
+                         inset=inset, approach=approach)
+            for kind, first, last in _op_runs(self.ops)
+            # A bore the road carries on one point of its line has no direction
+            # to build a mouth along.
+            if kind is Op.TUNNEL and last > first]
+        if not mouths:
+            return None
+
+        def opened(x: Any, z: Any) -> np.ndarray:
+            shape = np.broadcast(np.asarray(x, dtype='d'),
+                                 np.asarray(z, dtype='d')).shape
+            found = np.zeros(shape, dtype=bool)
+            for mouth in mouths:
+                found |= mouth(x, z)
+            return found
+        return opened
 
     def structure_runs(self) -> list[tuple[Op, float, float]]:
         """Every stretch that is not plain dirt, as ``(op, from, to)`` metres.
@@ -923,7 +1032,9 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
                     earthwork_slope: float = EARTHWORK_SLOPE,
                     maximum_earthwork: float = MAXIMUM_EARTHWORK,
                     formation: float = FORMATION_DEPTH,
-                    widening: float = 0.0) -> HeightFn:
+                    widening: float = 0.0,
+                    tunnel: TunnelProfile | None = None,
+                    portal_cut: float = PORTAL_CUT) -> HeightFn:
     """A height function whose ground meets the road.
 
     Out to the edge of the verge the ground *is* the road's cross-section, so
@@ -945,12 +1056,24 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     is where a bridge or a tunnel belongs and moving a mountain would only hide
     the fact.
 
-    Where the road is carried *over* the land -- a deck, a causeway -- the ground
-    is left exactly as it was found: a bridge stands over a valley, and filling
-    the valley in would put the structure inside a hill of its own making.
-    Where it is carried *inside* the land the opposite is true, and the cutting
-    runs the length of the bore: see :meth:`RoadPath.reshaped_segments`. The
-    road's ``ops`` say which stretches are which.
+    Where the road is carried -- a deck, a causeway, a bore -- the ground is left
+    exactly as it was found: a bridge stands over a valley, filling the valley in
+    would put the structure inside a hill of its own making, and the hill a bore
+    runs through is a hill. What a surface cannot hold is that the hill is
+    hollow, and the opening at a portal is where that is said rather than dug:
+    see :meth:`RoadPath.reshaped_segments`. The road's ``ops`` say which
+    stretches are which.
+
+    A **portal is excavated**, though, and this is where that is done. The
+    cutting stops where the bore begins and the hillside takes over, so without
+    it the ground steps from the carriageway to the hill between two samples --
+    a face one sample thick standing over the arch, and slivers of it either
+    side of the opening. The ground around each of ``path.portals()`` is held
+    down to the top of the portal's face and rises from there at
+    ``earthwork_slope`` out to ``portal_cut``, which is the cut a portal is
+    built in. It only ever takes ground away, so the cutting the road arrives in
+    is untouched, and past the funnel the mountain is the mountain. ``tunnel``
+    is the bore being built, which says how tall that face is.
 
     ``widening`` is how far apart the samples are that will read this function.
     A ground mesh only knows the surface at its vertices and draws straight
@@ -970,15 +1093,40 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
 
     laid = path.on_ground.all()
     reshaped = path.reshaped_segments()
+    tunnel = tunnel or TunnelProfile()
+    portals = path.portals()
+    # The face a portal stands in: as wide as the headwall and as tall, since
+    # what the funnel has to clear is the portal rather than the arch in it.
+    face = (path.profile.on_structure().total_width / 2.0 + tunnel.margin
+            + tunnel.portal_border)
+    # The top of the portal's face, which is what the cut is held by: ground
+    # left standing above it stands in front of it, and the opening a game cuts
+    # in the drawn ground stops just inside it
+    # (:func:`~OpenGLContext.scenegraph.roadworks.bore_opening`), so the face
+    # covers the edge of the cut with nothing over its top.
+    crown = tunnel.clearance + tunnel.portal_border
 
     def conformed(x: Any, z: Any) -> np.ndarray:
         natural = np.asarray(height_fn(x, z), dtype='d')
         found = path.sample(x, z, radius=reach)
         distance = found.distance.reshape(natural.shape)
         road_height = found.height.reshape(natural.shape)
+        approach = np.zeros(natural.shape, dtype=bool)
+        if len(portals.points):
+            natural = np.minimum(
+                natural, _portal_funnel(x, z, portals.points, road_height,
+                                        face + widening, crown,
+                                        earthwork_slope, portal_cut))
+            approach = _in_front_of(x, z, portals, face + widening)
         near = distance < reach
         if not laid:
-            near = near & reshaped[found.segment.reshape(natural.shape)]
+            # The cutting reaches the face. A sample beside the carriageway a
+            # step before a portal is nearer to the bore than to the road on the
+            # ground, and taking the op of the nearest stretch alone would leave
+            # it at the hillside's own height -- standing across the road the
+            # step before a car arrives at it.
+            near = near & (reshaped[found.segment.reshape(natural.shape)]
+                           | approach)
         if not np.any(near):
             return natural
         # Beside a climbing road, the ground has to sit low enough that the
@@ -1003,10 +1151,61 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
     return conformed
 
 
+def _in_front_of(x: Any, z: Any, portals: Portals,
+                 reach: float) -> np.ndarray:
+    """Which points stand in the excavation in front of a portal's face.
+
+    In front, and within ``reach`` of the face in plan: that is the end of the
+    cutting the road arrives in, and it is ground the machine cuts whatever the
+    stretch of road nearest to it happens to be carried on.
+    """
+    x = np.asarray(x, dtype='d')
+    z = np.asarray(z, dtype='d')
+    found = np.zeros(np.broadcast(x, z).shape, dtype=bool)
+    for point, inward in zip(portals.points, portals.inward, strict=True):
+        away_x, away_z = x - point[0], z - point[2]
+        ahead = away_x * inward[0] + away_z * inward[2]
+        found |= (ahead <= 0.0) & (np.hypot(away_x, away_z) <= reach)
+    return found
+
+
+def _portal_funnel(x: Any, z: Any, portals: np.ndarray, road: np.ndarray,
+                   face: float, crown: float, slope: float,
+                   reach: float) -> np.ndarray:
+    """How high the ground may stand near a portal, in world units.
+
+    A cone on each portal: level with the top of its face out to the face's own
+    edge, and rising at ``slope`` from there. Ground above it is ground standing
+    over the mouth, and what a machine would take away.
+
+    Measured from ``road`` -- the carriageway's own height at each point, which
+    over the bore is the bore's -- rather than from the portal's. A bore on a
+    climb rises under its cut, and a cone hung off the portal alone would thin
+    the cover a few metres in until the mouth reached back through it.
+
+    Past ``reach`` from a portal the ground is left as it is: a hillside is met
+    well inside that and nothing is cut at all beyond where it is met, and one
+    steep enough not to be met there is a hillside rather than a doorway.
+    """
+    x = np.asarray(x, dtype='d')
+    z = np.asarray(z, dtype='d')
+    limit = np.full(np.broadcast(x, z).shape, np.inf)
+    for point in portals:
+        gap = np.hypot(x - point[0], z - point[2])
+        limit = np.where(
+            gap <= face + reach,
+            np.minimum(limit,
+                       road + crown + slope * np.maximum(gap - face, 0.0)),
+            limit)
+    return limit
+
+
 def conform_terrain_at(height_fn: HeightFn, path: RoadPath,
                        earthwork_slope: float = EARTHWORK_SLOPE,
                        maximum_earthwork: float = MAXIMUM_EARTHWORK,
                        formation: float = FORMATION_DEPTH,
+                       tunnel: TunnelProfile | None = None,
+                       portal_cut: float = PORTAL_CUT,
                        ) -> Callable[[float], HeightFn]:
     """The conformed ground as a function of the spacing it will be sampled at.
 
@@ -1014,11 +1213,22 @@ def conform_terrain_at(height_fn: HeightFn, path: RoadPath,
     as its ``height_fn_at``: every tile then gets the earthwork widened to its
     own resolution, so the road is legible at every level of the tree instead of
     only at the finest.
+
+    Widened to its resolution, and no further than :data:`WIDEST_SHELF` widths
+    of road: the shelf holds the ground at the height of the nearest stretch of
+    road, and a tile sampling the world every sixty metres has no stretch nearer
+    than the one over the next ridge. What that draws is not a road but a
+    plateau around one. A tile that coarse cannot show a road either way, and
+    the road's own surface is drawn on it regardless.
     """
+    shelf = WIDEST_SHELF * path.widest()
+
     def at(spacing: float) -> HeightFn:
         return conform_terrain(height_fn, path, earthwork_slope=earthwork_slope,
                                maximum_earthwork=maximum_earthwork,
-                               formation=formation, widening=spacing)
+                               formation=formation,
+                               widening=min(float(spacing), shelf),
+                               tunnel=tunnel, portal_cut=portal_cut)
     return at
 
 
@@ -1052,6 +1262,7 @@ class RoadLayer:
     material: PBRMaterial | None = None
     finest_spacing: float = FINEST_SPACING
     spacing_per_error: float = SPACING_PER_ERROR
+    coarsest_spacing: float = COARSEST_SPACING
     wetness: float = 0.0
     texture_size: int = 512
     seed: int = 0
@@ -1186,8 +1397,13 @@ class RoadLayer:
         return self.path.bounds()
 
     def spacing_for(self, error: float) -> float:
-        """How far apart the centreline points are for a tile of this error."""
-        return max(self.finest_spacing, float(error) * self.spacing_per_error)
+        """How far apart the centreline points are for a tile of this error.
+
+        Never coarser than :data:`COARSEST_SPACING`: what is written at this
+        spacing includes the bores and the decks, which are swept along it.
+        """
+        return min(max(self.finest_spacing, float(error) * self.spacing_per_error),
+                   self.coarsest_spacing)
 
     def segments_in(self, region: BoundingBox, error: float) -> set[int]:
         """Which segments of the centreline this tile is responsible for.

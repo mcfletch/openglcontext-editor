@@ -32,11 +32,16 @@ from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
 from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.terrain import Relief
+from OpenGLContext.scenegraph.terrain.ground import GROUND_MATERIAL
+from OpenGLContext.scenegraph.terrain.holes import cut
 from OpenGLContext.scenegraph.water import LAKE, mesh_across, water_surface
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 
 HeightFn = Callable[[Any, Any], Any]
+#: ``holes(x, z) -> mask``: where a surface is not there.
+Holes = Callable[[Any, Any], Any]
 ColorFn = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
 #: How many samples across a tile edge the ground is meshed at. 33 gives a
@@ -101,6 +106,21 @@ class HeightfieldLayer:
     ``height_fn_at(spacing) -> height function``, each tile asks for the ground
     at its own spacing and gets an earthwork it can actually represent. When it
     is set, ``height_fn`` is still what the layer reports its *bounds* from.
+
+    ``holes`` is ground that is not there -- ``holes(x, z) -> mask``, the mouth
+    of a bore the road runs into. The tile is meshed and then cut back to the
+    opening's own edge (:func:`OpenGLContext.scenegraph.terrain.holes.cut`), so
+    what the hole is shaped like is the portal rather than the tile's grid, and
+    a tile the opening swallows whole carries no ground at all.
+
+    ``relief`` is the grain in the ground -- the hummocks and ruts a height
+    function does not carry -- meshed into a tile once its samples are close
+    enough together to show it, and held inside the tile's own geometric error
+    (:class:`~OpenGLContext.scenegraph.terrain.Relief`). What a coarse tile
+    draws is unchanged by it, and no tile's surface stands further from the
+    height function than the error the streamer already allows -- which is what
+    lets a world be collided against the function while it is drawn from the
+    tiles.
     """
 
     height_fn: HeightFn
@@ -110,6 +130,8 @@ class HeightfieldLayer:
     color_fn: ColorFn | None = None
     water_level: float | None = None
     material: PBRMaterial | None = None
+    holes: Holes | None = None
+    relief: Relief | None = None
     skirt: float = 2.0
     name: str = 'terrain'
 
@@ -119,7 +141,7 @@ class HeightfieldLayer:
         return self.extent.with_height(low, high)
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
-        footprint = self._footprint(region)
+        footprint = self.footprint_of(region)
         if footprint is None:
             return []
         low, high = self._height_range(footprint, samples=9)
@@ -132,9 +154,14 @@ class HeightfieldLayer:
         positions, normals, colors, indices = terrain_patch(
             float(footprint.minimum[0]), float(footprint.maximum[0]),
             float(footprint.minimum[2]), float(footprint.maximum[2]),
-            self.resolution, height_fn=self._height_fn_for(footprint),
+            self.resolution, height_fn=self.height_fn_for(footprint, error),
             skirt_depth=depth, water_level=self.water_level,
             color_fn=self.color_fn)
+        if self.holes is not None:
+            opened = _opened(positions, normals, colors, indices, self.holes)
+            if opened is None:
+                return []
+            positions, normals, colors, indices = opened
         mesh = PBRMesh(positions=positions, normals=normals, colors=colors,
                        indices=indices, material=self.material or _ground_material())
         return [SceneNode(mesh=mesh, name='%s_%d' % (self.name, self.resolution))]
@@ -143,12 +170,23 @@ class HeightfieldLayer:
         """How far apart this tile's ground samples are, in metres."""
         return float(max(footprint.size[0], footprint.size[2])) / self.resolution
 
-    def _height_fn_for(self, footprint: BoundingBox) -> HeightFn:
-        if self.height_fn_at is None:
-            return self.height_fn
-        return self.height_fn_at(self.sample_spacing(footprint))
+    def height_fn_for(self, footprint: BoundingBox, error: float) -> HeightFn:
+        """The ground this tile is meshed from: the surface it *draws*.
 
-    def _footprint(self, region: BoundingBox) -> BoundingBox | None:
+        The height function with the tile's own earthwork resolution and its own
+        relief already in it, so anything that has to sit on the drawn ground --
+        a stone lying on the hillside -- asks the same question the mesh did.
+        """
+        spacing = self.sample_spacing(footprint)
+        ground = (self.height_fn if self.height_fn_at is None
+                  else self.height_fn_at(spacing))
+        if self.relief is None:
+            return ground
+        grained: HeightFn = self.relief.over(ground, spacing=spacing,
+                                             error=float(error))
+        return grained
+
+    def footprint_of(self, region: BoundingBox) -> BoundingBox | None:
         """The region's XZ overlap with the extent, or None if they miss."""
         low = np.maximum(region.minimum, self.extent.minimum)
         high = np.minimum(region.maximum, self.extent.maximum)
@@ -173,10 +211,42 @@ class HeightfieldLayer:
         return spacing * self.skirt
 
 
+def _opened(positions: np.ndarray, normals: np.ndarray, colors: np.ndarray,
+            indices: np.ndarray, holes: Holes) -> tuple[np.ndarray, ...] | None:
+    """One patch cut back to the edge of the openings in it.
+
+    The attributes travel through the cut with the positions, so a corner the
+    cut invented is shaded and coloured as the surface already was there. What
+    comes back is compacted, since a tile most of an opening swallowed would
+    otherwise carry a grid of vertices no triangle names.
+    """
+    width = colors.shape[1]
+    packed = np.hstack([np.asarray(positions, 'd'), np.asarray(normals, 'd'),
+                        np.asarray(colors, 'd')])
+    packed, triangles = cut(packed, np.asarray(indices).reshape(-1, 3), holes)
+    if not len(triangles):
+        return None
+    kept, renumbered = np.unique(triangles, return_inverse=True)
+    packed = packed[kept]
+    return (packed[:, :3].astype('f'), packed[:, 3:6].astype('f'),
+            packed[:, 6:6 + width].astype('f'),
+            renumbered.reshape(-1).astype(np.uint32))
+
+
 def _ground_material() -> PBRMaterial:
-    """Vertex-coloured, two-sided: a tile's skirt is seen from both faces."""
+    """The material a tile's ground carries: vertex-coloured, two-sided.
+
+    Two-sided because a tile's skirt is seen from both faces. Vertex-coloured
+    because that is what any renderer makes of it, and **named**, because the
+    engine's own makes more: a primitive whose material is called ``ground`` is
+    drawn with the world's ground shading -- the detail materials blended per
+    pixel from the control map beside the tileset, and the light baked into the
+    landscape (:mod:`OpenGLContext.scenegraph.terrain.ground`). The colours stay
+    on it either way, so a viewer that has never heard of that convention still
+    draws a landscape rather than a white one.
+    """
     return PBRMaterial(baseColor=(1.0, 1.0, 1.0), metallic=0.0, roughness=1.0,
-                       doubleSided=True)
+                       doubleSided=True, DEF=GROUND_MATERIAL)
 
 
 # --- open water ---------------------------------------------------------------
