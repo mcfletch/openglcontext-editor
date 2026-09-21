@@ -8,7 +8,6 @@ about the demo rather than about Blender, so it is written down here as data:
 ``GalleryFloor``        ambientCG ``WoodFloor070`` -- dark parquet, with
                         a clearcoat over it for the polish
 ``GalleryWall``         ambientCG ``PaintedPlaster017``
-``GalleryCeiling``      ambientCG ``PaintedPlaster017``, between the beams
 ``GalleryBeam``         ambientCG ``Wood067`` -- dark, near-black oak
 ``GalleryPlinth``       ambientCG ``Plaster001``, at a tighter tile
 ======================  ==============================================
@@ -82,7 +81,6 @@ MATERIALS: dict[str, Recipe] = {
     'GalleryFloor': Recipe('WoodFloor070', tile=2.0, coat=0.9,
                            coat_roughness=0.035),
     'GalleryWall': Recipe('PaintedPlaster017', tile=3.0),
-    'GalleryCeiling': Recipe('PaintedPlaster017', tile=3.0),
     'GalleryBeam': Recipe('Wood067', tile=1.5),
     'GalleryPlinth': Recipe('Plaster001', tile=1.0),
 }

@@ -18,6 +18,7 @@ import os
 from collections.abc import Iterable, Sequence
 
 import bpy
+import mathutils
 
 from . import budget, msftlod
 from . import gallery as layout
@@ -179,6 +180,33 @@ def place(mesh: bpy.types.Mesh, name: str,
     obj.location = tuple(location)
     obj.rotation_euler = (0.0, 0.0, turn)
     (collection or bpy.context.scene.collection).objects.link(obj)
+    return obj
+
+
+#: What Blender's glTF exporter takes a watt to be worth in lumens, and so what
+#: it multiplies a sun's watts per square metre by to write the extension's lux.
+#: A plan states a light in the unit the *file* will carry, which is the unit
+#: whatever renders it will read, and the division back into Blender's happens
+#: here -- the one place that knows it is talking to Blender.
+LUMENS_PER_WATT = 683.0
+
+
+#: The custom property a renderer reads to leave an object out of the shadow
+#: maps. It exports as the node's ``extras``, which is where
+#: OpenGLContext's glTF loader looks (``loaders/gltf/scene.py``); a renderer
+#: that has never heard of it draws the object exactly as before.
+CASTS_SHADOW_PROPERTY = 'OGLC_castsShadow'
+
+
+def mark_casting(obj: bpy.types.Object, casts: bool) -> bpy.types.Object:
+    """Say whether ``obj`` is drawn into the shadow maps.
+
+    Only the objects that do not cast are marked: casting is what a renderer
+    assumes, and a file saying so about every object in it is a file saying
+    nothing at greater length.
+    """
+    if not casts:
+        obj[CASTS_SHADOW_PROPERTY] = 0
     return obj
 
 
@@ -349,16 +377,17 @@ def build_gallery(plan: layout.Gallery, bust: str,
         return mesh
 
     for slab in plan.room():
-        place(slab_mesh(slab.name, slab), slab.name, slab.centre,
-              collection=room)
+        mark_casting(place(slab_mesh(slab.name, slab), slab.name, slab.centre,
+                           turn=slab.turn, collection=room), slab.casts)
         counted['slabs'] += 1
     for slab in plan.beams():
-        place(slab_mesh('Beam', slab), slab.name, slab.centre, collection=room)
+        mark_casting(place(slab_mesh('Beam', slab), slab.name, slab.centre,
+                           turn=slab.turn, collection=room), slab.casts)
         counted['slabs'] += 1
 
     for slab in plan.plinths():
         place(slab_mesh('Plinth', slab), slab.name, slab.centre,
-              collection=stands)
+              turn=slab.turn, collection=stands)
         counted['plinths'] += 1
 
     original = import_mesh(bust)
@@ -384,13 +413,21 @@ def build_gallery(plan: layout.Gallery, bust: str,
         counted['levels'] += len(chain)
     counted['impostor'] = 1 if impostor else 0
 
-    for lamp in plan.lights():
-        light = bpy.data.lights.new(lamp.name, type='POINT')
-        light.energy = lamp.power
-        light.color = lamp.colour
-        light.shadow_soft_size = 0.15
-        obj = bpy.data.objects.new(lamp.name, light)
-        obj.location = lamp.position
+    for sun in plan.lights():
+        light = bpy.data.lights.new(sun.name, type='SUN')
+        light.energy = sun.lux / LUMENS_PER_WATT
+        light.color = sun.colour
+        # A degree and a half across, near enough the real sun, so the shadow
+        # edges soften with distance from what casts them.
+        light.angle = math.radians(1.5)
+        obj = bpy.data.objects.new(sun.name, light)
+        # A Blender light shines down its own -Z, so the object is turned until
+        # that axis lies along the direction the sun travels. Where it stands
+        # says nothing for a sun; it is put above the hall to be found.
+        obj.location = (0.0, 0.0, plan.height + 2.0)
+        obj.rotation_euler = (
+            mathutils.Vector(sun.direction).to_track_quat('-Z', 'Y').to_euler())
+        mark_casting(obj, sun.casts)
         bpy.context.scene.collection.objects.link(obj)
         counted['lights'] += 1
 
@@ -430,8 +467,10 @@ def export(path: str, **settings: object) -> str:
     """Write the scene as a glB, with ``MSFT_lod`` on every chain in it.
 
     The add-on's export extension does the LODs, so this is Blender's ordinary
-    exporter with the settings the world needs: cameras and lights kept, and
-    no limit to what is visible, because the coarse levels are hidden.
+    exporter with the settings the world needs: cameras and lights kept, no
+    limit to what is visible because the coarse levels are hidden, and custom
+    properties written through, which is how an object says it does not cast a
+    shadow (:data:`CASTS_SHADOW_PROPERTY`).
     """
     arguments: dict[str, object] = dict(
         filepath=path,
@@ -440,7 +479,7 @@ def export(path: str, **settings: object) -> str:
         export_cameras=True,
         export_lights=True,
         export_yup=True,
-        export_extras=False,
+        export_extras=True,
         use_visible=False,
         use_renderable=False,
         use_selection=False,

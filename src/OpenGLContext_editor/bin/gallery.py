@@ -2,7 +2,9 @@
 
 The demo world for level of detail: a hall of marble busts on plinths, each one
 a six-level chain declared with ``MSFT_lod``, in a room with a polished parquet
-floor, white plaster walls and dark beams overhead.
+floor, white plaster walls, dark beams across the top of them and the sky above
+-- one generated panorama, which is the backdrop, the reflections and the light
+that is not the sun.
 
 One command covers the whole of it -- fetch the CC0 art, build the world in
 Blender, export the glB the viewer opens:
@@ -39,8 +41,9 @@ from OpenGLContext.loaders import cc0
 from OpenGLContext_editor import blender
 from OpenGLContext_editor.blender.openglcontext_lod import content as recipes
 from OpenGLContext_editor.blender.openglcontext_lod import gallery as layout
+from OpenGLContext_editor.blender.openglcontext_lod import sky
 
-__all__ = ['assemble', 'build', 'content_dir', 'main']
+__all__ = ['assemble', 'build', 'content_dir', 'main', 'roof']
 
 
 def content_dir(directory: str | None = None) -> str:
@@ -127,7 +130,32 @@ def build(content: str, output: str, bays: int = 30, levels: int = 6,
         sys.stderr.write(done.stdout[-4000:])
         sys.stderr.write(done.stderr[-4000:])
         raise SystemExit('Blender did not write %s' % (output,))
+    roof(output)
     return output
+
+
+def roof(path: str, plan: layout.Gallery | None = None) -> str:
+    """Put the sky in the world Blender wrote; the path again.
+
+    Blender's exporter writes materials, meshes and lights, and has nothing to
+    say about a document-level environment -- so the panorama is added here,
+    where the extension is a few lines of JSON rather than an export hook. What
+    it adds is an ordinary image, texture and sampler plus
+    ``OMI_environment_sky``, so a reader that never heard of the extension
+    opens the same world with no sky in it.
+    """
+    plan = plan or layout.Gallery()
+    with open(path, 'rb') as handle:
+        blob = handle.read()
+    panorama = sky.panorama(sun_azimuth=plan.sun_azimuth(),
+                            sun_elevation=plan.sun_elevation())
+    written = sky.with_sky(blob, panorama)
+    with open(path, 'wb') as handle:
+        handle.write(written)
+    print('SKY: %dx%d panorama, %+.1f KB'
+          % (panorama.width, panorama.height,
+             (len(written) - len(blob)) / 1024.0))
+    return path
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -24,11 +24,12 @@ def plan():
 
 
 class TestTheRoom:
-    def test_it_has_a_floor_walls_and_a_ceiling(self, plan):
+    def test_it_has_a_floor_and_four_walls(self, plan):
+        """And no roof: the sky is what is overhead."""
         named = {slab.name for slab in plan.room()}
 
         assert named == {'Floor', 'Wall_North', 'Wall_South', 'Wall_East',
-                         'Wall_West', 'Ceiling'}
+                         'Wall_West'}
 
     def test_the_floor_is_the_whole_hall(self, plan):
         floor = next(slab for slab in plan.room() if slab.name == 'Floor')
@@ -58,7 +59,7 @@ class TestTheRoom:
         assert east.size[1] >= plan.length
 
 
-class TestTheCeiling:
+class TestTheBeams:
     def test_the_beams_cross_the_hall(self, plan):
         beam = plan.beams()[0]
 
@@ -70,16 +71,85 @@ class TestTheCeiling:
     def test_there_is_one_per_bay(self, plan):
         assert len(plan.beams()) == plan.bays
 
-    def test_they_hang_below_the_plaster(self, plan):
-        ceiling = next(slab for slab in plan.room() if slab.name == 'Ceiling')
+    def test_they_span_the_tops_of_the_walls(self, plan):
+        """Where the roof would have sat: the sun comes through between them,
+        which is what puts the stripes on the busts."""
         top_of_beam = max(beam.centre[2] + beam.size[2] / 2 for beam in plan.beams())
 
-        assert top_of_beam == pytest.approx(ceiling.centre[2] - ceiling.size[2] / 2)
+        assert top_of_beam == pytest.approx(plan.height)
+
+    def test_the_sky_shows_between_them(self, plan):
+        """A bay is wider than a beam, or the hall is roofed in timber."""
+        assert plan.beam_width < plan.bay
 
     def test_they_are_clear_of_a_walking_head(self, plan):
         lowest = min(beam.centre[2] - beam.size[2] / 2 for beam in plan.beams())
 
         assert lowest > 2.0
+
+
+class TestHowTheyStand:
+    """Nothing in a room is exactly where it was meant to be.
+
+    A hundred and twenty plinths on a perfect lattice, each square to the hall
+    and each bust facing exactly the same way, reads as a rendering rather than
+    as a room -- the eye finds the repetition before it finds the busts. Each
+    one is moved by a couple of millimetres and turned by a fraction of a
+    degree, which is what a floor and a pair of hands do to a stone.
+    """
+
+    def test_they_are_not_all_in_the_same_place_in_their_bay(self, plan):
+        offsets = {(round(plinth.centre[0], 6), round(plinth.centre[1], 6))
+                   for plinth in plan.plinths()}
+
+        assert len(offsets) == len(plan.plinths())
+
+    def test_none_of_them_moves_more_than_a_few_millimetres(self, plan):
+        """It is a hall that has been walked through, not an earthquake."""
+        for plinth, place in zip(plan.plinths(), plan._places(), strict=True):
+            assert math.dist(plinth.centre[:2], place) <= plan.plinth_shift
+
+    def test_they_are_turned_a_fraction_of_a_degree(self, plan):
+        turns = [plinth.turn for plinth in plan.plinths()]
+
+        assert max(abs(turn) for turn in turns) <= plan.plinth_turn
+        assert len(set(turns)) > len(turns) // 2
+
+    def test_each_bust_stays_on_its_plinth(self, plan):
+        """A bust carries its plinth's own shift and adds a smaller one: what
+        it must not do is wander off the stone it stands on."""
+        for bust, plinth in zip(plan.busts(), plan.plinths(), strict=True):
+            assert math.dist(bust.position[:2], plinth.centre[:2]) <= plan.bust_shift
+
+    def test_the_shift_is_small_beside_the_stone_it_stands_on(self, plan):
+        """Millimetres against a plinth two thirds of a metre across."""
+        assert plan.bust_shift < plan.plinth_width / 20.0
+        assert plan.plinth_shift < plan.plinth_width / 20.0
+
+    def test_the_busts_are_not_all_facing_the_same_way(self, plan):
+        left = [bust.turn for bust in plan.busts() if bust.position[0] < 0]
+
+        assert len(set(left)) > len(left) // 2
+
+    def test_no_bust_is_turned_far_enough_to_look_at_a_wall(self, plan):
+        for bust in plan.busts():
+            square = plan._facing(bust.position[0])
+            assert abs(bust.turn - square) <= plan.bust_turn
+
+    def test_the_same_hall_is_built_twice_the_same(self, plan):
+        """A world rebuilt is the same world, or every capture of it differs."""
+        again = gallery.Gallery()
+
+        assert [plinth.centre for plinth in again.plinths()] == \
+            [plinth.centre for plinth in plan.plinths()]
+        assert [bust.turn for bust in again.busts()] == \
+            [bust.turn for bust in plan.busts()]
+
+    def test_another_seed_stands_them_differently(self):
+        one = gallery.Gallery()
+        other = gallery.Gallery(jitter_seed=one.jitter_seed + 1)
+
+        assert [p.centre for p in other.plinths()] != [p.centre for p in one.plinths()]
 
 
 class TestThePlinths:
@@ -122,7 +192,7 @@ class TestTheBusts:
     def test_each_stands_on_the_top_of_its_plinth(self, plan):
         for bust, plinth in zip(plan.busts(), plan.plinths(), strict=True):
             assert bust.position[2] == pytest.approx(plinth.size[2])
-            assert bust.position[:2] == plinth.centre[:2]
+            assert math.dist(bust.position[:2], plinth.centre[:2]) < 0.01
 
     def test_each_chain_has_a_name_of_its_own(self, plan):
         """One chain per bust: a level belongs to the copy it is a level of."""
@@ -181,6 +251,38 @@ class TestWhatTheHallIsFor:
             assert abs(view.position[1]) < plan.length / 2
             assert 0.0 < view.position[2] < plan.height
 
+    def test_there_is_a_viewpoint_at_a_bust_s_shoulder(self, plan):
+        """One still with the whole demo in it: a bust at arm's length drawing
+        at its finest, and the length of the hall behind it drawing at every
+        level down to its coarsest."""
+        shoulder = next(view for view in plan.cameras()
+                        if view.name == 'Shoulder')
+        nearest = min(math.dist(shoulder.position[:2], bust.position[:2])
+                      for bust in plan.busts())
+
+        assert nearest < 1.0
+
+    def test_the_shoulder_view_is_where_a_viewer_reads_it(self, plan):
+        """Stated in the file's own Y-up: (-2.07, 1.65, -22.41)."""
+        shoulder = next(view for view in plan.cameras()
+                        if view.name == 'Shoulder')
+        across, along, up = shoulder.position
+
+        assert (round(across, 2), round(up, 2), round(-along, 2)) == \
+            (-2.07, 1.65, -22.41)
+
+    def test_the_shoulder_view_faces_the_far_corner(self, plan):
+        shoulder = next(view for view in plan.cameras()
+                        if view.name == 'Shoulder')
+        looking = (math.sin(shoulder.turn), -math.cos(shoulder.turn))
+        corner = plan.far_corner
+        wanted = (corner[0] - shoulder.position[0],
+                  corner[1] - shoulder.position[1])
+        length = math.hypot(*wanted)
+
+        assert looking[0] == pytest.approx(wanted[0] / length, abs=0.01)
+        assert looking[1] == pytest.approx(wanted[1] / length, abs=0.01)
+
     def test_the_viewpoints_are_named_apart(self, plan):
         names = [view.name for view in plan.cameras()]
 
@@ -189,27 +291,66 @@ class TestWhatTheHallIsFor:
     def test_there_is_light(self, plan):
         assert plan.lights()
 
-    def test_the_lights_are_under_the_ceiling(self, plan):
-        for light in plan.lights():
-            assert light.position[2] < plan.height
+    def test_the_sun_leans_far_enough_to_throw_a_shadow(self, plan):
+        """Straight down is a hall of busts standing on their own shadows."""
+        for sun in plan.lights():
+            across = math.hypot(sun.direction[0], sun.direction[1])
+            assert across > 0.2
 
-    def test_there_are_no_more_lamps_than_a_pass_will_bind(self, plan):
-        """A ninth lamp is not a dimmer hall, it is a lamp never switched on."""
-        assert len(plan.lights()) <= 8
+    def test_every_light_is_a_unit_direction(self, plan):
+        for sun in plan.lights():
+            assert math.dist(sun.direction, (0.0, 0.0, 0.0)) == pytest.approx(1.0)
 
-    def test_the_lamps_are_spread_the_length_of_the_hall(self, plan):
-        """All of them at one end lights one end and leaves the rest dark."""
-        along = sorted(light.position[1] for light in plan.lights())
+    def test_the_hall_is_lit_for_a_neutral_exposure(self, plan):
+        """Every light in the hall counts towards the illuminance the engine's
+        light meter reads, and the meter reads six lux as neutral.
 
-        assert along[0] < -plan.length / 4
-        assert along[-1] > plan.length / 4
+        Over that, the hall is exposed correctly only where the meter is
+        consulted -- against a black background and nowhere else -- and
+        ``oglc-view``'s own default draws a sky. A hall that stays under it
+        looks the same either way.
+        """
+        assert sum(sun.lux for sun in plan.lights()) <= 6.0
 
-    def test_they_are_evenly_spaced(self, plan):
-        along = sorted(light.position[1] for light in plan.lights())
-        gaps = [second - first
-                for first, second in zip(along, along[1:], strict=False)]
+    def test_the_lights_are_named_apart(self, plan):
+        names = [sun.name for sun in plan.lights()]
 
-        assert max(gaps) == pytest.approx(min(gaps))
+        assert len(set(names)) == len(names)
+
+
+class TestWhatStandsBetweenTheLightAndTheRoom:
+    """The shell is lit and takes shadows; it does not throw any.
+
+    Two suns overhead are outside the building. A wall or a ceiling that cast
+    would put the whole interior in its shadow, which is a dark hall rather
+    than a lit one -- so the shell is marked as not casting, and everything
+    standing in the room still is.
+    """
+
+    @pytest.fixture
+    def plan(self):
+        return gallery.Gallery()
+
+    def test_the_walls_cast(self, plan):
+        """A rafter's shadow that crosses a wall and does not stop where the
+        wall's own shadow begins reads as a shadow floating in the air."""
+        walls = [slab for slab in plan.room() if slab.name.startswith('Wall')]
+
+        assert walls and all(slab.casts for slab in walls)
+
+    def test_the_floor_casts_nothing(self, plan):
+        """It is the ground: there is nothing under it to shadow, and a floor
+        in the depth pass shadows itself along every grazing ray."""
+        floor = next(slab for slab in plan.room() if slab.name == 'Floor')
+
+        assert floor.casts is False
+
+    def test_what_stands_in_the_room_casts(self, plan):
+        assert all(slab.casts for slab in plan.plinths())
+        assert all(slab.casts for slab in plan.beams())
+
+    def test_a_slab_casts_unless_it_is_told_not_to(self):
+        assert gallery.Slab('X', 'M', (0, 0, 0), (1, 1, 1)).casts
 
 
 class TestAskingForADifferentHall:

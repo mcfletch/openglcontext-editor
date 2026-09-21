@@ -276,3 +276,62 @@ class TestTheAddOnInstallsOnItsOwn:
         assert all(name.startswith('openglcontext_lod/') for name in held)
         assert 'openglcontext_lod/blender_manifest.toml' in held
         assert not [name for name in held if '__pycache__' in name]
+
+
+SUN_AND_A_QUIET_BLOCK = '''
+from openglcontext_lod import gallery as layout
+sun = layout.Sun('Sun_Test', (0.0, 0.0, -1.0), lux=2.0)
+light = bpy.data.lights.new(sun.name, type='SUN')
+light.energy = sun.lux / scene.LUMENS_PER_WATT
+obj = bpy.data.objects.new(sun.name, light)
+where.objects.link(obj)
+scene.mark_casting(scene.place(fine, 'Quiet', (0, 0, 0), collection=where), False)
+scene.place(coarse, 'Loud', (3, 0, 0), collection=where)
+'''
+
+
+#: What the add-on writes on an object that is not drawn into the shadow maps,
+#: and what a renderer looks for. Spelled out rather than imported, because the
+#: name is the contract between two programs and a test that reads it from one
+#: of them cannot see it change.
+CASTS_SHADOW = 'OGLC_castsShadow'
+
+
+@pytest.fixture(scope='module')
+def sunlit(tmp_path_factory, have_blender):
+    """One sun and two blocks, one of them marked, exported once."""
+    return build(tmp_path_factory.mktemp('sun'), have_blender,
+                 SUN_AND_A_QUIET_BLOCK)
+
+
+class TestWhatALightAndAShadowFlagSurvive:
+    """Two facts the gallery is built on, taken from Blender's own exporter.
+
+    Both are assumptions about a program this project does not own, and both
+    are invisible in the built file until something renders it: a light off by
+    the luminous efficacy factor still exports, and a shadow flag the exporter
+    drops leaves a file that loads and draws.
+    """
+
+    def test_a_sun_is_written_at_the_lux_the_plan_states(self, sunlit):
+        """Blender measures a sun in watts per square metre and the exporter
+        multiplies by the luminous efficacy to write the extension's lux, so a
+        plan stating lux has to divide it back out first.  Stating the watts
+        and calling them lux is a hall lit 683 times over."""
+        lights = sunlit['extensions']['KHR_lights_punctual']['lights']
+        sun = next(light for light in lights if light['name'] == 'Sun_Test')
+
+        assert sun['type'] == 'directional'
+        assert sun['intensity'] == pytest.approx(2.0, rel=1e-3)
+
+    def test_the_shadow_flag_reaches_the_node(self, sunlit):
+        quiet = next(node for node in sunlit['nodes']
+                     if node.get('name') == 'Quiet')
+
+        assert quiet['extras'][CASTS_SHADOW] == 0
+
+    def test_an_unmarked_object_says_nothing(self, sunlit):
+        loud = next(node for node in sunlit['nodes']
+                    if node.get('name') == 'Loud')
+
+        assert CASTS_SHADOW not in (loud.get('extras') or {})
