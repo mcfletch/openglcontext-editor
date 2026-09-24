@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -119,8 +119,8 @@ class Place:
         return (0.0, math.sin(half), 0.0, math.cos(half))
 
 
-def road_places(road: Any, trees: Optional[Any] = None,
-                tunnel_half_width: Optional[float] = None,
+def road_places(road: Any, trees: Any | None = None,
+                tunnel_half_width: float | None = None,
                 tunnel_height: float = 7.5) -> list[Place]:
     """Every place along ``road``, from its structures and the trees beside it.
 

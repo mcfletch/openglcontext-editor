@@ -8,10 +8,20 @@ import numpy as np
 import pytest
 
 from OpenGLContext_editor.bake.zones import (
-    DOCUMENT, AmbientSound, ZonesLayer, place_sounds, wav_bytes, zone_records,
+    DOCUMENT,
+    AmbientSound,
+    ZonesLayer,
+    place_sounds,
+    wav_bytes,
+    zone_records,
 )
 from OpenGLContext_editor.world.places import (
-    BRIDGE, CAUSEWAY, FOREST, KINDS, TUNNEL, road_places,
+    BRIDGE,
+    CAUSEWAY,
+    FOREST,
+    KINDS,
+    TUNNEL,
+    road_places,
 )
 from OpenGLContext_editor.world.road import RoadPath
 from OpenGLContext_editor.world.structures import Op

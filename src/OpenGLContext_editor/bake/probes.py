@@ -26,7 +26,8 @@ import json
 import logging
 import math
 import os
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -43,9 +44,8 @@ FRAMES_PER_ZONE = 40
 
 
 def _png(values: np.ndarray) -> bytes:
-    from PIL import Image
-
     from OpenGLContext.scenegraph.imagebasedlight import encode_rgbd
+    from PIL import Image
     buffer = io.BytesIO()
     Image.fromarray(encode_rgbd(values)).save(buffer, 'PNG')
     return buffer.getvalue()
@@ -53,8 +53,8 @@ def _png(values: np.ndarray) -> bytes:
 
 def bake_probes(directory: str, document: str = 'zones.gltf',
                 size: tuple[int, int] = (256, 256),
-                scene: Optional[Callable[[Any], list]] = None,
-                progress: Optional[Callable[[int, int], None]] = None) -> int:
+                scene: Callable[[Any], list] | None = None,
+                progress: Callable[[int, int], None] | None = None) -> int:
     """Capture every zone of the world in ``directory`` and write its light.
 
     ``scene`` gives the nodes to light the world with around the terrain --
@@ -71,7 +71,7 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
     os.environ['OPENGLCONTEXT_IBL'] = 'full'
     try:
         from OpenGLContext.eglcontext import EGLContext
-    except Exception as error:             # pragma: no cover - no EGL here
+    except (ImportError, OSError) as error:   # pragma: no cover - no EGL here
         log.warning('no offscreen context (%s); zones capture at run time', error)
         return 0
     from OpenGLContext.passes import renderpass

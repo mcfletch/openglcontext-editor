@@ -36,8 +36,9 @@ def test_a_baked_zone_names_its_light_and_no_longer_captures(tmp_path):
 
 
 def test_the_faces_are_rgbd(tmp_path):
-    from PIL import Image
     import io
+
+    from PIL import Image
     data = probes._png(np.full((4, 4, 3), 6.0, 'f4'))
     pixels = np.asarray(Image.open(io.BytesIO(data)))
     assert pixels.shape == (4, 4, 4)

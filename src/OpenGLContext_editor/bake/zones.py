@@ -22,14 +22,19 @@ from __future__ import annotations
 import io
 import json
 import wave
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Sequence
+from typing import Any
 
 import numpy as np
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.places import (
-    BRIDGE, CAUSEWAY, FOREST, TUNNEL, Place,
+    BRIDGE,
+    CAUSEWAY,
+    FOREST,
+    TUNNEL,
+    Place,
 )
 
 __all__ = [
@@ -79,8 +84,8 @@ class ZoneRecord:
     size: tuple[float, float, float]
     priority: int = 0
     blend: float = 0.0
-    environment: Optional[dict] = None
-    reverb: Optional[dict] = None
+    environment: dict | None = None
+    reverb: dict | None = None
     sounds: tuple[str, ...] = ()
 
 
@@ -130,7 +135,7 @@ PLACE_SETTINGS: dict[str, dict] = {
 
 
 def zone_records(places: Sequence[Place],
-                 settings: Optional[dict[str, dict]] = None) -> list[ZoneRecord]:
+                 settings: dict[str, dict] | None = None) -> list[ZoneRecord]:
     """A zone for each place, with its kind's settings (:data:`PLACE_SETTINGS`)."""
     chosen = PLACE_SETTINGS if settings is None else settings
     counts: dict[str, int] = {}
