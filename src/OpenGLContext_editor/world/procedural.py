@@ -54,13 +54,13 @@ from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
 from OpenGLContext_editor.bake.zones import ZonesLayer, place_sounds, zone_records
 from OpenGLContext_editor.world.character import corner_radii, road_character
-from OpenGLContext_editor.world.places import road_places
 from OpenGLContext_editor.world.gantry import StartFinish, start_finish
 from OpenGLContext_editor.world.height import (
     DEFAULT_RELIEF,
     HeightSource,
     ProceduralBase,
 )
+from OpenGLContext_editor.world.places import road_places
 from OpenGLContext_editor.world.road import (
     RoadLayer,
     RoadPath,
