@@ -52,7 +52,9 @@ from OpenGLContext_editor.bake.layers import (
 from OpenGLContext_editor.bake.props import PropLayer
 from OpenGLContext_editor.bake.signs import SignLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
+from OpenGLContext_editor.bake.zones import ZonesLayer, place_sounds, zone_records
 from OpenGLContext_editor.world.character import corner_radii, road_character
+from OpenGLContext_editor.world.places import road_places
 from OpenGLContext_editor.world.gantry import StartFinish, start_finish
 from OpenGLContext_editor.world.height import (
     DEFAULT_RELIEF,
@@ -549,6 +551,11 @@ class ProceduralWorld:
     forest: str = 'field'
     #: Where the species' files are; None for the shipped ones.
     species_directory: str | None = None
+    #: Whether the world carries zones for the places its road runs through --
+    #: its bores, causeways, bridges and wooded stretches -- each lit by an
+    #: environment captured in it and heard with its own ambience
+    #: (:meth:`zone_layer`).
+    places: bool = True
     wetness: float = 0.0
     _circuit: RoadPath | None = field(default=None, init=False, repr=False)
     _terrain: Layer | None = field(default=None, init=False, repr=False)
@@ -625,7 +632,29 @@ class ProceduralWorld:
         stones = self.stone_layer()
         if stones is not None:
             layers.append(stones)
+        if self.road and self.places:
+            layers.append(self.zone_layer())
         return layers
+
+    def zone_layer(self) -> ZonesLayer:
+        """The zones of the places the circuit runs through.
+
+        One per piece of every bore, causeway and bridge, and of every stretch
+        of plain road with the forest close beside it
+        (:func:`~OpenGLContext_editor.world.places.road_places`), each with
+        what that kind of place holds: an environment captured on the road
+        inside it, and birdsong in the forest, surf at a causeway, or a bore's
+        reverb (:data:`~OpenGLContext_editor.bake.zones.PLACE_SETTINGS`).
+        """
+        tunnel = self.tunnel_profile()
+        road = self.circuit()
+        trees = self.scatter().positions if self.tree_density > 0.0 else None
+        places = road_places(
+            road, trees,
+            tunnel_half_width=road.profile.on_structure().total_width / 2.0
+            + tunnel.margin,
+            tunnel_height=tunnel.clearance)
+        return ZonesLayer(zone_records(places), place_sounds(self.seed))
 
     def water(self) -> Layer:
         """The lakes: a sheet wherever the ground dips below the waterline.
