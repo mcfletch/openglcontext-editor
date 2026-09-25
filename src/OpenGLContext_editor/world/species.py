@@ -33,46 +33,55 @@ from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
 from OpenGLContext.scenegraph.vegetation.field import TreeSpecies
 
 __all__ = ['shipped_species', 'shipped_credits', 'species_directory',
-           'shipped_cover', 'SHIPPED', 'CREDITS', 'COVER']
+           'shipped_cover', 'shipped_trees', 'default_cover', 'CREDITS']
 
-#: The species the example world uses, as ``(name, files..., keys)``. Fir and
-#: Noel pine are conifers, which is what a coniferous landscape wants; the two
-#: maples give the valleys something broadleaf so a lap is not one tree
-#: repeated.
-SHIPPED = (
-    TreeSpecies(name='fir', mesh='fir.npz', solidTexture='fir_bark.png',
-                foliageTexture='fir_branch.png', impostor='fir_imp.png',
-                cardWidth=0.50),
-    TreeSpecies(name='noel', mesh='noel.npz', solidTexture='noel_bark.png',
-                foliageTexture='noel_branch.png', impostor='noel_imp.png',
-                cardWidth=0.55),
-    TreeSpecies(name='maple0', mesh='maple0.npz',
-                solidTexture='maple_bark.png',
-                foliageTexture='maple_leaves.png',
-                impostor='maple_imp0.png',
-                solid=('bP', 'bN', 'bU', 'bI'),
-                foliage=('cP', 'cN', 'cU', 'cI'),
-                cardWidth=0.72),
-    TreeSpecies(name='maple2', mesh='maple2.npz',
-                solidTexture='maple_bark.png',
-                foliageTexture='maple_leaves.png',
-                impostor='maple_imp2.png',
-                solid=('bP', 'bN', 'bU', 'bI'),
-                foliage=('cP', 'cN', 'cU', 'cI'),
-                cardWidth=0.72),
-)
+def shipped_trees() -> list[TreeSpecies]:
+    """The species the example world uses, their files named as the forest
+    demo ships them.
 
-#: What the example world grows between its trees when its art carries no
-#: ``cover.json`` -- one grass, which is what there was before there were sets
-#: of them. :func:`shipped_cover` prefers the baked set.
-COVER = CoverSpecies(name='grass', clump='basic-clump.glb',
-                     card='grass_clump_imp.png', density=1.6, height=0.5)
+    Fir and Noel pine are conifers, which is what a coniferous landscape
+    wants; the two maples give the valleys something broadleaf so a lap is not
+    one tree repeated. Made afresh on each call: a species is a node whose
+    fields can be set, so a caller's changes are its own. ``varied()`` makes a
+    changed copy.
+    """
+    return [
+        TreeSpecies(name='fir', mesh='fir.npz', solidTexture='fir_bark.png',
+                    foliageTexture='fir_branch.png', impostor='fir_imp.png',
+                    cardWidth=0.50),
+        TreeSpecies(name='noel', mesh='noel.npz', solidTexture='noel_bark.png',
+                    foliageTexture='noel_branch.png', impostor='noel_imp.png',
+                    cardWidth=0.55),
+        TreeSpecies(name='maple0', mesh='maple0.npz',
+                    solidTexture='maple_bark.png',
+                    foliageTexture='maple_leaves.png',
+                    impostor='maple_imp0.png',
+                    solid=('bP', 'bN', 'bU', 'bI'),
+                    foliage=('cP', 'cN', 'cU', 'cI'),
+                    cardWidth=0.72),
+        TreeSpecies(name='maple2', mesh='maple2.npz',
+                    solidTexture='maple_bark.png',
+                    foliageTexture='maple_leaves.png',
+                    impostor='maple_imp2.png',
+                    solid=('bP', 'bN', 'bU', 'bI'),
+                    foliage=('cP', 'cN', 'cU', 'cI'),
+                    cardWidth=0.72),
+    ]
+
+
+def default_cover() -> CoverSpecies:
+    """What the example world grows between its trees when its art carries no
+    ``cover.json``: one grass. :func:`shipped_cover` prefers the baked set.
+    Made afresh on each call, as :func:`shipped_trees` is.
+    """
+    return CoverSpecies(name='grass', clump='basic-clump.glb',
+                        card='grass_clump_imp.png', density=1.6, height=0.5)
 
 #: What the baked set is written to, beside the models it names. Written by
 #: ``oglc-bake-plants``; see :mod:`OpenGLContext_editor.assets.plants`.
 COVER_MANIFEST = 'cover.json'
 
-#: What a world baked from :data:`SHIPPED` has to say about where its trees came
+#: What a world baked from :func:`shipped_trees` has to say about where its trees came
 #: from. CC-BY 4.0 requires the attribution to travel with the work.
 CREDITS = (
     "Ground cover plants: scans from Poly Haven (https://polyhaven.com/), "
@@ -115,7 +124,7 @@ def shipped_species(directory: str | None = None) -> list[TreeSpecies]:
     """
     where = directory or species_directory()
     found = []
-    for entry in SHIPPED:
+    for entry in shipped_trees():
         species = entry.beside(where)
         for part in (species.mesh, species.solidTexture,
                      species.foliageTexture, species.impostor):
@@ -135,8 +144,8 @@ def shipped_cover(directory: str | None = None) -> list[CoverSpecies]:
     The set named by that directory's ``cover.json`` -- a forest floor is
     several kinds of plant, each at its own density, clumping its own way and
     growing under its own share of tree cover. A directory with no manifest
-    falls back to :data:`COVER`, so art baked before there were sets of them
-    still makes a world.
+    falls back to :func:`default_cover`, so a directory holding only the one
+    grass still makes a world.
     """
     where = directory or species_directory()
     manifest = os.path.join(where, COVER_MANIFEST)
@@ -145,7 +154,7 @@ def shipped_cover(directory: str | None = None) -> list[CoverSpecies]:
             named = json.load(handle)['species']
         found = [CoverSpecies.from_json(entry).beside(where) for entry in named]
     else:
-        found = [COVER.beside(where)]
+        found = [default_cover().beside(where)]
     for one in found:
         for part in (one.card, one.clump):
             if part and not os.path.exists(part):
