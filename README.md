@@ -39,8 +39,11 @@ oglc-view /tmp/world/tileset.json   # walk around in it
 many ground samples each tile spends; `glisteel-bake --help` lists the rest.
 
 The baker itself is here, and takes any layers at all:
-`OpenGLContext_editor.bake.driver.bake_world`. `oglc-bake` remains for one
-release cycle, saying where the command went.
+`OpenGLContext_editor.bake.driver.bake_world`. A `ProceduralWorld` bakes
+itself with `world.bake(directory)`, which is `bake_world` over its layers at
+the world's own `depth` — the depth its ground spacing, portals and grain were
+laid out for — with its credits. `oglc-bake` remains for one release cycle,
+saying where the command went.
 
 **How the ground and the trees are carried** is the choice that decides what a
 world costs to draw. `--ground field` writes the landscape once beside the

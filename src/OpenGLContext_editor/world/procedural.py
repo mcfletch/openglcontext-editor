@@ -39,7 +39,7 @@ from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, LayerRule, Relief
 
 from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
 from OpenGLContext_editor.bake.bounds import BoundingBox
-from OpenGLContext_editor.bake.driver import root_error_for
+from OpenGLContext_editor.bake.driver import BakeResult, bake_world, root_error_for
 from OpenGLContext_editor.bake.field import FieldTerrainLayer
 from OpenGLContext_editor.bake.gantry import GantryLayer
 from OpenGLContext_editor.bake.layers import (
@@ -496,7 +496,8 @@ class ProceduralWorld:
     #: geometric error allows, so refining the tree buys detail rather than a
     #: denser sampling of the same smooth surface. None leaves the tiles smooth.
     #: The landscape beside the tileset -- what a car is driven on and a tree is
-    #: planted on -- carries none of it.
+    #: planted on -- carries the bands its own grid can hold, at the finest
+    #: tile's figures, which is what the finest tile draws (:meth:`grain_drawn`).
     grain: Relief | None = GROUND_RELIEF
     #: How many times the tile tree subdivides when this world is baked. It is
     #: the bake's setting, and the world is told it because a tiled world's
@@ -1369,6 +1370,24 @@ class ProceduralWorld:
             return shipped_cover(self.species_directory)
         except LookupError:
             return None
+
+    def bake(self, directory: str, **named: Any) -> BakeResult:
+        """The world baked into ``directory`` as 3D Tiles, at its own depth.
+
+        :func:`~OpenGLContext_editor.bake.driver.bake_world` over
+        :meth:`layers`, with :attr:`depth` and :meth:`credits`; ``named`` is
+        any other ``bake_world`` option. A ``depth`` other than the world's is
+        refused, since the world's ground spacing, portals and finest grain
+        are measured against a cell of that depth.
+        """
+        depth = named.pop('depth', self.depth)
+        if int(depth) != int(self.depth):
+            raise ValueError(
+                'this world is laid out for a tree of depth %d, not %d; give '
+                'the world the depth to bake at' % (self.depth, depth))
+        named.setdefault('credits', self.credits())
+        return bake_world(self.layers(), directory, depth=int(self.depth),
+                          **named)
 
     def credits(self) -> list[str]:
         """Where everything in this world came from, licences included.

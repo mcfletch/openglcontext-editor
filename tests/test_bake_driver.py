@@ -329,3 +329,31 @@ class TestWhatTheWorldCarriesForAGame:
         result = _bake(tmp_path, layers=[_terrain(), Painted()])
         assert result.assets == ['palette.bin']
         assert (tmp_path / 'palette.bin').read_bytes() == b'0123'
+
+
+class TestAWorldBakedAtItsOwnDepth:
+    """A world is told the tree's depth -- its ground spacing, its portals and
+    the grain its finest tile carries are measured against a cell of it -- so
+    the bake takes that depth from the world rather than being told again."""
+
+    @staticmethod
+    def _world(depth):
+        from OpenGLContext_editor.world.procedural import ProceduralWorld
+        return ProceduralWorld(extent=256.0, depth=depth, road=False,
+                               tree_density=0.0, field_resolution=65,
+                               control_size=64, ground='tiles', places=False)
+
+    @staticmethod
+    def _deepest(tile, level=0):
+        return max([level] + [TestAWorldBakedAtItsOwnDepth._deepest(child, level + 1)
+                              for child in tile.get('children', ())])
+
+    def test_the_tree_is_as_deep_as_the_world_says(self, tmp_path):
+        import json
+        result = self._world(2).bake(str(tmp_path))
+        with open(result.tileset) as handle:
+            assert self._deepest(json.load(handle)['root']) == 2
+
+    def test_a_different_depth_is_refused(self, tmp_path):
+        with pytest.raises(ValueError, match='depth'):
+            self._world(2).bake(str(tmp_path), depth=3)
