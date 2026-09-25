@@ -256,3 +256,57 @@ class TestBaking:
         beside &= ~covered
         assert np.any(beside), 'no gutter next to a chart at all'
         assert np.any(np.any(baked[beside] > 0, axis=1)), 'the gutter was left black'
+
+
+class TestReadingBetweenTheSourcesTexels:
+    """Where the new atlas is denser than the original's, several of its texels
+    fall inside one texel of the source; read at the nearest they come out as
+    blocks, read filtered they come out as the gradient the source shows."""
+
+    def test_a_read_between_two_texels_blends_them(self):
+        source = np.zeros((1, 2, 3), dtype=np.uint8)
+        source[0, 1] = (200, 200, 200)
+        shot = rewrap.Projection(spots=np.array([[0, 0]]),
+                                 read=np.array([[0.5, 0.5]]), size=1)
+        assert int(rewrap.sample(shot, source)[0, 0, 0]) == 100
+
+    def test_a_read_at_a_texel_s_centre_is_that_texel(self):
+        source = np.zeros((1, 2, 3), dtype=np.uint8)
+        source[0, 1] = (200, 200, 200)
+        shot = rewrap.Projection(spots=np.array([[0, 0]]),
+                                 read=np.array([[0.75, 0.5]]), size=1)
+        assert int(rewrap.sample(shot, source)[0, 0, 0]) == 200
+
+
+class TestTheRasterIsTheOneThePerFaceWalkGives:
+    """Every texel a triangle covers, found for all triangles at once."""
+
+    @staticmethod
+    def _one_face_at_a_time(laid, size):
+        faces = np.asarray(laid.indices).reshape(-1, 3)
+        corner_uv = np.asarray(laid.uv, dtype='d')[faces] * size - 0.5
+        low = np.maximum(np.floor(corner_uv.min(axis=1)).astype(np.int64), 0)
+        high = np.minimum(np.ceil(corner_uv.max(axis=1)).astype(np.int64) + 1, size)
+        found = set()
+        for face in range(len(faces)):
+            columns, rows = np.meshgrid(np.arange(low[face][0], high[face][0]),
+                                        np.arange(low[face][1], high[face][1]))
+            pixels = np.stack([columns.ravel(), rows.ravel()], axis=1).astype('d')
+            weights = rewrap._barycentric(pixels, corner_uv[face])
+            if weights is None:
+                continue
+            slack = 0.5 / max(np.ptp(corner_uv[face], axis=0).max(), 1e-12)
+            for spot in pixels[np.all(weights >= -slack, axis=1)].astype(int):
+                found.add((face, int(spot[0]), int(spot[1])))
+        return found
+
+    def test_the_same_texels_for_the_same_faces(self):
+        rng = np.random.default_rng(4)
+        uv = rng.random((60, 2))
+        laid = rewrap.Unwrapped(positions=rng.random((60, 3)).astype('f4'),
+                                indices=rng.integers(0, 60, 90).astype(np.uint32),
+                                uv=uv.astype('f4'), source=np.arange(60), charts=1)
+        spots, _at, whose, _within = rewrap._rasterise(laid, 32)
+        found = {(int(face), int(x), int(y))
+                 for face, (x, y) in zip(whose, spots, strict=True)}
+        assert found == self._one_face_at_a_time(laid, 32)

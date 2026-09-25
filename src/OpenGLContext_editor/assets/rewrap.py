@@ -5,9 +5,8 @@ charts -- which is the right answer for the dense mesh, because small charts
 distort least, and the wrong one for anything reduced from it. A texture
 coordinate means something only inside one chart, so once a reduced triangle
 covers more surface than a chart holds, its three corners point at unrelated
-places in the image and what it draws is the stripe between them. On a museum
-scan of lekking ruffs that is the ground the birds are standing on, and it
-starts at eight thousand triangles, which is a level a game ships.
+places in the image and what it draws is the stripe between them. On a dense
+scan that begins at triangle counts a game ships.
 
 No decimator mends that: the fault is in the unwrap, not in the surface, and a
 reducer can only carry the coordinates it was given. What mends it is the step
@@ -126,13 +125,17 @@ class Frames:
     handed: Any
 
 
+#: How many candidate texels :func:`_rasterise` tests in one batch of faces.
+RASTER_BATCH = 1 << 21
+
+
 def unwrap(positions: Any, indices: Any, size: int = DEFAULT_SIZE) -> Unwrapped:
     """Lay a mesh out in a fresh atlas of whole triangles.
 
     The surface is **welded first**. A mesh reduced from a scan carries a vertex
     per chart corner of the atlas it inherited, and an unwrapper handed those
-    sees a surface torn into thousands of disconnected pieces and dutifully
-    gives thousands of charts back. Positions say what is actually joined.
+    sees a surface torn into thousands of disconnected pieces and lays out
+    thousands of charts. Positions say what is actually joined.
 
     ``size`` is the atlas the packer aims at; the coordinates come back in
     ``[0, 1]`` either way, so it decides how the charts are packed rather than
@@ -204,32 +207,46 @@ def _rasterise(laid: Unwrapped, size: int) -> tuple[Any, Any, Any, Any]:
 
     low = np.maximum(np.floor(corner_uv.min(axis=1)).astype(np.int64), 0)
     high = np.minimum(np.ceil(corner_uv.max(axis=1)).astype(np.int64) + 1, size)
+    wide = np.maximum(high[:, 0] - low[:, 0], 0)
+    tall = np.maximum(high[:, 1] - low[:, 1], 0)
+    first = corner_uv[:, 1] - corner_uv[:, 0]
+    second = corner_uv[:, 2] - corner_uv[:, 0]
+    area = first[:, 0] * second[:, 1] - second[:, 0] * first[:, 1]
+    # A texel counts as covered when its centre is inside the triangle. A
+    # sliver narrower than a texel would then paint nothing at all, so the test
+    # is loosened by half a texel's worth of the triangle's own size.
+    slack = 0.5 / np.maximum(np.ptp(corner_uv, axis=1).max(axis=1), 1e-12)
+    drawn = np.flatnonzero((wide * tall > 0) & (np.abs(area) >= 1e-12))
 
     spots: list[Any] = []
     places: list[Any] = []
     whose: list[Any] = []
     within: list[Any] = []
-    for face in range(len(faces)):
-        left, top = low[face]
-        right, bottom = high[face]
-        if right <= left or bottom <= top:
-            continue
-        columns, rows = np.meshgrid(np.arange(left, right), np.arange(top, bottom), indexing='xy')
-        pixels = np.stack([columns.ravel(), rows.ravel()], axis=1).astype('d')
-        weights = _barycentric(pixels, corner_uv[face])
-        if weights is None:
-            continue
-        # A texel counts as covered when its centre is inside the triangle. A
-        # sliver narrower than a texel would then paint nothing at all, so the
-        # test is loosened by half a texel's worth of the triangle's own size.
-        slack = 0.5 / max(np.ptp(corner_uv[face], axis=0).max(), 1e-12)
-        inside = np.all(weights >= -slack, axis=1)
-        if not np.any(inside):
-            continue
-        spots.append(np.stack([columns.ravel(), rows.ravel()], axis=1)[inside])
-        places.append(np.einsum('ij,jk->ik', weights[inside], corner_at[face]))
-        whose.append(np.full(int(inside.sum()), face, dtype=np.int64))
+    # Every candidate texel of a batch of faces at once, the batch bounded so
+    # the arrays stay a few tens of megabytes whatever the mesh.
+    counts = (wide * tall)[drawn]
+    ends = np.cumsum(counts)
+    begin = 0
+    while begin < len(drawn):
+        stop = int(np.searchsorted(ends, (ends[begin] - counts[begin])
+                                   + RASTER_BATCH, side='right'))
+        stop = max(stop, begin + 1)
+        batch = drawn[begin:stop]
+        each = counts[begin:stop]
+        face = np.repeat(batch, each)
+        offset = np.arange(int(each.sum())) - np.repeat(np.cumsum(each) - each, each)
+        column = low[face, 0] + offset % wide[face]
+        row = low[face, 1] + offset // wide[face]
+        away = np.stack([column, row], axis=1).astype('d') - corner_uv[face, 0]
+        along = (away[:, 0] * second[face, 1] - second[face, 0] * away[:, 1]) / area[face]
+        across = (first[face, 0] * away[:, 1] - away[:, 0] * first[face, 1]) / area[face]
+        weights = np.stack([1.0 - along - across, along, across], axis=1)
+        inside = np.all(weights >= -slack[face][:, None], axis=1)
+        spots.append(np.stack([column, row], axis=1)[inside])
+        places.append(np.einsum('ij,ijk->ik', weights[inside], corner_at[face[inside]]))
+        whose.append(face[inside])
         within.append(weights[inside])
+        begin = stop
     if not spots:
         empty = np.zeros((0, 2), dtype=np.int64)
         return (
@@ -336,10 +353,12 @@ def sample(shot: Projection, image: Any) -> Any:
     canvas = np.zeros((shot.size, shot.size, channels), dtype=image.dtype)
     if not len(shot.spots):
         return canvas
-    across = np.clip((shot.read[:, 0] * image.shape[1]).astype(np.int64), 0, image.shape[1] - 1)
-    # glTF: v of zero is the top of the image, which is row zero.
-    down = np.clip((shot.read[:, 1] * image.shape[0]).astype(np.int64), 0, image.shape[0] - 1)
-    canvas[shot.spots[:, 1], shot.spots[:, 0]] = image[down, across].reshape(len(shot.spots), -1)
+    read = _filtered(image, shot.read)
+    if np.issubdtype(image.dtype, np.integer):
+        limits = np.iinfo(image.dtype)
+        read = np.clip(np.rint(read), limits.min, limits.max)
+    canvas[shot.spots[:, 1], shot.spots[:, 0]] = read.astype(image.dtype).reshape(
+        len(shot.spots), -1)
     painted = np.zeros((shot.size, shot.size), dtype=bool)
     painted[shot.spots[:, 1], shot.spots[:, 0]] = True
     return _spread(canvas, painted, BLEED)
@@ -427,9 +446,7 @@ def sample_normals(
     source = _frame_at(onto, np.asarray(indices).reshape(-1, 3), shot.onto, shot.onto_weights)
     target = _frame_at(into, np.asarray(laid_indices).reshape(-1, 3), shot.into, shot.into_weights)
 
-    across = np.clip((shot.read[:, 0] * image.shape[1]).astype(np.int64), 0, image.shape[1] - 1)
-    down = np.clip((shot.read[:, 1] * image.shape[0]).astype(np.int64), 0, image.shape[0] - 1)
-    leaning = image[down, across][:, :3].astype('d') / 127.5 - 1.0
+    leaning = _filtered(image, shot.read)[:, :3] / 127.5 - 1.0
 
     # Rows of a frame are its tangent, bitangent and normal, so the frame times
     # the direction takes it out into the model's space, and the transpose --
@@ -444,6 +461,34 @@ def sample_normals(
         np.rint((turned + 1.0) * 127.5), 0, 255
     ).astype(np.uint8)
     return _spread(canvas, painted, BLEED)
+
+
+def _filtered(image: Any, read: Any) -> Any:
+    """``image`` read at texture coordinates ``read``, bilinearly, as float.
+
+    Texel centres are at half-integers, as a renderer samples them, and the
+    edges clamp. ``v`` of zero is the top of the image, which is row zero, as
+    glTF has it. Where the new atlas is denser than the source, neighbouring
+    texels of it read between the source's texels rather than repeating one.
+    """
+    source = np.asarray(image, dtype='d')
+    if source.ndim == 2:
+        source = source[:, :, None]
+    height, width = source.shape[:2]
+    x = np.asarray(read[:, 0], dtype='d') * width - 0.5
+    y = np.asarray(read[:, 1], dtype='d') * height - 0.5
+    left = np.floor(x)
+    top = np.floor(y)
+    across = (x - left)[:, None]
+    down = (y - top)[:, None]
+    x0 = np.clip(left.astype(np.int64), 0, width - 1)
+    x1 = np.clip(left.astype(np.int64) + 1, 0, width - 1)
+    y0 = np.clip(top.astype(np.int64), 0, height - 1)
+    y1 = np.clip(top.astype(np.int64) + 1, 0, height - 1)
+    upper = source[y0, x0] * (1.0 - across) + source[y0, x1] * across
+    lower = source[y1, x0] * (1.0 - across) + source[y1, x1] * across
+    found: Any = upper * (1.0 - down) + lower * down
+    return found
 
 
 def _spread(canvas: Any, painted: Any, reach: int) -> Any:
