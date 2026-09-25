@@ -335,3 +335,55 @@ class TestWhatALightAndAShadowFlagSurvive:
                     if node.get('name') == 'Loud')
 
         assert CASTS_SHADOW not in (loud.get('extras') or {})
+
+
+def _toml():
+    """Whichever TOML reader this Python has."""
+    try:
+        import tomllib
+    except ImportError:                   # Python 3.10
+        import tomli as tomllib
+    return tomllib
+
+
+class TestTheAddOnShipsWithTheToolkit:
+    """A pip install carries the whole add-on: the files that are not Python
+    are installed only where the package data names them."""
+
+    def test_every_file_of_the_add_on_is_package_data(self):
+        import fnmatch
+        import os
+
+        tomllib = _toml()
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, 'pyproject.toml'), 'rb') as handle:
+            patterns = tomllib.load(handle)['tool']['setuptools'][
+                'package-data']['OpenGLContext_editor']
+        package = os.path.dirname(os.path.abspath(blender.__file__))
+        data = [os.path.relpath(os.path.join(where, leaf),
+                                os.path.dirname(package)).replace(os.sep, '/')
+                for where, directories, files in os.walk(blender.addon_directory())
+                for leaf in files
+                if not leaf.endswith(('.py', '.pyc'))]
+        assert data
+        for name in data:
+            assert any(fnmatch.fnmatch(name, pattern) for pattern in patterns), name
+
+    def test_the_manifest_is_a_resource_of_the_package(self):
+        from importlib import resources
+
+        manifest = resources.files('OpenGLContext_editor.blender').joinpath(
+            'openglcontext_lod', 'blender_manifest.toml')
+        assert 'version' in manifest.read_text(encoding='utf-8')
+
+
+class TestTheAddOnVersionOnEveryPython:
+    def test_where_there_is_no_tomllib_tomli_reads_it(self, monkeypatch):
+        """Python 3.10 has no tomllib; the dependency on tomli covers it."""
+        import sys
+
+        reader = _toml()
+        expected = blender.addon_version()
+        monkeypatch.setitem(sys.modules, 'tomllib', None)
+        monkeypatch.setitem(sys.modules, 'tomli', reader)
+        assert blender.addon_version() == expected

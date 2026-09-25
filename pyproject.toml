@@ -58,6 +58,9 @@ dependencies = [
     # The zone bake makes an area's ambience with `synth.surf` and
     # `synth.birdsong`, which 0.4.0a1 is the first version to carry.
     "omi_audio>=0.4.0a1",
+    # The Blender add-on's version is read from its TOML manifest; tomllib
+    # is in the standard library from 3.11.
+    "tomli>=1.1; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -90,7 +93,7 @@ oglc-bake-plants = "OpenGLContext_editor.bin.plants:main"
 
 # The level-of-detail demo world: fetch the CC0 art, build the gallery in
 # Blender, export the glB with MSFT_lod on every bust.  Needs Blender on the
-# path; see docs/blender.html.
+# path; see docs/blender.md.
 oglce-gallery = "OpenGLContext_editor.bin.gallery:main"
 
 [project.urls]
@@ -107,7 +110,9 @@ where = ["src"]
 version = { attr = "OpenGLContext_editor.__version__" }
 
 [tool.setuptools.package-data]
-OpenGLContext_editor = ["py.typed"]
+# The Blender add-on is installed into Blender as a directory, manifest and
+# all, so every file of it is package data.
+OpenGLContext_editor = ["py.typed", "blender/openglcontext_lod/*.toml"]
 
 # The engine's E/W/F/B base, plus import-order, pyupgrade and blind-except.
 # Nothing here predates the stricter set, so it is adopted from the first commit

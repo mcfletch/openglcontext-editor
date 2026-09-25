@@ -2,12 +2,12 @@
 
 A Blender add-on. Install it, and Blender gains:
 
-* **Object > Levels of Detail > Make LOD chain** -- a chain from the selected
-  mesh, cut by Blender's own Decimate modifier, each level named and marked;
-* **``MSFT_lod`` on glTF export** -- the ordinary *File > Export > glTF 2.0*
+* Object > Levels of Detail > Make LOD chain - a chain from the selected
+  mesh, cut by Blender's own Decimate modifier, each level named and marked.
+* ``MSFT_lod`` on glTF export - the ordinary *File > Export > glTF 2.0*
   writes the chain as the vendor extension, so a viewer that knows it switches
-  levels and one that does not draws the finest;
-* **the bust gallery** -- the demo world, as a worked example of both.
+  levels and one that does not draws the finest.
+* The bust gallery - the demo world, as a worked example of both.
 
 Only Blender's own Python is needed; the modules that carry no Blender import
 cleanly outside it, which is where they are tested.

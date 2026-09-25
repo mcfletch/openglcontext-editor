@@ -8,14 +8,14 @@ never installs this toolkit at all.
 
 What it adds to Blender:
 
-* **levels of detail on any object** -- one operator makes a chain from the
+* Levels of detail on any object - one operator makes a chain from the
   selected mesh with Blender's own Decimate modifier, names the levels and
-  records which chain they belong to;
-* **``MSFT_lod`` on export** -- a glTF export extension turns those levels into
+  records which chain they belong to.
+* ``MSFT_lod`` on export - a glTF export extension turns those levels into
   the vendor extension OpenGLContext reads, so a normal *File > Export > glTF*
   produces a file that switches levels in a viewer and draws the finest in one
-  that has never heard of the extension;
-* **the bust gallery** -- the demo world, built in Blender from this toolkit's
+  that has never heard of the extension.
+* The bust gallery - the demo world, built in Blender from this toolkit's
   own content, as a worked example of the above.
 
 This module is the part outside Blender: where the add-on is, how to put it in
@@ -27,7 +27,8 @@ a Blender installation, and how to drive Blender from a script.
     blender.install()                  # copy it into the user's Blender
     blender.run(['--python', script])  # drive a headless Blender
 
-See `blender.html <../docs/blender.html>`_ for the authoring guide.
+``docs/blender.md`` in the openglcontext-editor repository is the authoring
+guide.
 """
 
 from __future__ import annotations
@@ -56,8 +57,8 @@ __all__ = [
 #: cannot drift apart.
 ADDON = 'openglcontext_lod'
 
-#: Where Blender's own Python lives in an installation, relative to the
-#: version directory. Only used to say what was searched when nothing is found.
+#: The executable names searched for on ``PATH`` when neither a Blender nor
+#: ``$BLENDER`` is given.
 _SEARCH = ('blender',)
 
 
@@ -148,10 +149,12 @@ def addon_version() -> str:
     is versioned as the thing Blender installs, and a zip named for a release
     of the toolkit around it would be naming the wrong thing.
     """
+    try:
+        import tomllib
+    except ImportError:                   # Python 3.10; tomli is the same reader
+        import tomli as tomllib  # type: ignore[no-redef]
     manifest = os.path.join(addon_directory(), 'blender_manifest.toml')
     with open(manifest, 'rb') as handle:
-        import tomllib
-
         return str(tomllib.load(handle)['version'])
 
 
