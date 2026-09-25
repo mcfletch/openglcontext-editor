@@ -86,6 +86,19 @@ class TestWriting:
         assert len(coverage) == 3
         assert coverage == sorted(coverage, reverse=True)
 
+    def test_with_every_level_in_a_sidecar_the_glb_is_still_valid(self, chain, tmp_path):
+        """glTF requires every buffer to hold a byte, and buffer 0 with no uri
+        to be a binary chunk that is there."""
+        path = str(tmp_path / 'thing.glb')
+        written = write_chain(path, chain, embed_coarsest=0)
+        assert len(written) == 4
+        document = LODAsset.open(path).document
+        assert all(one['byteLength'] >= 1 and 'uri' in one for one in document['buffers'])
+        from OpenGLContext.loaders import gltf
+        assert gltf.load_gltf(path) is not None
+        attributes, indices = LODAsset.open(path).load(2)
+        assert np.array_equal(indices, chain[2].indices)
+
     def test_a_chain_with_no_levels_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match='no levels'):
             write_chain(str(tmp_path / 'empty.glb'), LODChain([], centre=(0, 0, 0), radius=1.0))

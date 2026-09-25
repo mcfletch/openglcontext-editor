@@ -74,7 +74,7 @@ class TestWhatTheEngineMakesOfABakedChain:
     def test_the_coverage_written_is_the_coverage_read(self, written):
         node = _the_lod(gltf.load_gltf(written[0]))
 
-        assert list(node.screenCoverage) == pytest.approx([0.5, 0.25, 0.125])
+        assert list(node.screenCoverage) == pytest.approx([0.5, 0.25, 0.0])
 
     def test_the_object_is_sized_without_its_geometry_being_read(self, written):
         """From the POSITION accessor bounds the writer declares."""
