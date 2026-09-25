@@ -270,27 +270,27 @@ def road_character(plan: Any, height_fn: HeightFn, design_speed: float,
 
     Four things come out, and each is derived:
 
-    **How fast a stretch is for** is what its own corner allows
+    How fast a stretch is for - what its own corner allows
     (:func:`~OpenGLContext.scenegraph.road.corner_speed`), never more than
     ``design_speed`` and never less than a road is worth building. It is what
     rounds the crests off, and taking it from the corner is what stops a hairpin
     being handed the vertical curve of a two-hundred-an-hour straight -- a
     quarter of a kilometre of earthwork for a crest nobody meets at that speed.
 
-    **How steeply it may climb** is ``grade_limit``, raised towards
+    How steeply it may climb - ``grade_limit``, raised towards
     ``steep_grade`` where the land itself climbs harder than that over
     :data:`CLIMB_REACH`. A road held to a gentle grade across a hillside stands
     off it on an embankment for as far as the hillside lasts; allowed the
     hillside's own grade it climbs with it, which is a climb to drive rather
     than a viaduct to sit on.
 
-    **How much it is smoothed** follows the speed: ``smoothing`` metres of
+    How much it is smoothed - it follows the speed: ``smoothing`` metres of
     averaging where the road is for its full design speed, falling towards
     ``least_smoothing`` where it is slow. A bump taken at two hundred is a car
     in the air and has to go; the same bump at eighty is the road having some
     shape, and ironing it out costs the drive and buys nothing.
 
-    **How far the trees are cut back**, from the centreline, is what a driver
+    How far the trees are cut back - from the centreline, what a driver
     needs to see round the bend they are on. Sight round a bend of radius *r*
     past an obstruction ``clear`` to the side is about ``sqrt(8 * r * clear)``,
     so the offset that buys a stopping distance is ``distance**2 / (8 * r)`` --
@@ -301,13 +301,13 @@ def road_character(plan: Any, height_fn: HeightFn, design_speed: float,
     and capped at ``most_clearing``, past which the drive is past the trees
     rather than through them.
 
-    Where that lands is worth knowing: it is the corners **near the design
-    radius** that get opened out. A tighter one is taken slowly enough to see
+    It is the corners near the design
+    radius that get opened out. A tighter one is taken slowly enough to see
     round already, and a much wider one is straight enough. So a lap gets its
     clearings at the corners that are quick but not flat -- which are the ones a
     driver most needs to see the exit of.
 
-    **How much wider it is** is ``climbing_lane`` metres of extra carriageway on
+    How much wider it is - ``climbing_lane`` metres of extra carriageway on
     the sustained climbs -- ``lane_grade`` or more for ``lane_run`` metres --
     tapered in and out over ``lane_taper``. It is a real road's answer to a real
     problem: on a long climb what is slow is much slower than what is quick, and

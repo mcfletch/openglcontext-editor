@@ -72,7 +72,7 @@ PORTAL_SOIL = 1.5
 #: How far under the natural ground the road has to be before a bore's portal
 #: can open in it, in metres.
 #:
-#: **Measured to the top of the bore, not to the carriageway.** A bore is a
+#: Measured to the top of the bore, not to the carriageway. A bore is a
 #: tube with its crown the better part of eight metres over the road, so a
 #: portal placed where there are two metres of soil over the tarmac is a portal
 #: whose opening is buried: the road runs into a bank of hillside and the arch
@@ -294,17 +294,16 @@ def _close_gaps(kinds: np.ndarray, station: np.ndarray, departure: np.ndarray,
     wall across the road and is not how anything is built. The stretch goes to
     the structure before it, so the deck lands on the portal.
 
-    **Only a stretch that structure can carry.** A deck is the road standing
-    clear of the land and a bore is the road inside it, so ground on the wrong
+    Only a stretch that structure can carry is given to it. A deck is the road
+    standing clear of the land and a bore is the road inside it, so ground on the wrong
     side of the road is ground no structure spans: the terrain under a
     structure is left undisturbed, and a deck run through a cutting is a hill
     standing up through the carriageway. Level with the road is carried either
-    way, because that is where a deck lands and where a portal opens.
-
-    Measured on Beacon, where the ground stands 1.4 m over the road inside a
-    626 m bridge run and a car meets it at 117 km/h as a two-and-a-half metre
-    ramp across its own lane. Such a stretch stays the road it is, however
-    short it is, and the terrain is conformed to it as to any other road.
+    way, because that is where a deck lands and where a portal opens. Ground
+    on the wrong side of a stretch leaves it the road it is, however short,
+    and the terrain is conformed to it as to any other road; given to a deck,
+    ground a metre or so over the road inside a long bridge run is a ramp
+    across the lane at speed.
     """
     count = len(kinds)
     carries = {Op.BRIDGE: departure >= 0.0, Op.TUNNEL: departure <= 0.0}
