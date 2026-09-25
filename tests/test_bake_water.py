@@ -7,6 +7,7 @@ lake does not stop halfway across a tile.
 """
 import numpy as np
 import pytest
+from OpenGLContext.scenegraph.water import LAKE
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.layers import WaterLayer
@@ -75,7 +76,6 @@ class TestWhatItPutsThere:
     def test_and_lies_at_the_waterline(self):
         """Sits at it rather than being flat on it: a lake carries a swell, so
         what is level is the water, not each vertex of it."""
-        from OpenGLContext.scenegraph.water import LAKE
         heights = self._sheet(level=3.5).mesh.positions[:, 1]
         assert float(np.mean(heights)) == pytest.approx(3.5, abs=0.05)
         # Three trains cross, so the excursion is a small multiple of one

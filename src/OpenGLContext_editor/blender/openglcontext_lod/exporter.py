@@ -38,7 +38,7 @@ class MSFTLODExtension:
         self._refused: list[str] = []
 
     def gather_node_hook(self, gltf2_node: Any, blender_object: Any,
-                         export_settings: dict) -> None:
+                         export_settings: dict) -> None:  # noqa: ARG002 glTF exporter hook signature
         """Note whether this object is a level of something."""
         if blender_object is None or not hasattr(blender_object, 'get'):
             return
@@ -52,7 +52,7 @@ class MSFTLODExtension:
             self._levels[id(gltf2_node)] = level
 
     def gather_material_hook(self, material: Any, blender_material: Any,
-                             export_settings: dict) -> None:
+                             export_settings: dict) -> None:  # noqa: ARG002 glTF exporter hook signature
         """Carry an octahedral impostor's own numbers onto its material.
 
         A card that shows one of many baked views has to say how many there

@@ -20,6 +20,12 @@ import sys
 import time
 
 import numpy as np
+from OpenGLContext.loaders.gltf import scene as gltfscene
+from OpenGLContext.testing.glcontext import hidden_window
+from PIL import Image
+
+from OpenGLContext_editor.meshlod import build_chain, measure_chain
+from OpenGLContext_editor.meshlod.quality import LODProbe
 
 
 def load(path):
@@ -28,7 +34,6 @@ def load(path):
         held = np.load(path)
         attributes = {name: held[name] for name in held.files if name != 'INDICES'}
         return attributes, held['INDICES']
-    from OpenGLContext.loaders.gltf import scene as gltfscene
 
     loaded = gltfscene.load(path)
     raise SystemExit('give a .npz of arrays; %r loaded as %r' % (path, type(loaded)))
@@ -36,7 +41,6 @@ def load(path):
 
 def contact_sheet(images, path, columns=None):
     """Tile renders into one picture so the levels can be compared by eye."""
-    from PIL import Image
 
     columns = columns or len(images[0])
     size = images[0][0].shape[0]
@@ -59,11 +63,6 @@ def main(argv=None):
     parser.add_argument('--sheet', default=None, help='write a contact sheet here')
     parser.add_argument('--rotation', type=float, default=25.0)
     args = parser.parse_args(argv)
-
-    from OpenGLContext.testing.glcontext import hidden_window
-
-    from OpenGLContext_editor.meshlod import build_chain, measure_chain
-    from OpenGLContext_editor.meshlod.quality import LODProbe
 
     attributes, indices = load(args.model)
     triangles = len(np.asarray(indices).reshape(-1)) // 3

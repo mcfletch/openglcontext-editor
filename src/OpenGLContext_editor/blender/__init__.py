@@ -37,7 +37,13 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from collections.abc import Sequence
+
+try:
+    import tomllib
+except ImportError:                       # Python 3.10; tomli is the same reader
+    import tomli as tomllib  # type: ignore[no-redef]
 
 __all__ = [
     'ADDON',
@@ -149,10 +155,6 @@ def addon_version() -> str:
     is versioned as the thing Blender installs, and a zip named for a release
     of the toolkit around it would be naming the wrong thing.
     """
-    try:
-        import tomllib
-    except ImportError:                   # Python 3.10; tomli is the same reader
-        import tomli as tomllib  # type: ignore[no-redef]
     manifest = os.path.join(addon_directory(), 'blender_manifest.toml')
     with open(manifest, 'rb') as handle:
         return str(tomllib.load(handle)['version'])
@@ -170,8 +172,6 @@ def package(into: str | None = None) -> str:
     The zip holds the add-on directory at its root, which is the shape both
     Blender's legacy installer and its extension installer read.
     """
-    import zipfile
-
     into = os.path.abspath(into or os.getcwd())
     os.makedirs(into, exist_ok=True)
     path = os.path.join(into, '%s-%s.zip' % (ADDON, addon_version()))

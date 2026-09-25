@@ -55,7 +55,7 @@ def _through(held, indices, which, weights, leaning):
     The same frame the renderer builds, so this reads the map the way the thing
     that draws it will.
     """
-    frame = rewrap._frame_at(held, np.asarray(indices).reshape(-1, 3), which, weights)
+    frame = rewrap._frame_at(held, np.asarray(indices).reshape(-1, 3), which, weights)  # noqa: SLF001 white-box test of the helper
     return np.einsum('irk,ir->ik', frame, np.atleast_2d(leaning))
 
 
@@ -292,7 +292,7 @@ class TestTheRasterIsTheOneThePerFaceWalkGives:
             columns, rows = np.meshgrid(np.arange(low[face][0], high[face][0]),
                                         np.arange(low[face][1], high[face][1]))
             pixels = np.stack([columns.ravel(), rows.ravel()], axis=1).astype('d')
-            weights = rewrap._barycentric(pixels, corner_uv[face])
+            weights = rewrap._barycentric(pixels, corner_uv[face])  # noqa: SLF001 white-box test of the helper
             if weights is None:
                 continue
             slack = 0.5 / max(np.ptp(corner_uv[face], axis=0).max(), 1e-12)
@@ -306,7 +306,7 @@ class TestTheRasterIsTheOneThePerFaceWalkGives:
         laid = rewrap.Unwrapped(positions=rng.random((60, 3)).astype('f4'),
                                 indices=rng.integers(0, 60, 90).astype(np.uint32),
                                 uv=uv.astype('f4'), source=np.arange(60), charts=1)
-        spots, _at, whose, _within = rewrap._rasterise(laid, 32)
+        spots, _at, whose, _within = rewrap._rasterise(laid, 32)  # noqa: SLF001 white-box test of the helper
         found = {(int(face), int(x), int(y))
                  for face, (x, y) in zip(whose, spots, strict=True)}
         assert found == self._one_face_at_a_time(laid, 32)

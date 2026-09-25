@@ -67,8 +67,10 @@ def arguments(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     _bootstrap()
-    import bpy
-    from openglcontext_lod import content, gallery, scene
+    # bpy exists only inside Blender, and the add-on is importable only once
+    # _bootstrap() has put it on the path.
+    import bpy  # noqa: PLC0415 Blender only
+    from openglcontext_lod import content, gallery, scene  # noqa: PLC0415 after _bootstrap
 
     if argv is None:
         argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []

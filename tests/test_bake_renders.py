@@ -18,11 +18,10 @@ import sys
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from OpenGLContext_editor.bake.driver import bake_world
 from OpenGLContext_editor.world.procedural import ProceduralWorld
-
-pytest.importorskip('PIL')
 
 
 def _viewer():
@@ -53,7 +52,6 @@ DEPTH = 2
 @pytest.fixture(scope='module')
 def rendered(tmp_path_factory):
     """Bake a world, render one frame of it from inside, return the pixels."""
-    from PIL import Image
     directory = tmp_path_factory.mktemp('rendered')
     # `forest='tiles'` grows the trees from generated conifer meshes
     # rather than from the demo's tree files, so what is rendered here is

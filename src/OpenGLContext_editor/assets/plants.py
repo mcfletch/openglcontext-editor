@@ -39,12 +39,24 @@ import io
 import os
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
+from opengl_decimate import SimplifyOptions, collapse_sequence
+from OpenGLContext.loaders.gltf import load_gltf, parse_gltf
+from OpenGLContext.loaders.gltf.animation import compute_world_matrices
+from OpenGLContext.loaders.gltf.writer import (
+    EncodedImage,
+    GLTFWriter,
+    SceneNode,
+)
+from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
+from PIL import Image
+
+from OpenGLContext_editor.assets.card import bake_card
 
 __all__ = ['PlantSource', 'Variant', 'bake', 'cutout', 'flatten',
            'replace_name', 'NEAR_TRIANGLES', 'FAR_TRIANGLES']
@@ -122,8 +134,6 @@ def flatten(path: str) -> list[Variant]:
     format allows is read as the engine draws it, and every buffer and image
     the document names is resolved under the file's own directory.
     """
-    from OpenGLContext.loaders.gltf import load_gltf, parse_gltf
-    from OpenGLContext.loaders.gltf.animation import compute_world_matrices
 
     document = parse_gltf(path)
     scene = load_gltf(document=document)
@@ -194,7 +204,6 @@ def _variant(meshes: Sequence[PBRMesh], world: np.ndarray,
 
 def replace_name(variant: Variant, name: str) -> Variant:
     """``variant`` under another name, for a caller assembling its own set."""
-    from dataclasses import replace
     return replace(variant, name=name)
 
 
@@ -205,7 +214,6 @@ def cutout(diffuse: str, mask: str | None) -> Any:
     A mask published at another size is resampled to the colour's, so the two
     always agree about where a texel is.
     """
-    from PIL import Image
     colour = Image.open(diffuse).convert('RGB')
     if mask is None:
         alpha = Image.new('L', colour.size, 255)
@@ -224,7 +232,6 @@ def _rungs(variant: Variant,
     contractions in order and every count is a prefix of that record, so the
     second rung costs nothing the first has not already paid for.
     """
-    from opengl_decimate import SimplifyOptions, collapse_sequence
     attributes = {'POSITION': variant.positions, 'NORMAL': variant.normals,
                   'TEXCOORD_0': variant.uvs}
     smallest = min(targets)
@@ -278,12 +285,6 @@ def bake(source: PlantSource, directory: str,
     plant there is -- the *tallest* tufts of a grass are its leggy seed stalks,
     and a card is the one thing that cannot show those.
     """
-    from OpenGLContext.loaders.gltf.writer import (
-        EncodedImage,
-        GLTFWriter,
-        SceneNode,
-    )
-    from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 
     os.makedirs(directory, exist_ok=True)
     found = list(variants) if variants is not None else flatten(source.gltf)
@@ -332,7 +333,6 @@ def bake(source: PlantSource, directory: str,
             # The card is the geometry rendered, so how wide it came out is how
             # wide the plant is: the figure the billboard node needs for its
             # quad.
-            from OpenGLContext_editor.assets.card import bake_card
             width = bake_card(os.path.join(directory, model), variant.name,
                               texture, os.path.join(directory, named),
                               size=card_size)

@@ -14,6 +14,8 @@ from OpenGLContext.scenegraph.road import RoadProfile
 from OpenGLContext_editor.world.procedural import (
     CROWN_RADIUS,
     ROAD_CLEARANCE,
+    ROCK_CLEARANCE,
+    ROCK_RADIUS,
     ProceduralWorld,
 )
 from OpenGLContext_editor.world.road import RoadPath
@@ -36,7 +38,7 @@ class _World(ProceduralWorld):
         self._sink = sink
 
     def natural(self):
-        return lambda x, z: np.zeros(np.shape(np.asarray(x, 'd')))
+        return lambda x, _z: np.zeros(np.shape(np.asarray(x, 'd')))
 
     def circuit(self):
         if self._circuit is None:
@@ -54,7 +56,7 @@ def _kept(world, offsets):
     points = np.stack([np.asarray(offsets, 'd'),
                        np.zeros(len(offsets)),
                        np.zeros(len(offsets))], axis=-1)
-    return np.asarray(world._away_from_the_road(points))
+    return np.asarray(world._away_from_the_road(points))  # noqa: SLF001 white-box test of the helper
 
 
 class TestOverABore:
@@ -180,7 +182,6 @@ class TestTheClearingTakesEverything:
     ideas of where its road is."""
 
     def _world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=1024.0, seed=11, tree_density=0.02,
                                field_resolution=513, control_size=128)
 
@@ -210,10 +211,6 @@ class TestTheClearingTakesEverything:
     def test_and_each_keeps_its_own_room_outside_it(self) -> None:
         """A boulder is not a point: it is cleared by its own radius as well,
         or the clearing ends halfway through it."""
-        from OpenGLContext_editor.world.procedural import (
-            ROCK_CLEARANCE,
-            ROCK_RADIUS,
-        )
         world = self._world()
         at = np.asarray([one.position for one in world.prop_layer().props],
                         dtype='d')
@@ -221,6 +218,5 @@ class TestTheClearingTakesEverything:
             world, at, margin=ROCK_RADIUS[1] + ROCK_CLEARANCE).all())
 
     def test_a_world_with_no_road_clears_nothing(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         bare = ProceduralWorld(extent=512.0, road=False, tree_density=0.0)
         assert bool(bare.outside_the_clearing(np.zeros((4, 3))).all())

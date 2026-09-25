@@ -8,12 +8,14 @@ it lives in :mod:`scene`; these are the buttons.
 from __future__ import annotations
 
 import os
+from typing import ClassVar
 
 import bpy
 from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Operator, Panel
 
 from . import budget, msftlod, scene
+from . import content as content_module
 from . import gallery as layout
 
 __all__ = ['classes', 'register', 'unregister']
@@ -24,7 +26,7 @@ class OBJECT_OT_make_lod_chain(Operator):
 
     bl_idname = 'object.make_lod_chain'
     bl_label = 'Make LOD chain'
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options: ClassVar[set[str]] = {'REGISTER', 'UNDO'}
 
     levels: IntProperty(
         name='Levels', default=6, min=2, max=12,
@@ -89,7 +91,7 @@ class OBJECT_OT_check_lod_chains(Operator):
 
     bl_idname = 'object.check_lod_chains'
     bl_label = 'Check LOD chains'
-    bl_options = {'REGISTER'}
+    bl_options: ClassVar[set[str]] = {'REGISTER'}
 
     def execute(self, context):
         levels = []
@@ -119,20 +121,20 @@ class EXPORT_SCENE_OT_lod_glb(Operator):
 
     bl_idname = 'export_scene.lod_glb'
     bl_label = 'Export world (glTF + MSFT_lod)'
-    bl_options = {'REGISTER'}
+    bl_options: ClassVar[set[str]] = {'REGISTER'}
 
     filepath: StringProperty(subtype='FILE_PATH')
     filename_ext = '.glb'
     filter_glob: StringProperty(default='*.glb', options={'HIDDEN'})
 
-    def invoke(self, context, event):
+    def invoke(self, context, event):  # noqa: ARG002 Operator.invoke signature
         if not self.filepath:
             self.filepath = os.path.splitext(
                 bpy.data.filepath or 'world')[0] + '.glb'
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
-    def execute(self, context):
+    def execute(self, context):  # noqa: ARG002 Operator.execute signature
         scene.export(self.filepath)
         self.report({'INFO'}, 'wrote %s' % (self.filepath,))
         return {'FINISHED'}
@@ -143,7 +145,7 @@ class SCENE_OT_build_bust_gallery(Operator):
 
     bl_idname = 'scene.build_bust_gallery'
     bl_label = 'Build the bust gallery'
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options: ClassVar[set[str]] = {'REGISTER', 'UNDO'}
 
     content: StringProperty(
         name='Content', subtype='DIR_PATH',
@@ -151,9 +153,7 @@ class SCENE_OT_build_bust_gallery(Operator):
     )
     bays: IntProperty(name='Bays', default=30, min=1, max=200)
 
-    def execute(self, context):
-        from . import content as content_module
-
+    def execute(self, context):  # noqa: ARG002 Operator.execute signature
         if not self.content or not os.path.isdir(self.content):
             self.report({'ERROR'}, 'name the directory the content is in')
             return {'CANCELLED'}
@@ -199,12 +199,12 @@ class VIEW3D_PT_lod(Panel):
                   % ('%.3f' % coverage if coverage is not None else 'halving'))
 
 
-def _menu(self, context):
+def _menu(self, context):  # noqa: ARG001 Blender menu draw callback signature
     self.layout.operator(EXPORT_SCENE_OT_lod_glb.bl_idname,
                          text='glTF 2.0 with MSFT_lod (.glb)')
 
 
-def _object_menu(self, context):
+def _object_menu(self, context):  # noqa: ARG001 Blender menu draw callback signature
     self.layout.separator()
     self.layout.operator(OBJECT_OT_make_lod_chain.bl_idname)
 

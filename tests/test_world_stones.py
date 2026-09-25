@@ -6,10 +6,13 @@ it. The table a game stands up travels in the tileset beside the boulders'.
 """
 import numpy as np
 import pytest
+from omi_physics.world import PhysicsWorld
+from OpenGLContext.physics.props import PropColliders
+from OpenGLContext.scenegraph.props import props_from_table
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.stones import StoneLayer
-from OpenGLContext_editor.world.procedural import ProceduralWorld
+from OpenGLContext_editor.world.procedural import STONE_SHAPES, ProceduralWorld
 
 EXTENT = 512.0
 
@@ -91,7 +94,6 @@ class TestTheLayerItBecomes:
         assert layer.content(tile, error=1.0) != []
 
     def test_the_stone_is_cut_from_a_handful_of_shapes(self) -> None:
-        from OpenGLContext_editor.world.procedural import STONE_SHAPES
         layer = _world(road=False).stone_layer()
         assert len(layer.prototypes) == STONE_SHAPES
         assert len(layer.kinds()) == STONE_SHAPES
@@ -105,7 +107,6 @@ class TestStandingOnOne:
         return _world(road=False, ground='tiles').stone_layer()
 
     def test_every_stone_travels_for_a_game_to_stand_up(self) -> None:
-        from OpenGLContext.scenegraph.props import props_from_table
         layer = self._layer()
         record = layer.metadata()['stones']
         assert record['count'] == len(layer.stones)
@@ -127,9 +128,6 @@ class TestStandingOnOne:
     def test_and_a_body_stands_where_the_stone_is_drawn(self) -> None:
         """Built through the engine's own collider, so what the game does with
         the table is what is asserted rather than what the table says."""
-        from omi_physics.world import PhysicsWorld
-        from OpenGLContext.physics.props import PropColliders
-        from OpenGLContext.scenegraph.props import props_from_table
         layer = self._layer()
         stones = props_from_table(layer.assets()['stones.npz'])
         one = min(stones, key=lambda s: float(np.hypot(s.position[0],

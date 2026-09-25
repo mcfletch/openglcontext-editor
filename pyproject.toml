@@ -143,6 +143,11 @@ select = [
     "S102", "S202", "S301", "S307", "S310",  # no exec, unchecked tar extraction, pickle, eval or unchecked URL scheme
     "PGH003", "PGH004",  # a type: ignore or noqa names the codes it silences
     "PLE0604", "PLE0605",  # __all__ is a list or tuple of strings
+    "RUF012",  # a mutable class attribute is declared ClassVar
+    "RUF100",  # every noqa silences something
+    "PLC0415",  # imports at module top; a deferred one says why on its line
+    "SLF001",  # no reaching into another object's private names
+    "ARG",  # no unused arguments; a signature fixed by a protocol says so
 ]
 ignore = [
     "E501",   # line too long -- kept readable by hand, not hard-wrapped (as in the engine)

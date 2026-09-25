@@ -16,11 +16,11 @@ from OpenGLContext_editor.world.scatter import (
 REGION = BoundingBox((-50, 0, -50), (50, 0, 50))     # 100 x 100 m
 
 
-def _flat(x, z):
+def _flat(x, _z):
     return np.zeros_like(np.asarray(x, 'd'))
 
 
-def _ramp(x, z):
+def _ramp(x, _z):
     """Ground rising one metre per metre eastward: a 45 degree slope."""
     return np.asarray(x, 'd')
 

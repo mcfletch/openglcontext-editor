@@ -12,9 +12,11 @@ is checked against the hosts Poly Haven publishes from before a socket is
 opened.
 """
 
+import json
 import os
 
 import pytest
+from OpenGLContext.loaders import resolver
 
 from OpenGLContext_editor.assets import polyhaven
 
@@ -30,7 +32,6 @@ def _library(include=None):
 
 def _transport(published, payload=b'bytes'):
     def get(url):
-        import json
         if '/files/' in url:
             return json.dumps(published).encode()
         if '/info/' in url:
@@ -84,44 +85,43 @@ class TestWhereBytesMayBeFetchedFrom:
     def test_a_polyhaven_url_is_fetched(self, monkeypatch):
         opened = []
         monkeypatch.setattr(polyhaven, '_open_capped',
-                            lambda url, cap: opened.append(url) or b'ok')
+                            lambda url, _cap: opened.append(url) or b'ok')
 
-        assert polyhaven._get('https://dl.polyhaven.org/file/x.gltf') == b'ok'
+        assert polyhaven._get('https://dl.polyhaven.org/file/x.gltf') == b'ok'  # noqa: SLF001 white-box test of the helper
         assert opened == ['https://dl.polyhaven.org/file/x.gltf']
 
     def test_the_library_itself_is_fetched(self, monkeypatch):
-        monkeypatch.setattr(polyhaven, '_open_capped', lambda url, cap: b'{}')
+        monkeypatch.setattr(polyhaven, '_open_capped', lambda _url, _cap: b'{}')
 
-        assert polyhaven._get('https://api.polyhaven.com/files/fern_02') == b'{}'
+        assert polyhaven._get('https://api.polyhaven.com/files/fern_02') == b'{}'  # noqa: SLF001 white-box test of the helper
 
     def test_another_host_is_refused(self, monkeypatch):
         opened = []
         monkeypatch.setattr(polyhaven, '_open_capped',
-                            lambda url, cap: opened.append(url) or b'')
+                            lambda url, _cap: opened.append(url) or b'')
 
         with pytest.raises(IOError):
-            polyhaven._get('https://evil.example/payload')
+            polyhaven._get('https://evil.example/payload')  # noqa: SLF001 white-box test of the helper
 
         assert opened == []
 
     def test_a_file_url_is_refused(self):
         with pytest.raises(IOError):
-            polyhaven._get('file:///etc/passwd')
+            polyhaven._get('file:///etc/passwd')  # noqa: SLF001 white-box test of the helper
 
 
 class TestWhereARedirectMayGo:
     def test_every_hop_is_held_to_the_same_hosts(self, monkeypatch):
         """A URL on an allowed host may answer with a redirect to any other."""
-        from OpenGLContext.loaders import resolver
         opened = []
 
-        def open_url(url, redirects, timeout=30, agent=None):
+        def open_url(_url, redirects, **_options):
             opened.append(redirects)
             raise OSError('no network here')
         monkeypatch.setattr(resolver, 'open_url', open_url)
 
         with pytest.raises(IOError):
-            polyhaven._get('https://dl.polyhaven.org/file/x.gltf')
+            polyhaven._get('https://dl.polyhaven.org/file/x.gltf')  # noqa: SLF001 white-box test of the helper
 
         policy, = opened
         assert policy.refusal('https://dl.polyhaven.org/file/x.gltf',
@@ -135,8 +135,8 @@ class TestHowMuchMayArrive:
         """A download is read into memory before it is written."""
         capped = []
         monkeypatch.setattr(polyhaven, '_open_capped',
-                            lambda url, cap: capped.append(cap) or b'')
+                            lambda _url, cap: capped.append(cap) or b'')
 
-        polyhaven._get('https://dl.polyhaven.org/file/x.bin')
+        polyhaven._get('https://dl.polyhaven.org/file/x.bin')  # noqa: SLF001 white-box test of the helper
 
         assert capped == [polyhaven.MAX_DOWNLOAD_BYTES]

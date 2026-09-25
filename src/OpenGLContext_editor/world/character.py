@@ -217,14 +217,14 @@ def corner_radii(plan: Any, design_radius: float,
     # with no hairpin on them at all, which is the one thing the mix is for.
     generator = np.random.default_rng(seed)
     share = weights / weights.sum() * len(plan)
-    counts = _whole_shares(share, generator)
+    counts = _whole_shares(share)
     drawn = np.repeat(multiples, counts)
     generator.shuffle(drawn)
     found: np.ndarray = design_radius * (1.0 + reach * (drawn - 1.0))
     return np.maximum(found, float(tightest))
 
 
-def _whole_shares(share: np.ndarray, generator: Any) -> np.ndarray:
+def _whole_shares(share: np.ndarray) -> np.ndarray:
     """Turn fractional shares of a lap's corners into whole numbers of them.
 
     The whole part of each share, and then the remaining corners handed out to

@@ -17,6 +17,11 @@ import struct
 
 import numpy as np
 import pytest
+from OpenGLContext.loaders import gltf
+from OpenGLContext.loaders.gltf import environment_sky as reader
+from OpenGLContext.loaders.gltf.loader import parse_gltf
+from OpenGLContext.loaders.resolver import Resolver
+from OpenGLContext.scenegraph.hdrbackground import HDRBackground
 
 from OpenGLContext_editor.blender.openglcontext_lod import gallery, sky
 
@@ -236,9 +241,6 @@ class TestWhatTheEngineMakesOfIt:
     """The point of the whole exercise: the loader has to see a sky."""
 
     def test_the_loader_builds_a_sky_from_it(self, tmp_path):
-        from OpenGLContext.loaders import gltf
-        from OpenGLContext.scenegraph.hdrbackground import HDRBackground
-
         written = sky.with_sky(_glb_with_nothing_in_it(),
                                sky.panorama(width=64, height=32, seed=1))
         path = tmp_path / 'sky.glb'
@@ -251,9 +253,6 @@ class TestWhatTheEngineMakesOfIt:
 
     def test_the_panorama_survives_as_pixels(self, tmp_path):
         """Not merely that a background exists: that it is the sky we wrote."""
-        from OpenGLContext.loaders.gltf import environment_sky as reader
-        from OpenGLContext.loaders.gltf.loader import parse_gltf
-        from OpenGLContext.loaders.resolver import Resolver
 
         written = sky.with_sky(_glb_with_nothing_in_it(),
                                sky.panorama(width=64, height=32, seed=1))

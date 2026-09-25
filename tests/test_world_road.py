@@ -5,20 +5,35 @@ about it -- where the line ends up after it is settled onto the ground, how the
 terrain is reshaped to meet it, and what each tile gets written.
 """
 
+import json
+import os
 from itertools import pairwise
 
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.road import RoadProfile
+from OpenGLContext.loaders import gltf
+from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
+from OpenGLContext.scenegraph.road import RoadProfile, tarmac_material
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.bake.driver import bake_world
+from OpenGLContext_editor.world.procedural import (
+    CIRCUIT_MAX_GRADE,
+    CIRCUIT_STEEP_GRADE,
+    ProceduralWorld,
+)
 from OpenGLContext_editor.world.road import (
+    CREST_WEIGHT_LOSS,
+    FORMATION_DEPTH,
+    GRAVITY,
     RoadLayer,
     RoadPath,
     conform_terrain,
+    conform_terrain_at,
     follow_terrain,
 )
 from OpenGLContext_editor.world.road import curvature_limit as _curvature_limit
+from OpenGLContext_editor.world.structures import Op, choose_structures
 
 
 def _bumpy(x, z):
@@ -27,7 +42,7 @@ def _bumpy(x, z):
     return 0.05 * x + 3.0 * np.sin(z * 0.5) + 8.0 * np.sin(x * 0.01)
 
 
-def _flat(x, z):
+def _flat(x, _z):
     return np.zeros_like(np.asarray(x, 'd'))
 
 
@@ -119,7 +134,7 @@ class TestTheAlignment:
         assert np.allclose(line[:, 1], 2.5)
 
     def test_a_grade_limit_is_honoured(self) -> None:
-        def cliff(x, z):
+        def cliff(_x, z):
             return np.where(np.asarray(z, 'd') < -100.0, 100.0, 0.0)
 
         line = follow_terrain([(0, 0), (0, -200)], cliff, spacing=5.0, smoothing=0.0,
@@ -130,7 +145,7 @@ class TestTheAlignment:
 
     def test_a_grade_limit_smooths_both_approaches(self) -> None:
         """A peak too steep to climb is also too steep to come down."""
-        def hill(x, z):
+        def hill(_x, z):
             return np.where(np.abs(np.asarray(z, 'd') + 100.0) < 10.0, 50.0, 0.0)
 
         line = follow_terrain([(0, 0), (0, -200)], hill, spacing=5.0, smoothing=0.0,
@@ -231,7 +246,6 @@ class TestTheRoadAsALayer:
         assert self._layer().bounds().minimum[2] <= -400
 
     def test_the_material_can_be_supplied(self) -> None:
-        from OpenGLContext.scenegraph.road import tarmac_material
         wet = tarmac_material(wetness=0.8)
         region = BoundingBox((-50, -50, -300), (50, 50, -100))
         node = self._layer(material=wet).content(region, error=0.0)[0]
@@ -300,7 +314,6 @@ class TestCarvingForACoarseTile:
         assert float(ground(np.array([500.0]), np.array([-100.0]))[0]) == 0.0
 
     def test_the_factory_gives_a_function_per_spacing(self) -> None:
-        from OpenGLContext_editor.world.road import conform_terrain_at
         at = conform_terrain_at(_flat, self._path())
         x, z = np.array([30.0]), np.array([-100.0])
         assert float(at(20.0)(x, z)[0]) < float(at(0.0)(x, z)[0])
@@ -354,9 +367,6 @@ class TestTheGroundNeverCoversTheRoad:
     @pytest.mark.parametrize('spacing', [1.0, 2.0, 4.0, 8.0, 16.0, 32.0])
     def test_the_meshed_ground_stays_below_the_carriageway(self, spacing,
                                                            mesh_surface) -> None:
-        from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
-
-        from OpenGLContext_editor.world.road import conform_terrain_at
         hills, path = self._road_over_hills()
         ground = conform_terrain_at(hills, path)(spacing)
         resolution = 65
@@ -398,7 +408,6 @@ class TestTheHillABoreRunsUnder:
 
     def _through_a_hill(self):
         """A level road with a hill across the middle of it, bored through."""
-        from OpenGLContext_editor.world.structures import Op, choose_structures
 
         def hill(x, z):
             z = np.asarray(z, 'd')
@@ -512,7 +521,7 @@ class TestTilesDivideTheRoadBetweenThem:
 class TestCrossingLowGround:
     """A road does not run under water: it rides over on fill."""
 
-    def _valley(self, x, z):
+    def _valley(self, _x, z):
         """Ground that drops into a flooded basin in the middle."""
         z = np.asarray(z, 'd')
         return np.where(np.abs(z + 100.0) < 40.0, -12.0, 20.0)
@@ -551,12 +560,6 @@ class TestTheWholeBakedWorldKeepsItsRoad:
     """
 
     def test_no_tile_covers_the_road(self, tmp_path, mesh_surface) -> None:
-        import numpy as np
-        from OpenGLContext.loaders import gltf
-
-        from OpenGLContext_editor.bake.driver import bake_world
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
-
         world = ProceduralWorld(extent=1024.0, resolution=17, seed=11,
                                 forest='tiles')
         result = bake_world(world.layers(), str(tmp_path), depth=2)
@@ -583,8 +586,6 @@ class TestTheWholeBakedWorldKeepsItsRoad:
 
 
 def _every_tile(tileset_path):
-    import json
-    import os
     with open(tileset_path) as handle:
         document = json.load(handle)
     base = os.path.dirname(tileset_path)
@@ -807,7 +808,6 @@ class TestTheShippedCircuitIsDrivable:
     """
 
     def _world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=2048.0, resolution=17, seed=11)
 
     def _circuit(self):
@@ -826,7 +826,6 @@ class TestTheShippedCircuitIsDrivable:
         to one speed from end to end any more, and a crest inside a hairpin
         rounded for the speed of the straight before it is a quarter of a
         kilometre of earthwork for a crest nobody meets at that speed."""
-        from OpenGLContext_editor.world.road import CREST_WEIGHT_LOSS, GRAVITY
         world = self._world()
         _grade, curvature = self._profile(world.circuit().points)
         # ``_profile`` measures the bend at each point from the two steps
@@ -840,10 +839,6 @@ class TestTheShippedCircuitIsDrivable:
         """The ordinary limit, or the steeper one a hillside earns: a road held
         to a gentle grade across a mountainside stands off it on an embankment
         for as far as the mountainside lasts."""
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_MAX_GRADE,
-            CIRCUIT_STEEP_GRADE,
-        )
         world = self._world()
         grade, _curvature = self._profile(world.circuit().points)
         allowed = world.circuit_character().grade_limit[:len(grade)]
@@ -978,7 +973,6 @@ class TestTheGroundSitsUnderTheRoadNotInIt:
             == pytest.approx(0.0)
 
     def test_it_is_shallow_enough_not_to_be_a_kerb(self) -> None:
-        from OpenGLContext_editor.world.road import FORMATION_DEPTH
         assert 0.0 < FORMATION_DEPTH <= 0.25
 
 
@@ -995,7 +989,6 @@ class TestAWorldCanBeGivenItsOwnRoute:
                         axis=-1)
 
     def test_the_route_it_is_given_is_the_one_it_builds(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=2048.0, resolution=17,
                                 route=self._plan(radius=400.0))
         circuit = world.circuit()
@@ -1004,7 +997,6 @@ class TestAWorldCanBeGivenItsOwnRoute:
         assert radius.min() > 250.0
 
     def test_a_different_route_makes_a_different_circuit(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         small = ProceduralWorld(extent=2048.0, resolution=17,
                                 route=self._plan(radius=200.0)).circuit()
         large = ProceduralWorld(extent=2048.0, resolution=17,
@@ -1012,16 +1004,11 @@ class TestAWorldCanBeGivenItsOwnRoute:
         assert large.length > small.length * 2.0
 
     def test_without_one_it_draws_its_own(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         assert ProceduralWorld(extent=2048.0, resolution=17).circuit().length > 0
 
     def test_the_route_is_still_settled_onto_the_ground(self) -> None:
         """A drawn route is a plan, not an alignment: it arrives with no
         heights on it and leaves with the grade limit honoured."""
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_MAX_GRADE,
-            ProceduralWorld,
-        )
         world = ProceduralWorld(extent=2048.0, resolution=17,
                                 route=self._plan(radius=500.0))
         line = world.circuit().points
@@ -1032,7 +1019,6 @@ class TestAWorldCanBeGivenItsOwnRoute:
         assert allowed.min() == pytest.approx(CIRCUIT_MAX_GRADE)
 
     def test_an_open_route_is_a_road_rather_than_a_circuit(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         plan = np.stack([np.linspace(-800.0, 800.0, 40), np.zeros(40)], axis=-1)
         world = ProceduralWorld(extent=2048.0, resolution=17, route=plan,
                                 closed=False)
@@ -1107,7 +1093,6 @@ class TestTheLampsInTheBores:
     is in comes and goes."""
 
     def _layer(self, **named):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=2048.0, seed=11, **named).circuit_layer()
 
     def test_a_world_with_bores_carries_lamps(self):
@@ -1117,16 +1102,12 @@ class TestTheLampsInTheBores:
         assert all(len(one) == 3 for one in self._layer().luminaires())
 
     def test_they_are_spaced_along_the_bores(self):
-        import numpy as np
         lamps = np.asarray(self._layer().luminaires(), dtype='d')
         gaps = np.linalg.norm(np.diff(lamps, axis=0), axis=1)
         # Consecutive lamps in one bore; the jump between bores is much larger.
         assert float(np.median(gaps[gaps < 100.0])) == pytest.approx(25.0, abs=6.0)
 
     def test_they_stand_above_the_road_they_light(self):
-        import numpy as np
-
-        from OpenGLContext_editor.world.structures import Op
         layer = self._layer()
         lamps = np.asarray(layer.luminaires(), dtype='d')
         inside = layer.path.points[layer.path.ops == Op.TUNNEL]

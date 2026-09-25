@@ -13,7 +13,7 @@ when it is opened tomorrow.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
 import numpy as np
@@ -109,7 +109,6 @@ class PresetBase(HeightBase):
 
     def profile(self) -> TerrainProfile:
         """The terrain profile, with this base's seed on it."""
-        from dataclasses import replace
         return replace(self.preset().profile, seed=int(self.seed))
 
     def sample(self, x: Any, z: Any) -> np.ndarray:

@@ -324,7 +324,7 @@ def _bends(line: np.ndarray, stations: np.ndarray, design_speed: float,
                               float(radius[over[0]:over[1]].min()),
                               bank=float(np.abs(
                                   bank[over[0]:over[1]]).min()))))
-    return _linked(found, stations)
+    return _linked(found)
 
 
 def _hands(turn: np.ndarray, stations: np.ndarray) -> list[tuple[int, float]]:
@@ -353,8 +353,7 @@ def _closed_up(flags: np.ndarray, stations: np.ndarray,
     return found
 
 
-def _linked(found: list[tuple[float, str, int]],
-            stations: np.ndarray) -> list[tuple[float, str, int]]:
+def _linked(found: list[tuple[float, str, int]]) -> list[tuple[float, str, int]]:
     """Bends close enough together to be one warning, merged into one.
 
     Two turning *opposite* ways within :data:`LINKED` metres are a double bend,

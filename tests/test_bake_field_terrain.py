@@ -11,14 +11,27 @@ geometry at all, and instead writes the landscape beside the tileset as a
 height image and a control map, with the numbers to read them back in the
 tileset's ``extras``.
 """
+import io
 import json
+import os
 
 import numpy as np
 import pytest
+from OpenGLContext.loaders.tiles3d.procedural import terrain_height
 from OpenGLContext.scenegraph.terrain import HeightField, LayerRule
+from PIL import Image
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.bake.driver import bake_world
 from OpenGLContext_editor.bake.field import FieldTerrainLayer
+from OpenGLContext_editor.world.procedural import ProceduralWorld
+from OpenGLContext_editor.world.road import (
+    RoadPath,
+    conform_terrain,
+    conform_terrain_at,
+    follow_terrain,
+)
+from OpenGLContext_editor.world.structures import Op
 
 EXTENT = 1024.0
 
@@ -54,24 +67,15 @@ class TestItWritesTheLandscapeBesideTheTileset:
         assert layer.metadata()['terrain']['control'] in layer.assets()
 
     def test_the_images_are_real_files(self) -> None:
-        import io
-
-        from PIL import Image
         for raw in _layer().assets().values():
             assert Image.open(io.BytesIO(raw)).size[0] > 1
 
     def test_the_height_image_is_sixteen_bit(self) -> None:
-        import io
-
-        from PIL import Image
         layer = _layer()
         raw = layer.assets()[layer.metadata()['terrain']['height']]
         assert Image.open(io.BytesIO(raw)).mode in ('I', 'I;16', 'I;16B')
 
     def test_the_control_map_is_rgba(self) -> None:
-        import io
-
-        from PIL import Image
         layer = _layer()
         raw = layer.assets()[layer.metadata()['terrain']['control']]
         assert Image.open(io.BytesIO(raw)).mode == 'RGBA'
@@ -145,7 +149,6 @@ class TestTheLandscapeItself:
 
 class TestPaintingTheRoadIn:
     def _straight_road(self):
-        from OpenGLContext_editor.world.road import RoadPath
         x = np.linspace(-400.0, 400.0, 81)
         line = np.stack([x, _hilly(x, np.zeros_like(x)), np.zeros_like(x)],
                         axis=-1)
@@ -153,9 +156,7 @@ class TestPaintingTheRoadIn:
 
     def test_the_corridor_takes_its_own_layer(self) -> None:
         """Gravel and bare earth beside a road, not grass up to the tarmac."""
-        import io
 
-        from PIL import Image
         layer = _layer(layers=['grass', 'forest_floor', 'rock', 'dirt'],
                        rules=[LayerRule(), LayerRule(), LayerRule(),
                               LayerRule()],
@@ -169,9 +170,6 @@ class TestPaintingTheRoadIn:
         assert on_road > away + 0.3
 
     def test_without_a_road_nothing_is_painted(self) -> None:
-        import io
-
-        from PIL import Image
         layer = _layer(layers=['grass', 'dirt'],
                        rules=[LayerRule(), LayerRule(slope=(9.0, 10.0))])
         raw = layer.assets()[layer.metadata()['terrain']['control']]
@@ -182,7 +180,6 @@ class TestPaintingTheRoadIn:
 class TestBakedIntoAWorld:
     @pytest.fixture(scope='class')
     def baked(self, tmp_path_factory):
-        from OpenGLContext_editor.bake.driver import bake_world
         directory = str(tmp_path_factory.mktemp('field'))
         layer = FieldTerrainLayer(height_fn=_hilly, extent=_footprint(),
                                   resolution=129)
@@ -191,7 +188,6 @@ class TestBakedIntoAWorld:
             return result, json.load(handle)
 
     def test_the_images_land_beside_the_tileset(self, baked) -> None:
-        import os
         result, document = baked
         terrain = document['extras']['terrain']
         for key in ('height', 'control'):
@@ -219,14 +215,6 @@ class TestGroundThatHasToCarryARoad:
     and comes out buried in the hillside it was cut into."""
 
     def _world(self, **named):
-        from OpenGLContext.loaders.tiles3d.procedural import terrain_height
-
-        from OpenGLContext_editor.world.road import (
-            RoadPath,
-            conform_terrain,
-            conform_terrain_at,
-            follow_terrain,
-        )
         plan = np.stack([np.linspace(-450.0, 450.0, 40),
                          np.linspace(-300.0, 300.0, 40)], axis=-1)
         # Heavily smoothed, so the alignment ignores the hummocks and the
@@ -272,15 +260,12 @@ class TestGroundThatHasToCarryARoad:
 
         def watching(spacing):
             asked.append(spacing)
-            return lambda x, z: np.zeros(np.shape(x))
+            return lambda x, _z: np.zeros(np.shape(x))
         layer, _road = self._world(height_fn_at=watching, resolution=129)
         layer.field()
         assert asked == [pytest.approx(EXTENT / 128.0)]
 
     def test_the_road_still_paints_its_corridor(self) -> None:
-        import io
-
-        from PIL import Image
         layer, _road = self._world()
         raw = layer.assets()[layer.metadata()['terrain']['control']]
         pixels = np.asarray(Image.open(io.BytesIO(raw)).convert('RGBA'), 'd') / 255.0
@@ -289,16 +274,12 @@ class TestGroundThatHasToCarryARoad:
 
 class TestHowWideTheRoadsGroundIs:
     def _straight_road(self):
-        from OpenGLContext_editor.world.road import RoadPath
         x = np.linspace(-400.0, 400.0, 81)
         line = np.stack([x, np.zeros_like(x), np.zeros_like(x)], axis=-1)
         return RoadPath(line)
 
     def _across(self, **named):
-        import io
-
-        from PIL import Image
-        layer = _layer(height_fn=lambda x, z: np.zeros(np.shape(np.asarray(x))),
+        layer = _layer(height_fn=lambda x, _z: np.zeros(np.shape(np.asarray(x))),
                        layers=['grass', 'dirt'],
                        rules=[LayerRule(), LayerRule(weight=0.0)],
                        road=self._straight_road(), road_layer=1, **named)
@@ -333,7 +314,6 @@ class TestTheGroundOverABoreIsHillside:
 
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=2048.0, seed=11)
 
     @staticmethod
@@ -346,13 +326,12 @@ class TestTheGroundOverABoreIsHillside:
     def test_the_road_layer_is_not_painted_over_one(self, world) -> None:
         """The hillside over a bore is hillside: the rules make of it whatever
         they make of the land either side."""
-        from OpenGLContext_editor.world.structures import Op
         layer = world.field_terrain()
         circuit = world.circuit()
         bores = [(first, last) for kind, first, last in circuit.structure_runs()
                  if kind is Op.TUNNEL]
         assert bores, 'this world is meant to have a bore in it'
-        painted = dict(layer._painted(world.height_fn()))
+        painted = dict(layer._painted())  # noqa: SLF001 white-box test of the helper
         found = painted[layer.road_layer]
         stations = np.asarray(circuit.stations, dtype='d')
         line = np.asarray(circuit.points, dtype='d').reshape(-1, 3)
@@ -365,7 +344,7 @@ class TestTheGroundOverABoreIsHillside:
     def test_and_still_on_the_open_road(self, world) -> None:
         layer = world.field_terrain()
         circuit = world.circuit()
-        painted = dict(layer._painted(world.height_fn()))
+        painted = dict(layer._painted())  # noqa: SLF001 white-box test of the helper
         found = painted[layer.road_layer]
         line = np.asarray(circuit.points, dtype='d').reshape(-1, 3)
         on = np.nonzero(circuit.segment_on_ground)[0]

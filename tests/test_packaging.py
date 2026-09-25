@@ -9,6 +9,8 @@ the module version are the same number.
 import importlib.metadata
 import re
 
+import OpenGLContext
+
 import OpenGLContext_editor
 
 DISTRIBUTION = "OpenGLContext-editor"
@@ -36,6 +38,4 @@ def test_the_engine_is_a_declared_dependency() -> None:
 
 
 def test_the_engine_imports() -> None:
-    import OpenGLContext
-
     assert OpenGLContext.__version__

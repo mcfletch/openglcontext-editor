@@ -14,8 +14,27 @@ import math
 
 import numpy as np
 import pytest
+from OpenGLContext.loaders.tiles3d.procedural import WATER_LEVEL
 
-from OpenGLContext_editor.world.route import REACH, ease_route
+from OpenGLContext_editor.world.procedural import (
+    CIRCUIT_CORNERS,
+    CIRCUIT_DESIGN_SPEED,
+    CIRCUIT_SPACING,
+    ProceduralWorld,
+    circuit_plan,
+)
+from OpenGLContext_editor.world.road import follow_terrain
+from OpenGLContext_editor.world.route import (
+    REACH,
+    _neighbours,
+    _radius,
+    cornering_radius,
+    ease_route,
+    hold_corners,
+    hold_radius,
+    least_radius,
+)
+from OpenGLContext_editor.world.structures import Op, choose_structures
 
 
 def _hill(x, z):
@@ -30,7 +49,7 @@ def _hill(x, z):
     return 120.0 * np.exp(-((x / 300.0) ** 2 + ((z - 90.0) / 300.0) ** 2))
 
 
-def _slope(x, z):
+def _slope(x, _z):
     """Ground falling to the east, with no line of constant height but one."""
     return 0.12 * np.asarray(x, 'd')
 
@@ -87,7 +106,7 @@ class TestItFindsGroundTheRoadCanFollow:
 
     def test_ground_that_is_already_level_is_left_alone(self) -> None:
         drawn = _crossing()
-        eased = ease_route(drawn, lambda x, z: np.zeros(np.shape(np.asarray(x))))
+        eased = ease_route(drawn, lambda x, _z: np.zeros(np.shape(np.asarray(x))))
         assert np.abs(eased - drawn).max() < 1.0
 
     def test_it_keeps_the_route_it_was_given(self) -> None:
@@ -169,7 +188,6 @@ class TestOnTheShippedLandscape:
         the ground supports. A plan that already knows about the ground has
         nothing to be slid towards.
         """
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=4096.0)
         angle = np.linspace(0.0, 2.0 * math.pi, 360, endpoint=False)
         radius = 1.0 + 0.20 * np.sin(3 * angle + 3) + 0.09 * np.sin(5 * angle + 5)
@@ -184,10 +202,6 @@ class TestOnTheShippedLandscape:
         assert _climb(eased, ground) < 0.7 * _climb(drawn, ground)
 
     def test_most_of_the_lap_ends_up_on_the_ground(self, landscape) -> None:
-        from OpenGLContext.loaders.tiles3d.procedural import WATER_LEVEL
-
-        from OpenGLContext_editor.world.road import follow_terrain
-        from OpenGLContext_editor.world.structures import Op, choose_structures
         drawn, ground = landscape
         eased = ease_route(drawn, ground, reach=300.0, closed=True)
         line = follow_terrain(eased, ground, spacing=6.0, smoothing=60.0,
@@ -219,45 +233,37 @@ class TestCornersACarCanTake:
                          (-400.0, 60.0)])
 
     def test_a_tight_corner_is_opened_out(self) -> None:
-        from OpenGLContext_editor.world.route import hold_radius, least_radius
         drawn = self._hairpin()
         held = hold_radius(drawn, 150.0)
         assert least_radius(held) > least_radius(drawn)
 
     def test_it_is_opened_to_the_radius_it_was_given(self) -> None:
-        from OpenGLContext_editor.world.route import hold_radius, least_radius
         held = hold_radius(self._hairpin(), 120.0)
         assert least_radius(held) > 100.0
 
     def test_a_gentle_line_is_left_alone(self) -> None:
-        from OpenGLContext_editor.world.route import hold_radius
         drawn = _ring(radius=900.0)
         assert np.abs(hold_radius(drawn, 150.0, closed=True) - drawn).max() < 1.0
 
     def test_an_open_line_keeps_its_ends(self) -> None:
-        from OpenGLContext_editor.world.route import hold_radius
         drawn = self._hairpin()
         held = hold_radius(drawn, 200.0)
         assert np.allclose(held[0], drawn[0])
         assert np.allclose(held[-1], drawn[-1])
 
     def test_a_straight_line_has_no_corner_at_all(self) -> None:
-        from OpenGLContext_editor.world.route import least_radius
         assert not np.isfinite(least_radius(_crossing()))
 
     def test_the_radius_follows_the_speed_and_the_grip(self) -> None:
-        from OpenGLContext_editor.world.route import cornering_radius
         assert cornering_radius(42.0, grip=1.0) == pytest.approx(179.8, abs=1.0)
         assert cornering_radius(84.0) > 3.0 * cornering_radius(42.0)
 
     def test_a_road_with_no_speed_has_no_limit(self) -> None:
-        from OpenGLContext_editor.world.route import cornering_radius
         assert cornering_radius(0.0) == 0.0
 
 
 class TestEasingKeepsTheCornersDrivable:
     def test_an_eased_route_can_be_held_to_a_radius(self) -> None:
-        from OpenGLContext_editor.world.route import least_radius
         drawn = _ring()
         loose = ease_route(drawn, _rolling, closed=True)
         held = ease_route(drawn, _rolling, closed=True, minimum_radius=200.0)
@@ -285,16 +291,6 @@ class TestEasingKeepsTheCornersDrivable:
         :data:`~OpenGLContext_editor.world.character.TIGHTEST_CORNER` rather
         than the design radius. See ``tests/test_world_variation.py``.
         """
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED,
-            ProceduralWorld,
-        )
-        from OpenGLContext_editor.world.route import (
-            _neighbours,
-            _radius,
-            cornering_radius,
-            least_radius,
-        )
         world = ProceduralWorld(extent=4096.0, variety=0.0)
         plan = world.circuit().points[:, [0, 2]]
         # The corner the *world* is laid out to, which allows for the lean its
@@ -319,19 +315,11 @@ class TestACircuitHasStraightsOnIt:
 
     def _plan(self, **named):
         """The plan as drawn -- one point per corner."""
-        from OpenGLContext_editor.world.procedural import circuit_plan
         return circuit_plan(655.0, 512.0, **named)
 
     def _aligned(self, **named):
         """And the same plan with its corners rounded, which is what the road
         is built along."""
-        from OpenGLContext.scenegraph.road import cornering_radius
-
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED,
-            CIRCUIT_SPACING,
-        )
-        from OpenGLContext_editor.world.route import hold_corners
         return hold_corners(self._plan(**named),
                             minimum=cornering_radius(CIRCUIT_DESIGN_SPEED),
                             closed=True, spacing=CIRCUIT_SPACING)
@@ -373,12 +361,6 @@ class TestACircuitHasStraightsOnIt:
         to the radius the design speed asks for. So the corners are counted on
         the *aligned* plan, which is what the road gets built along.
         """
-        from OpenGLContext.scenegraph.road import cornering_radius
-
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_CORNERS,
-            CIRCUIT_DESIGN_SPEED,
-        )
         wanted = cornering_radius(CIRCUIT_DESIGN_SPEED)
         radii = self._radii(self._aligned())
         assert (radii < 4.0 * wanted).sum() >= CIRCUIT_CORNERS
@@ -418,7 +400,6 @@ class TestTheWorldsOwnCircuitIsBuiltAsDrawn:
     """
 
     def _circuit(self, **named):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=2048.0, seed=11, **named)
         return world, np.asarray(world.circuit().points, dtype='d')
 
@@ -473,24 +454,20 @@ class TestTheTightestCornerIsMeasuredOverRoad:
         return line
 
     def test_a_clean_bend_reads_as_the_bend_it_is(self) -> None:
-        from OpenGLContext_editor.world.route import least_radius
         assert least_radius(self._arc(200.0), closed=True) == pytest.approx(
             200.0, rel=0.05)
 
     def test_and_one_written_down_untidily_still_does(self) -> None:
-        from OpenGLContext_editor.world.route import least_radius
         found = least_radius(self._arc(200.0, jitter=0.1), closed=True)
         assert found > 0.6 * 200.0, '%.0f m for a 200 m bend' % found
 
     def test_a_tighter_bend_still_reads_tighter(self) -> None:
-        from OpenGLContext_editor.world.route import least_radius
         assert least_radius(self._arc(80.0), closed=True) < \
             least_radius(self._arc(400.0), closed=True)
 
     def test_and_a_hairpin_is_still_a_hairpin(self) -> None:
         """Short enough to resolve the corner it is about: a plan with one
         tight corner in it does not have that corner averaged away."""
-        from OpenGLContext_editor.world.route import least_radius
         drawn = np.array([(-400.0, 0.0), (-200.0, 0.0), (-30.0, 0.0),
                           (0.0, 0.0), (-30.0, 40.0), (-200.0, 60.0),
                           (-400.0, 60.0)])

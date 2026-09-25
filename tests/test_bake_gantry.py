@@ -13,14 +13,18 @@ import pytest
 from OpenGLContext.scenegraph.gantry import GantryProfile, gantry_legs
 from OpenGLContext.scenegraph.props import Prop
 from OpenGLContext.scenegraph.road import RoadProfile
+from PIL import Image
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.bake.driver import bake_world
 from OpenGLContext_editor.bake.gantry import (
     ATLAS_IMAGE,
     LEG_KIND,
     MAXIMUM_ERROR,
     GantryLayer,
 )
+from OpenGLContext_editor.bake.layers import HeightfieldLayer
+from OpenGLContext_editor.bake.signs import MAXIMUM_ERROR as SIGNS
 from OpenGLContext_editor.world.gantry import start_finish
 from OpenGLContext_editor.world.road import RoadPath
 
@@ -56,7 +60,6 @@ class TestWhatItPutsInATile:
     def test_a_gantry_is_visible_from_further_off_than_a_sign(self) -> None:
         """It is nine metres wide and seven tall, and a driver wants to see the
         line coming."""
-        from OpenGLContext_editor.bake.signs import MAXIMUM_ERROR as SIGNS
         assert MAXIMUM_ERROR > SIGNS
 
     def test_the_frame_and_its_line_are_one_mesh(self) -> None:
@@ -93,7 +96,7 @@ class TestWhereItReachesTo:
 
     def test_it_reaches_down_to_the_lowest_foot(self) -> None:
         placement = start_finish(
-            _path(), ground=lambda x, z: np.where(np.asarray(x) > 0.0, -6.0, 0.0))
+            _path(), ground=lambda x, _z: np.where(np.asarray(x) > 0.0, -6.0, 0.0))
         box = _layer(placement=placement).bounds()
         assert box.minimum[1] <= -6.0
 
@@ -104,7 +107,6 @@ class TestThePictureItReads:
         assert list(assets) == [ATLAS_IMAGE]
 
     def test_it_is_a_readable_image(self) -> None:
-        from PIL import Image
         image = Image.open(io.BytesIO(_layer().assets()[ATLAS_IMAGE]))
         assert image.size == (64, 64)
 
@@ -142,7 +144,7 @@ class TestWhatAGameIsToldAboutIt:
 
     def test_a_leg_on_low_ground_stands_on_that_ground(self) -> None:
         placement = start_finish(
-            _path(), ground=lambda x, z: np.where(np.asarray(x) > 0.0, -6.0, 0.0))
+            _path(), ground=lambda x, _z: np.where(np.asarray(x) > 0.0, -6.0, 0.0))
         props = [Prop.from_json(one)
                  for one in _layer(placement=placement).metadata()['props']]
         assert pytest.approx(-6.25, abs=0.01) == min(
@@ -157,12 +159,9 @@ class TestWhatAGameIsToldAboutIt:
 
 class TestInAWholeWorld:
     def test_it_bakes_alongside_a_landscape(self, tmp_path) -> None:
-        from OpenGLContext_editor.bake.driver import bake_world
-        from OpenGLContext_editor.bake.layers import HeightfieldLayer
-
         ground = BoundingBox((-256.0, 0.0, -256.0), (256.0, 0.0, 256.0))
         result = bake_world(
-            [HeightfieldLayer(height_fn=lambda x, z: np.zeros_like(np.asarray(x, 'd')),
+            [HeightfieldLayer(height_fn=lambda x, _z: np.zeros_like(np.asarray(x, 'd')),
                               extent=ground, resolution=9),
              _layer()],
             directory=str(tmp_path), depth=2, name='circuit.json')

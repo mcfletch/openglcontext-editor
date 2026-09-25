@@ -12,6 +12,8 @@ level, ``ids`` runs in decreasing detail, and ``MSFT_screencoverage`` has one
 value per level including the finest.
 """
 
+from types import SimpleNamespace as N
+
 import pytest
 
 from OpenGLContext_editor.blender.openglcontext_lod import msftlod
@@ -252,7 +254,6 @@ class TestWritingIntoTheExportersOwnObjects:
     """
 
     def document(self):
-        from types import SimpleNamespace as N
         return N(
             nodes=[N(name='Bust', extensions=None, extras=None, children=[1]),
                    N(name='Bust_LOD1', extensions=None, extras=None, children=None)],

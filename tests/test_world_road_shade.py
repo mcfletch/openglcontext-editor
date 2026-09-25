@@ -10,7 +10,9 @@ import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.road import RoadLayer, RoadPath
+from OpenGLContext_editor.world.species import species_are_available
 
 PROFILE = RoadProfile(lane_width=3.6, lanes=2)
 REGION = BoundingBox((-400.0, -50.0, -50.0), (400.0, 100.0, 450.0))
@@ -22,7 +24,7 @@ def _path(count=41, length=400.0):
                     profile=PROFILE)
 
 
-def _dark_north(x, z):
+def _dark_north(_x, z):
     """Deep shade past the halfway point, full sun before it."""
     return np.where(np.asarray(z, 'd') > 200.0, 0.2, 1.0)
 
@@ -63,8 +65,6 @@ class TestWhatTheSurfaceCarries:
 
 class TestTheShippedWorld:
     def test_its_circuit_runs_through_its_own_shade(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
-        from OpenGLContext_editor.world.species import species_are_available
         if not species_are_available():
             pytest.skip("the example world's trees are not installed")
         world = ProceduralWorld(extent=1024.0, field_resolution=257,
@@ -77,7 +77,6 @@ class TestTheShippedWorld:
         assert float(found.max()) > 0.5
 
     def test_a_world_with_no_forest_leaves_it_at_full_sun(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         assert ProceduralWorld(forest='tiles', ground='tiles',
                                extent=512.0).canopy_shade() is None
 

@@ -25,6 +25,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from omi_audio import synth
+from omi_audio.clip import Clip
 from OpenGLContext.loaders.gltf.writer import GlobalSound, GLTFWriter, ZoneNode, zone_box
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -68,7 +70,6 @@ class AmbientSound:
 
     def wav_bytes(self) -> bytes:
         """The sound as the WAV file written at :attr:`uri`."""
-        from omi_audio.clip import Clip
         return Clip(self.make(), SAMPLE_RATE, self.name).wav_bytes()
 
     def emitter(self) -> GlobalSound:
@@ -106,7 +107,6 @@ def place_sounds(seed: int = 0) -> dict[str, AmbientSound]:
     :func:`omi_audio.synth.surf`). A bore has no ambience of its own: what is
     heard in it is the car, given back by the bore's reverb.
     """
-    from omi_audio import synth
 
     def birds() -> Any:
         return synth.birdsong(16.0, sample_rate=SAMPLE_RATE, seed=seed + 1).samples
@@ -162,7 +162,7 @@ class ZonesLayer:
         """Nothing: zones are not tile content, and hold no region of the bake open."""
         return None
 
-    def content(self, region: BoundingBox, error: float) -> list:
+    def content(self, region: BoundingBox, error: float) -> list:  # noqa: ARG002 Layer.content protocol
         """Nothing in any tile."""
         return []
 

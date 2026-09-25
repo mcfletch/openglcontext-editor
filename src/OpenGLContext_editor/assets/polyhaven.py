@@ -35,7 +35,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from OpenGLContext import atomicfiles
+from OpenGLContext import atomicfiles, userpaths
+from OpenGLContext.loaders import resolver
+from OpenGLContext.loaders.resolver import Resolver
 
 from OpenGLContext_editor.assets.plants import PlantSource
 
@@ -97,7 +99,6 @@ def cache_dir(directory: str | None = None) -> str:
     if directory is None:
         directory = os.environ.get(CACHE_VARIABLE) or ''
     if not directory:
-        from OpenGLContext import userpaths
         directory = os.path.join(userpaths.appdatadirectory(), 'OpenGLContext',
                                  'polyhaven')
     os.makedirs(directory, mode=0o700, exist_ok=True)
@@ -109,7 +110,6 @@ def _open_capped(url: str, max_bytes: int) -> bytes:
 
     A redirect is followed only to one of :data:`HOSTS`.
     """
-    from OpenGLContext.loaders import resolver
     with resolver.open_url(url, redirects=resolver.AllowedHosts(HOSTS),
                            timeout=120, agent=USER_AGENT) as answer:
         return resolver.stream_capped(answer, max_bytes)
@@ -122,7 +122,6 @@ def _get(url: str) -> bytes:
     checked before a socket is opened rather than trusted for having arrived
     over TLS: an answer says where a file is, and that is a claim.
     """
-    from OpenGLContext.loaders import resolver
     return _open_capped(resolver.require_host(url, HOSTS), MAX_DOWNLOAD_BYTES)
 
 
@@ -201,7 +200,6 @@ def _under(directory: str, relative: str) -> str:
     name is data. ``../../.bashrc`` as a key would otherwise write bytes the
     same answer chose wherever this process can write.
     """
-    from OpenGLContext.loaders.resolver import Resolver
     return Resolver(base_dir=directory).resolve(relative)
 
 

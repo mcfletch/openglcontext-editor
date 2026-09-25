@@ -29,6 +29,7 @@ import json
 import os
 from typing import Any
 
+import numpy as np
 from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
 from OpenGLContext.scenegraph.vegetation.field import TreeSpecies
 
@@ -103,7 +104,7 @@ def species_directory() -> str:
     :func:`shipped_species` at its own directory instead.
     """
     try:
-        import openglcontext_forest_demo
+        import openglcontext_forest_demo  # noqa: PLC0415 optional, not a dependency
     except ImportError as error:
         raise LookupError(
             "the example world's trees come from openglcontext-forest-demo, "
@@ -182,15 +183,13 @@ def species_are_available(directory: str | None = None) -> bool:
     return True
 
 
-def biome_species(positions: Any, heights: Any, slopes: Any, seed: int = 11
-                  ) -> Any:
+def biome_species(positions: Any, slopes: Any, seed: int = 11) -> Any:
     """Which of the shipped species stands at each place.
 
     Conifers take the high and the steep ground, maples the low and gentle, with
     a broad noise over the top so a hillside has a dominant kind and a minority
     mixed through it rather than every kind everywhere.
     """
-    import numpy as np
     if not len(np.asarray(positions, dtype='d')):
         return np.zeros(0, 'i4')
     x = np.asarray(positions, dtype='d')[:, 0]

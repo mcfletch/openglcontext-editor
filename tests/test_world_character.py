@@ -15,13 +15,15 @@ from OpenGLContext_editor.world.character import (
     corner_radii,
     road_character,
 )
+from OpenGLContext_editor.world.road import points_along
+from OpenGLContext_editor.world.route import hold_corners
 
 
-def _flat(x, z):
+def _flat(x, _z):
     return np.zeros_like(np.asarray(x, 'd'))
 
 
-def _hill(x, z):
+def _hill(_x, z):
     """A hillside the road climbs, and a flat run either side of it.
 
     The road runs towards -z, so the ground has to *rise* as z falls for the
@@ -80,7 +82,6 @@ class TestHowFastEachStretchIsFor:
                               design_speed=200.0 / 3.6, **kwargs)
 
     def test_it_answers_one_figure_per_alignment_point(self) -> None:
-        from OpenGLContext_editor.world.road import points_along
         found = self._character()
         wanted = points_along(_ring(), 6.0, closed=True)
         for each in (found.design_speed, found.grade_limit, found.smoothing,
@@ -95,7 +96,6 @@ class TestHowFastEachStretchIsFor:
     def test_a_tight_corner_is_for_the_speed_it_can_be_taken_at(self) -> None:
         """Not the speed of the straight before it: a crest inside a hairpin
         rounded for two hundred is a crest nobody meets at two hundred."""
-        from OpenGLContext_editor.world.route import hold_corners
         plan = hold_corners(_ring(), 60.0, closed=True)
         found = road_character(plan, _flat, design_speed=200.0 / 3.6,
                                spacing=6.0, closed=True)
@@ -139,7 +139,6 @@ class TestWhichStretchesAreLeftAsTheyLie:
         assert found.smoothing.min() > 40.0
 
     def test_a_slow_stretch_keeps_the_ground_s_own_shape(self) -> None:
-        from OpenGLContext_editor.world.route import hold_corners
         plan = hold_corners(_ring(), 60.0, closed=True)
         found = road_character(plan, _flat, design_speed=200.0 / 3.6,
                                spacing=6.0, closed=True)
@@ -148,7 +147,6 @@ class TestWhichStretchesAreLeftAsTheyLie:
 
 class TestHowWideTheTreesAreCutBack:
     def _clearance(self, radius, **kwargs):
-        from OpenGLContext_editor.world.route import hold_corners
         plan = hold_corners(_ring(), radius, closed=True)
         return road_character(plan, _flat, design_speed=200.0 / 3.6,
                               spacing=6.0, closed=True, **kwargs).clearance
@@ -227,7 +225,6 @@ class TestACharacterIsAWholeRoad:
         assert not found.varies()
 
     def test_a_road_of_several_says_so_too(self) -> None:
-        from OpenGLContext_editor.world.route import hold_corners
         found = road_character(hold_corners(_ring(), 60.0, closed=True), _hill,
                                design_speed=55.0, spacing=6.0, closed=True)
         assert found.varies()

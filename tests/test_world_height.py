@@ -15,6 +15,7 @@ from OpenGLContext_editor.world.height import (
     edit_from_json,
     register_edit,
 )
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 
 
 def _grid(half=400.0, steps=17):
@@ -37,7 +38,7 @@ class Lift(HeightEdit):
         return (x - self.radius, z - self.radius,
                 x + self.radius, z + self.radius)
 
-    def delta(self, x, z, height):
+    def delta(self, x, z, height):  # noqa: ARG002 HeightEdit.delta protocol
         return np.full(np.shape(x), self.amount)
 
     def to_json(self):
@@ -123,7 +124,7 @@ class TestAnEditOnTop:
         seen = {}
 
         class Reading(Lift):
-            def delta(self, x, z, height):
+            def delta(self, x, z, height):  # noqa: ARG002 HeightEdit.delta protocol
                 seen['under'] = np.asarray(height).copy()
                 return np.zeros(np.shape(x))
 
@@ -167,7 +168,6 @@ class TestTheWorldItMakes:
     """A world takes a source and builds its ground from it."""
 
     def _world(self, **named):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=512.0, road=False, tree_density=0.0,
                                **named)
 

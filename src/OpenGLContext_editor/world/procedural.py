@@ -22,6 +22,8 @@ from OpenGLContext.loaders.tiles3d.procedural import (
     WATER_LEVEL,
     terrain_colors,
 )
+from OpenGLContext.loaders.tiles3d.scatter import Scatter
+from OpenGLContext.loaders.tiles3d.vegetation import poisson_thin
 from OpenGLContext.scenegraph.gantry import GantryProfile
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.props import Prop, RockProfile, rock_mesh
@@ -37,6 +39,7 @@ from OpenGLContext.scenegraph.roadworks import (
     TunnelProfile,
 )
 from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, LayerRule, Relief
+from OpenGLContext.scenegraph.terrain.splat import SplatTerrain
 
 from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -52,7 +55,9 @@ from OpenGLContext_editor.bake.layers import (
     WaterLayer,
 )
 from OpenGLContext_editor.bake.props import PropLayer
+from OpenGLContext_editor.bake.rivers import RiverLayer
 from OpenGLContext_editor.bake.signs import SignLayer
+from OpenGLContext_editor.bake.stones import StoneLayer
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
 from OpenGLContext_editor.bake.zones import ZonesLayer, place_sounds, zone_records
 from OpenGLContext_editor.world.character import corner_radii, road_character
@@ -742,7 +747,6 @@ class ProceduralWorld:
         """
         if not len(self.channels):
             return None
-        from OpenGLContext_editor.bake.rivers import RiverLayer
         return RiverLayer(channels=list(self.channels),
                           ground=self.height_source().height_fn(),
                           name='river')
@@ -755,7 +759,6 @@ class ProceduralWorld:
         carriageway because an obstacle a driver cannot avoid is not an
         obstacle, it is a wall.
         """
-        from OpenGLContext.loaders.tiles3d.scatter import Scatter
         placed = scatter_on_heightfield(
             self.seated_on(), self.footprint(), density=ROCK_DENSITY,
             seed=self.seed + 101, scale_range=ROCK_RADIUS,
@@ -777,7 +780,6 @@ class ProceduralWorld:
         through it and nothing on it is still standing. Kept off nothing else,
         because a landscape has stone in it.
         """
-        from OpenGLContext.loaders.tiles3d.scatter import Scatter
         placed = scatter_on_heightfield(
             self.seated_on(), self.footprint(), density=STONE_DENSITY,
             seed=self.seed + 307, scale_range=STONE_RADIUS,
@@ -814,7 +816,6 @@ class ProceduralWorld:
         placed = self.stones()
         if not len(placed.positions):
             return None
-        from OpenGLContext_editor.bake.stones import StoneLayer
         prototypes = self.stone_shapes()
         stones = [
             Prop.of(prototypes[_stone_kind(index % STONE_SHAPES)],
@@ -1309,7 +1310,6 @@ class ProceduralWorld:
         the same trunks and the same sun. None where the world has no landscape
         or no forest to shade it with.
         """
-        from OpenGLContext.scenegraph.terrain.splat import SplatTerrain
         if self.forest != 'field':
             return None
         return SplatTerrain(self.landscape().field(), list(GROUND_LAYERS),
@@ -1379,8 +1379,6 @@ class ProceduralWorld:
         return self._scatter
 
     def _build_scatter(self) -> Any:
-        from OpenGLContext.loaders.tiles3d.scatter import Scatter
-        from OpenGLContext.loaders.tiles3d.vegetation import poisson_thin
         if self.tree_density <= 0.0:
             return Scatter(np.zeros((0, 3), 'f4'), np.zeros(0), np.zeros(0))
         placed = scatter_on_heightfield(
@@ -1427,7 +1425,7 @@ class ProceduralWorld:
         return VegetationLayer(
             positions=placed.positions, yaws=placed.yaws, heights=heights,
             species=species,
-            species_id=biome_species(placed.positions, heights, slopes,
+            species_id=biome_species(placed.positions, slopes,
                                      seed=self.seed),
             cover=self.ground_cover(), cover_on=list(COVER_ON),
             name='trees')

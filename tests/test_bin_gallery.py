@@ -15,7 +15,7 @@ from OpenGLContext_editor.bin import gallery
 
 
 def _blender(stdout, writes=None):
-    def run(arguments, blender=None, check=True, timeout=None, background=True):
+    def run(arguments, **_options):
         if writes is not None:
             with open(writes, 'wb') as handle:
                 handle.write(b'glTF from this run')

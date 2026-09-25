@@ -12,6 +12,7 @@ import struct
 
 import numpy as np
 import pytest
+from OpenGLContext.loaders import gltf
 
 from OpenGLContext_editor.meshlod import LODAsset, sidecar_name, write_chain
 from OpenGLContext_editor.meshlod.chain import LODChain, LODLevel
@@ -94,7 +95,6 @@ class TestWriting:
         assert len(written) == 4
         document = LODAsset.open(path).document
         assert all(one['byteLength'] >= 1 and 'uri' in one for one in document['buffers'])
-        from OpenGLContext.loaders import gltf
         assert gltf.load_gltf(path) is not None
         attributes, indices = LODAsset.open(path).load(2)
         assert np.array_equal(indices, chain[2].indices)

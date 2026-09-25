@@ -27,7 +27,7 @@ def _cone(x, z):
     return 100.0 - np.hypot(x, z)
 
 
-def _ramp(x, z):
+def _ramp(x, _z):
     """A plane tilted along x: contours are straight lines across it."""
     return x
 
@@ -119,7 +119,7 @@ class TestASlopesContours:
 
 class TestFlatGround:
     def test_nothing_is_drawn_on_a_plain(self) -> None:
-        heights, extent = _grid(lambda x, z: np.zeros_like(x))
+        heights, extent = _grid(lambda x, _z: np.zeros_like(x))
         assert contours(heights, *extent, interval=10.0) == []
 
 

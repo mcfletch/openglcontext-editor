@@ -5,6 +5,8 @@ obstacle and is held for hundreds of metres around; a stone is ground -- a few
 kilobytes of placements in the tile that draws it, and a dome in the physics
 world where a wheel is.
 """
+import json
+
 import numpy as np
 import pytest
 from OpenGLContext.scenegraph.props import Prop, props_from_table, rock_mesh
@@ -186,7 +188,6 @@ class TestTheTableAGameStandsUp:
     def test_the_tileset_names_the_table_and_no_more(self) -> None:
         """Everything that opens a world parses its extras; tens of thousands
         of stones as JSON is megabytes of it."""
-        import json
         many = _stones(count=5000)
         assert len(json.dumps(many.metadata())) < 100
         assert set(many.assets()) == {many.metadata()['stones']['table']}

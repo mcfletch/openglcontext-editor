@@ -69,7 +69,6 @@ class TestOneTile:
 
     def test_a_tile_can_carry_its_own_transform(self) -> None:
         """Content written in a local frame is placed by the tile's matrix."""
-        import numpy as np
         matrix = np.identity(4)
         matrix[3, :3] = (100.0, 0.0, -50.0)
         doc = tileset_document(_tile((0, 0, 0), (1, 1, 1), 1.0, transform=matrix))

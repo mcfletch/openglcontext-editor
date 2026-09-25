@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from opengl_decimate import SimplifyOptions, collapse_sequence
+from opengl_decimate import certify as certification
 
 __all__ = ["LODLevel", "LODChain", "build_chain"]
 
@@ -113,8 +115,6 @@ def build_chain(
     switching distance; pass ``False`` where only the geometry is wanted.
     Further keyword arguments go to ``opengl_decimate.SimplifyOptions``.
     """
-    from opengl_decimate import SimplifyOptions, collapse_sequence
-    from opengl_decimate import certify as certification
 
     positions = np.asarray(attributes["POSITION"])
     centre, radius = bounding_sphere(positions)

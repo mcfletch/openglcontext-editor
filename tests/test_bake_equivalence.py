@@ -186,7 +186,7 @@ class TestTheSurfaceIsAtLeastAsFaithful:
         assert baked_error.max() <= reference_error.max() * 1.05
 
     def test_the_error_is_small_against_the_terrain_s_own_relief(
-            self, reference, baked) -> None:
+            self, baked) -> None:
         """Not merely equal to the reference -- close to the real surface."""
         baked_error, _ = _errors(baked, _sample_points())
         assert baked_error.mean() < 2.0        # metres, over 400 m of relief

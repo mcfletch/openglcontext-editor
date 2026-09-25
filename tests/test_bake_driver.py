@@ -15,11 +15,13 @@ import numpy as np
 import pytest
 from OpenGLContext.loaders import gltf
 from OpenGLContext.loaders.tiles3d.tileset import build_runtime_tileset
+from OpenGLContext.physics.gltf_world import extract_trimesh
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
-from OpenGLContext_editor.bake.driver import BakeResult, bake_world
+from OpenGLContext_editor.bake.driver import BakeResult, bake_summary, bake_world
 from OpenGLContext_editor.bake.layers import HeightfieldLayer, InstanceLayer
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 
 EXTENT = BoundingBox((-256, 0, -256), (256, 0, 256))
 
@@ -32,7 +34,7 @@ def _listing(key, value):
         def bounds(self):
             return EXTENT.with_height(-1, 1)
 
-        def content(self, region, error):
+        def content(self, region, error):  # noqa: ARG002 Layer.content protocol
             return []
 
         def metadata(self):
@@ -171,7 +173,6 @@ class TestTheContentItProduces:
         with open(result.tileset) as handle:
             document = json.load(handle)
         uri = _uris(document['root'])[0]
-        from OpenGLContext.loaders.gltf.writer import _pack_glb  # noqa: F401
         raw = open(os.path.join(result.directory, uri), 'rb').read()
         assert b'EXT_mesh_gpu_instancing' in raw
 
@@ -221,7 +222,6 @@ def _points(path):
     at every placement it is drawn at rather than at whatever this test would
     have guessed.
     """
-    from OpenGLContext.physics.gltf_world import extract_trimesh
     extracted = extract_trimesh(gltf.load_gltf(path).group)
     assert extracted is not None, path
     return extracted[0]
@@ -269,7 +269,6 @@ class TestTheReportItPrints:
         assert 'tiles' in result.summary() and 'MB' in result.summary()
 
     def test_the_long_report_lists_the_layers(self, tmp_path) -> None:
-        from OpenGLContext_editor.bake.driver import bake_summary
         report = bake_summary(_bake(tmp_path, layers=[_terrain(), _trees()]))
         assert 'terrain' in report and 'trees' in report
         assert 'extent:' in report and 'tileset:' in report
@@ -283,7 +282,7 @@ class TestWhatTheWorldCarriesForAGame:
             def bounds(self):
                 return EXTENT.with_height(-1, 1)
 
-            def content(self, region, error):
+            def content(self, region, error):  # noqa: ARG002 Layer.content protocol
                 return []
 
             def metadata(self):
@@ -320,7 +319,7 @@ class TestWhatTheWorldCarriesForAGame:
             def bounds(self):
                 return EXTENT.with_height(-1, 1)
 
-            def content(self, region, error):
+            def content(self, region, error):  # noqa: ARG002 Layer.content protocol
                 return []
 
             def assets(self):
@@ -338,7 +337,6 @@ class TestAWorldBakedAtItsOwnDepth:
 
     @staticmethod
     def _world(depth):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=256.0, depth=depth, road=False,
                                tree_density=0.0, field_resolution=65,
                                control_size=64, ground='tiles', places=False)
@@ -349,7 +347,6 @@ class TestAWorldBakedAtItsOwnDepth:
                               for child in tile.get('children', ())])
 
     def test_the_tree_is_as_deep_as_the_world_says(self, tmp_path):
-        import json
         result = self._world(2).bake(str(tmp_path))
         with open(result.tileset) as handle:
             assert self._deepest(json.load(handle)['root']) == 2

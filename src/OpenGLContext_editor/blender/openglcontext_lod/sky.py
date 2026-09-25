@@ -30,6 +30,7 @@ import struct
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 __all__ = [
     'EXTENSION', 'GROUND_COLOUR', 'HORIZON_COLOUR', 'ZENITH_COLOUR',
@@ -137,7 +138,6 @@ def panorama(width: int = 2048, height: int = 1024, seed: int = 11,
     Returns a PIL image, which is what the glTF writer and anything looking at
     it both want.
     """
-    from PIL import Image
 
     generator = np.random.default_rng(seed)
     elevation = _elevation(height)[:, None]

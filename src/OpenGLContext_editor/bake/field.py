@@ -151,7 +151,7 @@ class FieldTerrainLayer:
         return BoundingBox((low[0], ground.base, low[2]),
                            (high[0], ground.base + ground.relief, high[2]))
 
-    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
+    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:  # noqa: ARG002 Layer.content protocol
         """Nothing: the ground is not tiled, it is the field beside the tileset."""
         return []
 
@@ -180,14 +180,14 @@ class FieldTerrainLayer:
         ground.save_image(height)
         control = io.BytesIO()
         control_map(ground, list(self.rules), size=self.control_size,
-                    painted=self._painted(ground)).save(control, format='PNG')
+                    painted=self._painted()).save(control, format='PNG')
         return {self._filename('height'): height.getvalue(),
                 self._filename('control'): control.getvalue()}
 
     def _filename(self, part: str) -> str:
         return '%s-%s.png' % (self.name, part)
 
-    def _painted(self, ground: HeightField) -> list[tuple[int, np.ndarray]]:
+    def _painted(self) -> list[tuple[int, np.ndarray]]:
         """Masks the rules could not have worked out: so far, the road's."""
         if self.road is None:
             return []

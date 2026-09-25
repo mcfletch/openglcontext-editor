@@ -14,14 +14,22 @@ is. The gate that has to have run them is a machine with Blender installed; see
 ``docs/blender.md``.
 """
 
+import fnmatch
 import json
 import os
 import struct
 import subprocess
 import sys
 import textwrap
+import zipfile
+from importlib import resources
 
 import pytest
+
+try:
+    import tomllib
+except ImportError:                       # Python 3.10
+    import tomli as tomllib
 
 from OpenGLContext_editor import blender
 
@@ -269,8 +277,6 @@ class TestTheAddOnInstallsOnItsOwn:
         assert said == {'enabled': True, 'hook': True, 'operator': True}
 
     def test_the_zip_carries_the_add_on_and_nothing_else(self, tmp_path):
-        import zipfile
-
         held = zipfile.ZipFile(blender.package(str(tmp_path))).namelist()
 
         assert all(name.startswith('openglcontext_lod/') for name in held)
@@ -337,24 +343,11 @@ class TestWhatALightAndAShadowFlagSurvive:
         assert CASTS_SHADOW not in (loud.get('extras') or {})
 
 
-def _toml():
-    """Whichever TOML reader this Python has."""
-    try:
-        import tomllib
-    except ImportError:                   # Python 3.10
-        import tomli as tomllib
-    return tomllib
-
-
 class TestTheAddOnShipsWithTheToolkit:
     """A pip install carries the whole add-on: the files that are not Python
     are installed only where the package data names them."""
 
     def test_every_file_of_the_add_on_is_package_data(self):
-        import fnmatch
-        import os
-
-        tomllib = _toml()
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, 'pyproject.toml'), 'rb') as handle:
             patterns = tomllib.load(handle)['tool']['setuptools'][
@@ -370,20 +363,26 @@ class TestTheAddOnShipsWithTheToolkit:
             assert any(fnmatch.fnmatch(name, pattern) for pattern in patterns), name
 
     def test_the_manifest_is_a_resource_of_the_package(self):
-        from importlib import resources
-
         manifest = resources.files('OpenGLContext_editor.blender').joinpath(
             'openglcontext_lod', 'blender_manifest.toml')
         assert 'version' in manifest.read_text(encoding='utf-8')
 
 
 class TestTheAddOnVersionOnEveryPython:
-    def test_where_there_is_no_tomllib_tomli_reads_it(self, monkeypatch):
-        """Python 3.10 has no tomllib; the dependency on tomli covers it."""
-        import sys
+    def test_where_there_is_no_tomllib_tomli_reads_it(self):
+        """Python 3.10 has no tomllib; the dependency on tomli covers it.
 
-        reader = _toml()
-        expected = blender.addon_version()
-        monkeypatch.setitem(sys.modules, 'tomllib', None)
-        monkeypatch.setitem(sys.modules, 'tomli', reader)
-        assert blender.addon_version() == expected
+        The reader is chosen when the module is imported, so a fresh
+        interpreter imports it with ``tomllib`` absent and the standard
+        library's reader standing in as ``tomli``.
+        """
+        code = (
+            "import sys, tomllib;"
+            "sys.modules['tomli'] = tomllib;"
+            "sys.modules['tomllib'] = None;"
+            "from OpenGLContext_editor import blender;"
+            "print(blender.addon_version())"
+        )
+        found = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                               text=True, check=True).stdout.strip()
+        assert found == blender.addon_version()

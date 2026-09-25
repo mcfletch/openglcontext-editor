@@ -18,6 +18,12 @@ import os
 import sys
 
 import numpy as np
+from OpenGLContext.testing.framebuffer_comparison import compare_images
+from OpenGLContext.testing.glcontext import hidden_window
+from PIL import Image
+
+from OpenGLContext_editor.meshlod import build_chain, measure_chain
+from OpenGLContext_editor.meshlod.quality import LODProbe, pop_breakdown
 
 
 def load(path):
@@ -45,12 +51,6 @@ def main(argv=None):
                              'radii, instead of at the measured transition')
     parser.add_argument('--sheet', default=None)
     args = parser.parse_args(argv)
-
-    from OpenGLContext.testing.framebuffer_comparison import compare_images
-    from OpenGLContext.testing.glcontext import hidden_window
-
-    from OpenGLContext_editor.meshlod import build_chain, measure_chain
-    from OpenGLContext_editor.meshlod.quality import LODProbe, pop_breakdown
 
     # Wide enough to place a switch anywhere from touching the surface to far
     # enough that the object is a smudge.
@@ -109,8 +109,6 @@ def main(argv=None):
                  result.percent_different, judged))
 
     if args.sheet and rows:
-        from PIL import Image
-
         size = args.size
         sheet = Image.new('RGB', (3 * size, len(rows) * size))
         for index, row in enumerate(rows):

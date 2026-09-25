@@ -15,6 +15,7 @@ import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.road import RoadLayer, RoadPath
 
 PROFILE = RoadProfile(lane_width=3.6, lanes=2)
@@ -100,7 +101,6 @@ class TestOneLevelOfTheTree:
 
 class TestTheShippedCircuit:
     def test_no_stretch_of_it_goes_unwritten(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=1024.0, field_resolution=257,
                                 control_size=256)
         found = world.circuit_layer()

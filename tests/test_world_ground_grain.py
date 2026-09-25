@@ -8,6 +8,7 @@ to and a tree is planted on, and it stays the analytic one.
 """
 import numpy as np
 import pytest
+from OpenGLContext.scenegraph.roadworks import TunnelProfile
 from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, Relief
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -181,7 +182,6 @@ class TestHowFinelyTheGroundIsMeshed:
     def test_and_a_deep_tree_does_not_make_a_portal_out_of_one(self) -> None:
         """A face as wide as a root tile's cell is a headwall sixty metres
         across, which is a wall with a road-sized hole in it."""
-        from OpenGLContext.scenegraph.roadworks import TunnelProfile
         world = _world(ground='tiles', depth=5)
         assert world.tunnel_profile().portal_border \
             < 4.0 * TunnelProfile().portal_border

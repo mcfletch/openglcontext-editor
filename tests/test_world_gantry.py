@@ -11,7 +11,9 @@ import pytest
 from OpenGLContext.scenegraph.gantry import GantryProfile
 from OpenGLContext.scenegraph.road import RoadProfile
 
+from OpenGLContext_editor.bake.gantry import GantryLayer
 from OpenGLContext_editor.world.gantry import FOOTING, StartFinish, start_finish
+from OpenGLContext_editor.world.procedural import GANTRY_CLEARANCE, ProceduralWorld
 from OpenGLContext_editor.world.road import RoadPath
 
 PROFILE = RoadProfile(lane_width=3.6, lanes=2, shoulder_width=1.5)
@@ -94,19 +96,19 @@ class TestTheGroundUnderTheLegs:
     def test_level_ground_still_sinks_the_feet_a_little(self) -> None:
         """A coarse terrain tile is not the surface the drop was measured on;
         a foot resting exactly on it shows daylight underneath."""
-        found = start_finish(_path(_straight()), ground=lambda x, z: 0.0)
+        found = start_finish(_path(_straight()), ground=lambda _x, _z: 0.0)
         assert pytest.approx((FOOTING, FOOTING), abs=1e-6) == found.drops
 
     def test_a_leg_over_a_drop_off_reaches_down_to_it(self) -> None:
         found = start_finish(_path(_straight()),
-                             ground=lambda x, z: np.where(np.asarray(x) > 0.0,
+                             ground=lambda x, _z: np.where(np.asarray(x) > 0.0,
                                                           -4.0, 0.0))
         assert pytest.approx(FOOTING, abs=1e-6) == found.drops[0]
         assert pytest.approx(4.0 + FOOTING, abs=1e-6) == found.drops[1]
 
     def test_ground_above_the_road_does_not_lift_the_gantry(self) -> None:
         """A leg cut into a bank starts at the road, not up the hillside."""
-        found = start_finish(_path(_straight()), ground=lambda x, z: 6.0)
+        found = start_finish(_path(_straight()), ground=lambda _x, _z: 6.0)
         assert pytest.approx((FOOTING, FOOTING), abs=1e-6) == found.drops
 
     def test_without_a_terrain_the_feet_sit_at_the_road(self) -> None:
@@ -122,20 +124,16 @@ class TestTheShippedWorld:
     """The example world marks its circuit, and leaves its legs room."""
 
     def _world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=1024.0, resolution=17,
                                field_resolution=129, control_size=256,
                                tree_density=0.0, forest='tiles',
                                ground='tiles')
 
     def test_the_circuit_is_marked(self) -> None:
-        from OpenGLContext_editor.bake.gantry import GantryLayer
         assert any(isinstance(layer, GantryLayer)
                    for layer in self._world().layers())
 
     def test_a_world_with_no_road_has_no_marker(self) -> None:
-        from OpenGLContext_editor.bake.gantry import GantryLayer
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=1024.0, resolution=17, road=False,
                                 tree_density=0.0, forest='tiles',
                                 ground='tiles')
@@ -151,7 +149,6 @@ class TestTheShippedWorld:
         assert float(found.distance[0]) < 1.0
 
     def test_no_boulder_stands_inside_a_leg(self) -> None:
-        from OpenGLContext_editor.world.procedural import GANTRY_CLEARANCE
         world = self._world()
         line = world.start_line()
         beam = np.array([np.cos(line.yaw), 0.0, -np.sin(line.yaw)])

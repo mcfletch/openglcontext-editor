@@ -302,7 +302,7 @@ class WaterLayer:
         """The extent's footprint, at the waterline. Water has no thickness."""
         return self.extent.with_height(float(self.level), float(self.level))
 
-    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
+    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:  # noqa: ARG002 Layer.content protocol
         footprint = self._footprint(region)
         if footprint is None:
             return []

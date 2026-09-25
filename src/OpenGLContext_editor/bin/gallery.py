@@ -39,6 +39,7 @@ from OpenGLContext import userpaths
 from OpenGLContext.loaders import cc0
 
 from OpenGLContext_editor import blender
+from OpenGLContext_editor.assets import polyhaven
 from OpenGLContext_editor.blender.openglcontext_lod import content as recipes
 from OpenGLContext_editor.blender.openglcontext_lod import gallery as layout
 from OpenGLContext_editor.blender.openglcontext_lod import sky
@@ -60,7 +61,6 @@ def assemble(into: str | None = None, resolution: str = '1k') -> str:
     Whatever is already there is left alone, so a second build costs nothing
     and works offline.
     """
-    from OpenGLContext_editor.assets import polyhaven
 
     directory = content_dir(into)
     os.makedirs(directory, exist_ok=True)

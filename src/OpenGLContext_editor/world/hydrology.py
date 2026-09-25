@@ -292,7 +292,7 @@ class Channel(HeightEdit):
         return (float(line[:, 0].min()) - reach, float(line[:, 1].min()) - reach,
                 float(line[:, 0].max()) + reach, float(line[:, 1].max()) + reach)
 
-    def delta(self, x: Any, z: Any, height: Any) -> np.ndarray:
+    def delta(self, x: Any, z: Any, height: Any) -> np.ndarray:  # noqa: ARG002 HeightEdit.delta protocol
         line = np.asarray(self.points, dtype='d').reshape(-1, 2)
         if len(line) < 2:
             return np.zeros(np.shape(x))
@@ -338,7 +338,8 @@ class Channel(HeightEdit):
         inside the ground and two pixels wide. A map says where the river is;
         the baked world says how deep it is.
         """
-        from OpenGLContext.scenegraph.water import FLOWING, water_ribbon
+        # The water node imports OpenGL, and the world package imports without it.
+        from OpenGLContext.scenegraph.water import FLOWING, water_ribbon  # noqa: PLC0415 GL
         line = np.asarray(self.points, dtype='d').reshape(-1, 2)
         if len(line) < 2:
             return None

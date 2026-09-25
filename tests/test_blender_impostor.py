@@ -32,7 +32,7 @@ import textwrap
 import pytest
 
 from OpenGLContext_editor import blender
-from OpenGLContext_editor.blender.openglcontext_lod import octahedral
+from OpenGLContext_editor.blender.openglcontext_lod import impostorspec, octahedral
 
 pytestmark = pytest.mark.blender
 
@@ -217,16 +217,13 @@ class TestWhichEngineRendersTheViews:
     BLENDER_EEVEE again from 5.0; the bake takes whichever is offered."""
 
     def test_blender_4_names_it_next(self):
-        from OpenGLContext_editor.blender.openglcontext_lod import impostorspec
         offered = ['BLENDER_EEVEE_NEXT', 'BLENDER_WORKBENCH', 'CYCLES']
         assert impostorspec.render_engine(offered) == 'BLENDER_EEVEE_NEXT'
 
     def test_blender_5_names_it_eevee(self):
-        from OpenGLContext_editor.blender.openglcontext_lod import impostorspec
         offered = ['BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES']
         assert impostorspec.render_engine(offered) == 'BLENDER_EEVEE'
 
     def test_without_eevee_the_workbench_draws(self):
-        from OpenGLContext_editor.blender.openglcontext_lod import impostorspec
         assert impostorspec.render_engine(['BLENDER_WORKBENCH', 'CYCLES']) \
             == 'BLENDER_WORKBENCH'

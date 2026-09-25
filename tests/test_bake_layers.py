@@ -7,12 +7,14 @@ region's footprint, and instances that fall inside it thinned to suit the tile.
 
 import numpy as np
 import pytest
-from OpenGLContext.loaders.gltf.writer import SceneNode
+from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
+from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.terrain import Relief
 
+from OpenGLContext_editor.bake.assets import combined_mesh
 from OpenGLContext_editor.bake.bounds import BoundingBox
-from OpenGLContext_editor.bake.layers import HeightfieldLayer, InstanceLayer, MeshLayer
+from OpenGLContext_editor.bake.layers import HeightfieldLayer, InstanceLayer, MeshLayer, node_bounds
 
 
 def _slope(x, z):
@@ -78,7 +80,7 @@ class TestAHeightfieldLayer:
         assert with_skirt.mesh.positions[:, 1].min() < without.mesh.positions[:, 1].min()
 
     def test_it_colours_what_it_meshes(self) -> None:
-        def blue(positions, normals):
+        def blue(positions, _normals):
             return np.tile(np.array([0, 0, 1], 'f'), (len(positions), 1))
         layer = self._layer(color_fn=blue)
         mesh = layer.content(_footprint(0, 50, 0, 50), error=8.0)[0].mesh
@@ -90,7 +92,6 @@ class TestAHeightfieldLayer:
         assert mesh.positions[:, 1].min() >= 5.0 - 1e-5
 
     def test_it_carries_the_material_it_was_given(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         material = PBRMaterial(baseColor=(0.2, 0.3, 0.4))
         layer = self._layer(material=material)
         mesh = layer.content(_footprint(0, 50, 0, 50), error=8.0)[0].mesh
@@ -209,7 +210,7 @@ class TestTheGrainInATilesGround:
         assert np.array_equal(one, two)
 
 
-def _prototype(name='tree'):
+def _prototype():
     return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 2, 0)], 'f'),
                    indices=np.array([0, 1, 2], np.uint32))
 
@@ -275,7 +276,7 @@ class TestAnInstanceLayer:
         assert layer.content(region, error=1.0)[0].instances.count() == 40
 
     def test_the_ladder_picks_a_coarser_mesh_for_a_coarser_tile(self) -> None:
-        near, far = _prototype('near'), _prototype('far')
+        near, far = _prototype(), _prototype()
         rng = np.random.default_rng(1)
         layer = InstanceLayer(positions=rng.uniform(-10, 10, size=(4, 3)),
                               lods=[(0.0, near), (20.0, far)])
@@ -311,7 +312,6 @@ class TestMeasuringAPlacedNode:
     def test_a_rotated_node_is_measured_at_its_widest(self) -> None:
         """A box that a turned mesh sticks out of gets the tile culled while it
         is still on screen, so rotation widens the box to enclose every turn."""
-        from OpenGLContext_editor.bake.layers import node_bounds
         upright = node_bounds(SceneNode(mesh=_prototype()))
         turned = node_bounds(SceneNode(mesh=_prototype(),
                                        rotation=(0, 0.7071, 0, 0.7071)))
@@ -319,29 +319,22 @@ class TestMeasuringAPlacedNode:
         assert turned.size[0] > upright.size[0]
 
     def test_a_scaled_node_is_measured_scaled(self) -> None:
-        from OpenGLContext_editor.bake.layers import node_bounds
         box = node_bounds(SceneNode(mesh=_prototype(), scale=(2, 2, 2)))
         assert box.maximum[1] == pytest.approx(4.0)      # the 2-unit-tall triangle
 
     def test_a_negative_scale_does_not_invert_the_box(self) -> None:
-        from OpenGLContext_editor.bake.layers import node_bounds
         box = node_bounds(SceneNode(mesh=_prototype(), scale=(-1, 1, 1)))
         assert np.all(box.minimum <= box.maximum)
 
     def test_a_node_with_no_mesh_has_no_bounds(self) -> None:
-        from OpenGLContext_editor.bake.layers import node_bounds
         assert node_bounds(SceneNode(name='empty')) is None
 
     def test_several_primitives_are_measured_together(self) -> None:
-        from OpenGLContext_editor.bake.layers import node_bounds
         tall = PBRMesh(positions=np.array([(0, 0, 0), (0, 9, 0), (1, 0, 0)], 'f'))
         box = node_bounds(SceneNode(mesh=[_prototype(), tall]))
         assert box.maximum[1] == pytest.approx(9.0)
 
     def test_rotated_instances_are_measured_at_their_widest(self) -> None:
-        from OpenGLContext.loaders.gltf.writer import InstanceSet
-
-        from OpenGLContext_editor.bake.layers import node_bounds
         instances = InstanceSet(translations=np.zeros((2, 3), 'f'),
                                 rotations=np.tile([0, 0, 0, 1.0], (2, 1)),
                                 scales=np.array([(1, 1, 1), (3, 3, 3)], 'f'))
@@ -354,18 +347,14 @@ class TestALadderRungOfSeveralMeshes:
     two meshes. A rung of the ladder is whatever the prototype is made of."""
 
     def _placed(self, rung):
-        from OpenGLContext_editor.bake.layers import InstanceLayer
         return InstanceLayer(positions=np.array([(0.0, 0.0, 0.0),
                                                  (4.0, 0.0, 4.0)]),
                              lods=[(0.0, rung)], name='trees')
 
     def _region(self):
-        from OpenGLContext_editor.bake.bounds import BoundingBox
         return BoundingBox((-50.0, -50.0, -50.0), (50.0, 50.0, 50.0))
 
     def _mesh(self, colour):
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
-        from OpenGLContext.scenegraph.pbrmesh import PBRMesh
         return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
                        indices=np.array([0, 1, 2], np.uint32),
                        material=PBRMaterial(baseColor=colour))
@@ -391,7 +380,6 @@ class TestALadderRungOfSeveralMeshes:
                            second.instances.translations)
 
     def test_a_tile_with_nothing_in_it_gets_nothing(self) -> None:
-        from OpenGLContext_editor.bake.bounds import BoundingBox
         rung = [self._mesh((1.0, 0, 0)), self._mesh((0, 1.0, 0))]
         empty = BoundingBox((500.0, 0.0, 500.0), (600.0, 10.0, 600.0))
         assert self._placed(rung).content(empty, 1.0) == []
@@ -399,31 +387,22 @@ class TestALadderRungOfSeveralMeshes:
 
 class TestCombiningMeshesDoesNotLoseAMaterial:
     def _mesh(self, material):
-        from OpenGLContext.scenegraph.pbrmesh import PBRMesh
         return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
                        indices=np.array([0, 1, 2], np.uint32), material=material)
 
     def test_meshes_of_one_material_combine(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
-
-        from OpenGLContext_editor.bake.assets import combined_mesh
         material = PBRMaterial(baseColor=(1.0, 0.0, 0.0))
         combined = combined_mesh([self._mesh(material), self._mesh(material)])
         assert combined.material is material
 
     def test_meshes_of_different_materials_do_not(self) -> None:
         """Silently keeping the first one paints the whole prototype in it."""
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 
-        from OpenGLContext_editor.bake.assets import combined_mesh
         with pytest.raises(ValueError):
             combined_mesh([self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),
                            self._mesh(PBRMaterial(baseColor=(0.0, 1.0, 0.0)))])
 
     def test_an_override_says_they_may(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
-
-        from OpenGLContext_editor.bake.assets import combined_mesh
         wanted = PBRMaterial(baseColor=(0.0, 0.0, 1.0))
         combined = combined_mesh(
             [self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),

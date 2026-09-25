@@ -194,9 +194,9 @@ def choose_structures(line: Any, natural: Any, *,
     kinds[departure > embankment_limit] = Op.BRIDGE
     _drop_short(kinds, station, Op.TUNNEL, minimum_tunnel, closed)
     _drop_short(kinds, station, Op.BRIDGE, minimum_span, closed)
-    _reach_out(kinds, station, departure, Op.BRIDGE, approach_limit,
+    _reach_out(kinds, station, Op.BRIDGE, approach_limit,
                departure > ABUTMENT_HEIGHT, closed)
-    _reach_out(kinds, station, departure, Op.TUNNEL, approach_limit,
+    _reach_out(kinds, station, Op.TUNNEL, approach_limit,
                departure < -portal_cover, closed)
     _close_gaps(kinds, station, departure, closed)
     if waterline is not None:
@@ -252,8 +252,7 @@ def _drop_short(kinds: np.ndarray, station: np.ndarray, wanted: Op,
             kinds[_covered(first, last, wraps, len(kinds))] = Op.DIRT
 
 
-def _reach_out(kinds: np.ndarray, station: np.ndarray, departure: np.ndarray,
-               wanted: Op, limit: float, eligible: np.ndarray,
+def _reach_out(kinds: np.ndarray, station: np.ndarray, wanted: Op, limit: float, eligible: np.ndarray,
                closed: bool) -> None:
     """Extend each run of ``wanted`` down its approaches to land on the ground.
 

@@ -12,8 +12,9 @@ import pytest
 from OpenGLContext.loaders.gltf.writer import SceneNode, write_glb
 from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.transform import Transform
 
-from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
+from OpenGLContext_editor.bake.assets import _apply, _local_matrix, combined_mesh, meshes_from_gltf
 
 
 def _triangle(**kwargs):
@@ -141,18 +142,12 @@ class TestReadingAVRMLTransform:
     """
 
     def test_rotation_happens_about_the_centre(self) -> None:
-        from OpenGLContext.scenegraph.transform import Transform
-
-        from OpenGLContext_editor.bake.assets import _apply, _local_matrix
         node = Transform(center=(1, 0, 0), rotation=(0, 1, 0, math.pi))
         turned = _apply(np.array([[2.0, 0.0, 0.0]]), _local_matrix(node))
         # A half turn about (1,0,0) takes x=2 to x=0, not to x=-2.
         assert np.allclose(turned[0], (0, 0, 0), atol=1e-5)
 
     def test_a_plain_transform_is_the_identity(self) -> None:
-        from OpenGLContext.scenegraph.transform import Transform
-
-        from OpenGLContext_editor.bake.assets import _local_matrix
         assert np.allclose(_local_matrix(Transform()), np.identity(4))
 
 

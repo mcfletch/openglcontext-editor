@@ -22,13 +22,14 @@ import numpy as np
 import pytest
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.scatter import scatter_on_heightfield
 
 SIDE = 400.0
 REGION = BoundingBox((-SIDE / 2, 0.0, -SIDE / 2), (SIDE / 2, 0.0, SIDE / 2))
 
 
-def _flat(x, z):
+def _flat(x, _z):
     return np.zeros(np.shape(np.asarray(x, dtype='d')))
 
 
@@ -135,12 +136,10 @@ class TestWhatItCostsToPlace:
 
 class TestTheShippedForest:
     def test_it_is_still_a_forest(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         placed = ProceduralWorld().scatter()
         assert 400_000 < len(placed.positions) < 800_000
 
     def test_and_the_trees_are_not_in_each_other(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         placed = ProceduralWorld().scatter()
         sample = placed.positions[::400][:, [0, 2]]
         gaps = np.hypot(sample[:, None, 0] - sample[None, :, 0],
@@ -162,7 +161,7 @@ class TestMeasuringTheSlopeCheaply:
     central difference over a metre reads every wrinkle of an earthwork as a
     cliff."""
 
-    def _bank(self, x, z):
+    def _bank(self, x, _z):
         """Flat, with a wall down the middle."""
         return np.where(np.abs(np.asarray(x, 'd')) < 20.0, 0.0, 40.0)
 
@@ -170,13 +169,13 @@ class TestMeasuringTheSlopeCheaply:
         counted = _Counting(self._bank)
         scatter_on_heightfield(counted, REGION, spacing=8.0, seed=3,
                                slope_limit=30.0,
-                               slope_fn=lambda x, z: np.zeros(np.shape(x)))
+                               slope_fn=lambda x, _z: np.zeros(np.shape(x)))
         assert counted.points == (SIDE / 8.0 + 1) ** 2
 
     def test_and_it_decides_what_stays(self) -> None:
         steep = scatter_on_heightfield(
             _flat, REGION, spacing=8.0, seed=3, slope_limit=30.0,
-            slope_fn=lambda x, z: np.where(np.asarray(x, 'd') > 0,
+            slope_fn=lambda x, _z: np.where(np.asarray(x, 'd') > 0,
                                            math.radians(60.0), 0.0))
         assert len(steep.positions)
         assert float(steep.positions[:, 0].max()) < 0.0
@@ -188,7 +187,6 @@ class TestMeasuringTheSlopeCheaply:
         assert float(np.abs(np.abs(found.positions[:, 0]) - 20.0).min()) > 1.0
 
     def test_the_shipped_world_uses_its_own_field(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=1024.0, field_resolution=257,
                                 control_size=256)
         assert world.slope_fn() is not None
@@ -198,7 +196,6 @@ class TestMeasuringTheSlopeCheaply:
         landscape: a world whose ground is meshed into its tiles still writes
         the landscape beside them, because that is what the tiles are blended
         from and what the world is collided against."""
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         assert ProceduralWorld(ground='tiles',
                                extent=512.0).slope_fn() is not None
 
@@ -209,7 +206,6 @@ class TestAskingForNone:
     single cell the whole world falls in."""
 
     def test_a_world_with_no_trees_has_none(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         bare = ProceduralWorld(tree_density=0.0, extent=512.0, ground='tiles',
                                forest='tiles', road=False)
         assert len(bare.scatter().positions) == 0

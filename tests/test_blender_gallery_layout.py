@@ -106,7 +106,7 @@ class TestHowTheyStand:
 
     def test_none_of_them_moves_more_than_a_few_millimetres(self, plan):
         """It is a hall that has been walked through, not an earthquake."""
-        for plinth, place in zip(plan.plinths(), plan._places(), strict=True):
+        for plinth, place in zip(plan.plinths(), plan._places(), strict=True):  # noqa: SLF001 white-box test of the helper
             assert math.dist(plinth.centre[:2], place) <= plan.plinth_shift
 
     def test_they_are_turned_a_fraction_of_a_degree(self, plan):
@@ -133,7 +133,7 @@ class TestHowTheyStand:
 
     def test_no_bust_is_turned_far_enough_to_look_at_a_wall(self, plan):
         for bust in plan.busts():
-            square = plan._facing(bust.position[0])
+            square = plan._facing(bust.position[0])  # noqa: SLF001 white-box test of the helper
             assert abs(bust.turn - square) <= plan.bust_turn
 
     def test_the_same_hall_is_built_twice_the_same(self, plan):

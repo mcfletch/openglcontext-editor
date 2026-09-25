@@ -14,6 +14,7 @@ from PIL import Image
 
 from OpenGLContext_editor.assets import plants
 from OpenGLContext_editor.assets.card import bake_card, card_coverage
+from tests.test_assets_plants import _source
 
 pytest.importorskip('glfw')
 
@@ -21,7 +22,6 @@ pytest.importorskip('glfw')
 @pytest.fixture
 def plant(tmp_path):
     """A baked plant file to render a card from: a leaf on a cutout texture."""
-    from tests.test_assets_plants import _source
     source = _source(tmp_path, nodes=[('leaf', (0, 0, 0))])
     out = tmp_path / 'assets'
     species = plants.bake(source, str(out), card=False)
@@ -74,7 +74,6 @@ class TestACardIsShapedLikeThePlant:
 
     def _wide(self, tmp_path, across):
         """A plant ``across`` times wider than it is tall."""
-        from tests.test_assets_plants import _source
         tmp_path.mkdir(parents=True, exist_ok=True)
         source = _source(tmp_path,
                          nodes=[('mat', (0, 0, 0), (across, 1.0, 1.0))])
@@ -121,7 +120,6 @@ class TestAPlantDeeperThanItIsTall:
 
     def _deep(self, tmp_path, depth):
         """Two unit cards, one ``depth`` in front of the middle, one behind."""
-        from tests.test_assets_plants import _source
         tmp_path.mkdir(parents=True, exist_ok=True)
         source = _source(tmp_path, nodes=[('leaf', (0, 0, 0))])
         leaf = plants.flatten(source.gltf)[0]
@@ -173,7 +171,6 @@ class TestABakedPlantGetsItsCardMeasured:
     def test_the_species_carries_the_width_that_was_rendered(self,
                                                              tmp_path) -> None:
         """Not a guess: the quad has to match what the geometry measured."""
-        from tests.test_assets_plants import _source
         source = _source(tmp_path, nodes=[('leaf', (0, 0, 0))])
         out = tmp_path / 'assets'
         species = plants.bake(source, str(out), card=True, card_size=64)

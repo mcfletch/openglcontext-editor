@@ -7,9 +7,12 @@ it was found and the road rides a walled embankment its own width.
 """
 import numpy as np
 import pytest
+from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
 from OpenGLContext.scenegraph.road import RoadProfile
+from OpenGLContext.scenegraph.roadworks import CONCRETE_ALBEDO
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.road import CARRIED, RoadLayer, RoadPath
 from OpenGLContext_editor.world.structures import Op
 
@@ -25,7 +28,7 @@ def _crossing(length=200.0, points=41):
     return RoadPath(line, profile=PROFILE, ops=ops)
 
 
-def _ground(x, z):
+def _ground(_x, z):
     """Twenty metres up, except across the middle, where it drops away."""
     z = np.asarray(z, 'd')
     return np.where((z > 45.0) & (z < 155.0), 12.0, 20.0)
@@ -83,7 +86,6 @@ class TestWhatABakeWrites:
 
 class TestTheShippedWorld:
     def test_its_crossings_are_built_as_structures(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         circuit = ProceduralWorld().circuit()
         kinds = {kind for kind, _, _ in circuit.structure_runs()}
         assert Op.CAUSEWAY in kinds
@@ -110,18 +112,15 @@ class TestWhatTheWallIsMadeOf:
         raise AssertionError('no %s wall was written' % (kind,))
 
     def test_the_wall_is_the_concrete_the_fill_is(self) -> None:
-        from OpenGLContext.scenegraph.roadworks import CONCRETE_ALBEDO
         assert tuple(float(one) for one in self._named().baseColor[:3]) \
             == pytest.approx(CONCRETE_ALBEDO, abs=1e-6)
 
     def test_a_caller_may_choose_its_own(self) -> None:
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         wanted = PBRMaterial(baseColor=(0.4, 0.1, 0.1))
         assert self._named(structure_material=wanted) is wanted
 
     def test_and_the_barrier_material_is_left_for_a_railing(self) -> None:
         """Which is a deck's parapet, and not a causeway's wall."""
-        from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
         wanted = PBRMaterial(baseColor=(0.4, 0.1, 0.1))
         assert self._named(barrier=wanted) is not wanted
 

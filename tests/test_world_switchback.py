@@ -6,7 +6,9 @@ slope too steep to climb straight up. What it needs from the generator is to be
 that goes somewhere else.
 """
 import numpy as np
+from OpenGLContext.scenegraph.road import resample_polyline
 
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.route import (
     hold_corners,
     hold_radius,
@@ -103,7 +105,6 @@ class TestAgainstOpeningItOut:
     def _resampled(self, drawn, spacing=6.0):
         """As the generator sees it: a plan is built at the road's spacing, and
         a corner is only a corner once there are points across it."""
-        from OpenGLContext.scenegraph.road import resample_polyline
         line = np.stack([drawn[:, 0], np.zeros(len(drawn)), drawn[:, 1]],
                         axis=-1)
         return resample_polyline(line, spacing)[:, [0, 2]]
@@ -139,7 +140,6 @@ class TestOnAClosedCircuit:
 
 class TestThroughTheGenerator:
     def _world(self, plan, **named):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         named.setdefault('extent', 2048.0)
         named.setdefault('resolution', 17)
         named.setdefault('tree_density', 0.0)

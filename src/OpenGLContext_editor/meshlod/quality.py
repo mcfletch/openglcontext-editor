@@ -26,6 +26,68 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from OpenGL.GL import (
+    GL_ARRAY_BUFFER,
+    GL_COLOR_ATTACHMENT0,
+    GL_COLOR_BUFFER_BIT,
+    GL_DEPTH_ATTACHMENT,
+    GL_DEPTH_BUFFER_BIT,
+    GL_DEPTH_COMPONENT24,
+    GL_DEPTH_TEST,
+    GL_ELEMENT_ARRAY_BUFFER,
+    GL_FALSE,
+    GL_FILL,
+    GL_FLOAT,
+    GL_FRAGMENT_SHADER,
+    GL_FRAMEBUFFER,
+    GL_FRAMEBUFFER_COMPLETE,
+    GL_FRONT_AND_BACK,
+    GL_LINE,
+    GL_POLYGON_OFFSET_FILL,
+    GL_RENDERBUFFER,
+    GL_RGB,
+    GL_RGBA8,
+    GL_STATIC_DRAW,
+    GL_TRIANGLES,
+    GL_UNSIGNED_BYTE,
+    GL_UNSIGNED_INT,
+    GL_VERTEX_SHADER,
+    glBindBuffer,
+    glBindFramebuffer,
+    glBindRenderbuffer,
+    glBindVertexArray,
+    glBufferData,
+    glCheckFramebufferStatus,
+    glClear,
+    glClearColor,
+    glDeleteBuffers,
+    glDeleteFramebuffers,
+    glDeleteProgram,
+    glDeleteRenderbuffers,
+    glDeleteVertexArrays,
+    glDisable,
+    glDrawElements,
+    glEnable,
+    glEnableVertexAttribArray,
+    glFinish,
+    glFramebufferRenderbuffer,
+    glGenBuffers,
+    glGenFramebuffers,
+    glGenRenderbuffers,
+    glGenVertexArrays,
+    glGetUniformLocation,
+    glPolygonMode,
+    glPolygonOffset,
+    glReadPixels,
+    glRenderbufferStorage,
+    glUniform1i,
+    glUniformMatrix3fv,
+    glUniformMatrix4fv,
+    glUseProgram,
+    glVertexAttribPointer,
+    glViewport,
+)
+from OpenGL.GL.shaders import compileProgram, compileShader
 
 __all__ = [
     "CHANNEL_DELTA",
@@ -229,26 +291,6 @@ void main() {
         self._build()
 
     def _build(self) -> None:
-        from OpenGL.GL import (
-            GL_COLOR_ATTACHMENT0,
-            GL_DEPTH_ATTACHMENT,
-            GL_DEPTH_COMPONENT24,
-            GL_FRAGMENT_SHADER,
-            GL_FRAMEBUFFER,
-            GL_FRAMEBUFFER_COMPLETE,
-            GL_RENDERBUFFER,
-            GL_RGBA8,
-            GL_VERTEX_SHADER,
-            glBindFramebuffer,
-            glBindRenderbuffer,
-            glCheckFramebufferStatus,
-            glFramebufferRenderbuffer,
-            glGenFramebuffers,
-            glGenRenderbuffers,
-            glRenderbufferStorage,
-        )
-        from OpenGL.GL.shaders import compileProgram, compileShader
-
         self._program = compileProgram(
             compileShader(self.VERTEX, GL_VERTEX_SHADER),
             compileShader(self.FRAGMENT, GL_FRAGMENT_SHADER),
@@ -331,7 +373,6 @@ void main() {
         The **median** frame is reported. A mean is moved by the one frame in
         which the driver decided to compile something.
         """
-        from OpenGL.GL import glFinish
 
         if frames < 1:
             raise ValueError("frames must be at least one, got %r" % (frames,))
@@ -359,13 +400,6 @@ void main() {
 
     def read(self) -> Any:
         """The probe's framebuffer as an ``(n, n, 3)`` array of bytes."""
-        from OpenGL.GL import (
-            GL_FRAMEBUFFER,
-            GL_RGB,
-            GL_UNSIGNED_BYTE,
-            glBindFramebuffer,
-            glReadPixels,
-        )
 
         glBindFramebuffer(GL_FRAMEBUFFER, self._framebuffer)
         try:
@@ -379,20 +413,6 @@ void main() {
 
     def _upload(self, positions: Any, normals: Any, indices: Any) -> _Upload:
         """Put one mesh on the card and hand back what draws it."""
-        from OpenGL.GL import (
-            GL_ARRAY_BUFFER,
-            GL_ELEMENT_ARRAY_BUFFER,
-            GL_FALSE,
-            GL_FLOAT,
-            GL_STATIC_DRAW,
-            glBindBuffer,
-            glBindVertexArray,
-            glBufferData,
-            glEnableVertexAttribArray,
-            glGenBuffers,
-            glGenVertexArrays,
-            glVertexAttribPointer,
-        )
 
         positions = np.ascontiguousarray(positions, dtype="f4")
         normals = np.ascontiguousarray(normals, dtype="f4")
@@ -415,8 +435,6 @@ void main() {
         return _Upload(vao=vao, buffers=buffers, count=len(indices))
 
     def _discard(self, upload: _Upload) -> None:
-        from OpenGL.GL import glBindVertexArray, glDeleteBuffers, glDeleteVertexArrays
-
         glBindVertexArray(0)
         glDeleteBuffers(len(upload.buffers), upload.buffers)
         glDeleteVertexArrays(1, [upload.vao])
@@ -425,18 +443,6 @@ void main() {
         self, distance: float, radius: float, centre: Any, fovy: float, rotation: float
     ) -> None:
         """Bind the framebuffer and set the camera for the draws that follow."""
-        from OpenGL.GL import (
-            GL_DEPTH_TEST,
-            GL_FALSE,
-            GL_FRAMEBUFFER,
-            glBindFramebuffer,
-            glEnable,
-            glGetUniformLocation,
-            glUniformMatrix3fv,
-            glUniformMatrix4fv,
-            glUseProgram,
-            glViewport,
-        )
 
         glBindFramebuffer(GL_FRAMEBUFFER, self._framebuffer)
         glViewport(0, 0, self.size, self.size)
@@ -467,26 +473,6 @@ void main() {
 
     def _draw(self, upload: _Upload, edges: bool) -> None:
         """Clear and draw the mesh once, with the wireframe over it or not."""
-        from OpenGL.GL import (
-            GL_COLOR_BUFFER_BIT,
-            GL_DEPTH_BUFFER_BIT,
-            GL_FILL,
-            GL_FRONT_AND_BACK,
-            GL_LINE,
-            GL_POLYGON_OFFSET_FILL,
-            GL_TRIANGLES,
-            GL_UNSIGNED_INT,
-            glBindVertexArray,
-            glClear,
-            glClearColor,
-            glDisable,
-            glDrawElements,
-            glEnable,
-            glGetUniformLocation,
-            glPolygonMode,
-            glPolygonOffset,
-            glUniform1i,
-        )
 
         glBindVertexArray(upload.vao)
         glClearColor(0.0, 0.0, 0.0, 1.0)
@@ -514,11 +500,6 @@ void main() {
 
     def release(self) -> None:
         """Give the framebuffer, its renderbuffers and the program back."""
-        from OpenGL.GL import (
-            glDeleteFramebuffers,
-            glDeleteProgram,
-            glDeleteRenderbuffers,
-        )
 
         if self._renderbuffers:
             glDeleteRenderbuffers(len(self._renderbuffers), self._renderbuffers)

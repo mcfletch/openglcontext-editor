@@ -11,6 +11,7 @@ import pytest
 from OpenGLContext.scenegraph.road import RoadProfile, advisory_speed, corner_speed
 from OpenGLContext.scenegraph.roadsigns import LIMIT
 
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.road import RoadPath
 from OpenGLContext_editor.world.signs import (
     LIMIT_SPACING,
@@ -111,7 +112,6 @@ class TestARoadWithSignsAllOverIt:
 
     @pytest.fixture(scope='class')
     def circuit(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=2048.0, seed=11).circuit()
 
     def test_it_is_posted(self, circuit) -> None:

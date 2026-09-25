@@ -108,7 +108,7 @@ def bake_atlas(obj: bpy.types.Object, path: str, grid: int = 8,
     centre, radius = bounding_sphere(obj)
     scene = bpy.context.scene
     with _scene_for_baking(scene, obj, tile, engine, world_strength, samples):
-        camera = _camera_looking_at(scene, centre, radius, margin)
+        camera = _camera_looking_at(scene, radius, margin)
         atlas = np.zeros((image, image, 4), dtype='f')
         directions = octahedral.view_directions(grid, hemi)
         with tempfile.TemporaryDirectory() as into:
@@ -209,8 +209,7 @@ class _scene_for_baking:
             bpy.data.cameras.remove(data)
 
 
-def _camera_looking_at(scene: Any, centre: Any, radius: float,
-                       margin: float) -> Any:
+def _camera_looking_at(scene: Any, radius: float, margin: float) -> Any:
     """An orthographic camera wide enough to hold the model from any angle."""
     data = bpy.data.cameras.new('ImpostorCamera')
     data.type = 'ORTHO'

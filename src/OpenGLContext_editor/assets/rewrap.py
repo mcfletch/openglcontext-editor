@@ -43,6 +43,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from opengl_decimate import certify, topology
+from OpenGLContext.loaders.gltf.meshes import estimate_tangents
 
 __all__ = [
     'Unwrapped',
@@ -142,7 +143,7 @@ def unwrap(positions: ArrayLike, indices: ArrayLike, size: int = DEFAULT_SIZE) -
     ``[0, 1]`` either way, so it decides how the charts are packed rather than
     what they are.
     """
-    import xatlas
+    import xatlas  # noqa: PLC0415 optional dependency: the rewrap extra
 
     points, belongs = topology.weld_positions(np.asarray(positions, dtype='d'))
     faces = belongs[np.asarray(indices).reshape(-1, 3)]
@@ -377,8 +378,6 @@ def frames(positions: ArrayLike, indices: ArrayLike, uv: ArrayLike,
     reason: one construction, one handedness convention, and a normal map baked
     here means what the renderer reads.
     """
-    from OpenGLContext.loaders.gltf.meshes import estimate_tangents
-
     normals = np.asarray(normals, dtype='f4')
     tangents = estimate_tangents(
         np.asarray(positions, dtype='f4'),

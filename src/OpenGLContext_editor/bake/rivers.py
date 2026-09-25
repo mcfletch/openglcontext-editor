@@ -82,7 +82,7 @@ class RiverLayer:
         """The ground the rivers cover, or None where there are none."""
         return BoundingBox.joined(
             BoundingBox.of_points(np.asarray(surface.positions, dtype='d'))
-            for surface in self._surfaces(spacing=None))
+            for surface in self._surfaces())
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
         """The water in one tile, at the detail that tile is drawn at."""
@@ -150,7 +150,7 @@ class RiverLayer:
                   & (course[:, 2] >= low[2]) & (course[:, 2] <= high[2]))
         return bool(inside.any())
 
-    def _surfaces(self, spacing: float | None) -> Any:
+    def _surfaces(self) -> Any:
         """Every river's surface, for measuring what they cover."""
         for channel in self.channels:
             course = self._course(channel)

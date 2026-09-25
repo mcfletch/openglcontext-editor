@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
 
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.road import RoadPath
 
 PROFILE = RoadProfile(lane_width=3.6, lanes=2)
@@ -75,7 +76,6 @@ class TestTheCostOfAskingAboutEmptyGround:
 
 class TestOnTheShippedWorld:
     def test_painting_the_control_map_does_not_walk_the_world(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(extent=1024.0, field_resolution=257,
                                 control_size=512)
         circuit = world.circuit()

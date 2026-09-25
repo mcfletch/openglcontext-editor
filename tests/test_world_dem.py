@@ -18,6 +18,7 @@ from OpenGLContext_editor.world.dem import (
     local_frame,
     read_hgt,
 )
+from OpenGLContext_editor.world.height import base_from_json
 
 #: A tiny stand-in for a real tile: 5 x 5 samples over one degree square.
 SIDE = 5
@@ -165,7 +166,6 @@ class TestTheHeightBase:
         assert base.grid() is base.grid()
 
     def test_it_round_trips_through_a_project_file(self, tmp_path) -> None:
-        from OpenGLContext_editor.world.height import base_from_json
         base = self._base(tmp_path, relief=0.8, datum=12.0)
         assert base_from_json(base.to_json()) == base
 

@@ -100,12 +100,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print('%-22s %d variant%s, %s' % (
             slug, len(species), '' if len(species) == 1 else 's',
             ', '.join('%s %.2fm' % (one.name, one.height) for one in species)))
-    manifest = _write(options.out, grown)
+    manifest = write_cover(options.out, grown)
     print('%d species -> %s' % (len(grown), manifest))
     return 0
 
 
-def _write(directory: str, grown: list) -> str:
+def write_cover(directory: str, grown: list) -> str:
     """The path of the directory's ``cover.json``, with ``grown`` added by name.
 
     Merged rather than replaced, because plants do not all want the same

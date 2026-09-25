@@ -11,9 +11,10 @@ import pytest
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.rivers import RiverLayer
 from OpenGLContext_editor.world.hydrology import Channel
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 
 
-def _slope(x, z):
+def _slope(x, _z):
     return 200.0 - np.asarray(x, dtype='d') * 0.1
 
 
@@ -123,7 +124,6 @@ class TestTheWorldThatCarriesThem:
     """A world is a list of layers, and the rivers have to be among them."""
 
     def _world(self, channels=(), **named):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         named.setdefault('extent', 1024.0)
         named.setdefault('resolution', 17)
         named.setdefault('tree_density', 0.0)

@@ -12,6 +12,7 @@ directory the glb is in, and how many bytes may be read is bounded. The cases
 below are the references that must be refused.
 """
 
+import base64
 import json
 import os
 import struct
@@ -141,7 +142,6 @@ class TestABufferThatCarriesItsOwnBytes:
         glb = chain_at()
         with open(os.path.join(os.path.dirname(glb), 'bust.lod0.bin'), 'rb') as handle:
             payload = handle.read()
-        import base64
         _repoint(glb, 'data:application/octet-stream;base64,'
                  + base64.b64encode(payload).decode('ascii'))
 
@@ -154,7 +154,6 @@ class TestABufferThatCarriesItsOwnBytes:
         glb = chain_at()
         with open(os.path.join(os.path.dirname(glb), 'bust.lod0.bin'), 'rb') as handle:
             payload = handle.read()
-        import base64
         _repoint(glb, 'data:application/octet-stream;base64,'
                  + base64.b64encode(payload).decode('ascii'))
 

@@ -6,13 +6,22 @@ the join between them: a road path that knows which of its stretches stand on
 the land, ground that is left alone under a deck and over a bore, and a bake
 layer that writes the deck and the bore into the tiles they cross.
 """
+import json
+
 import numpy as np
 import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
-from OpenGLContext.scenegraph.roadworks import BoreCut, TunnelProfile
+from OpenGLContext.scenegraph.roadworks import BoreCut, TunnelProfile, bore_opening
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
-from OpenGLContext_editor.world.road import RoadLayer, RoadPath, conform_terrain
+from OpenGLContext_editor.world.procedural import ProceduralWorld
+from OpenGLContext_editor.world.road import (
+    COARSEST_SPACING,
+    PORTAL_CUT,
+    RoadLayer,
+    RoadPath,
+    conform_terrain,
+)
 from OpenGLContext_editor.world.structures import Op
 
 SPACING = 10.0
@@ -216,7 +225,6 @@ class TestTheLayerWritesTheStructures:
         line, and a tube swept along points a hundred metres apart is not a
         coarse tunnel but a shape nothing in the world has. The error ladder of
         a tiled world starts at ninety-odd metres, so the spacing is held."""
-        from OpenGLContext_editor.world.road import COARSEST_SPACING
         layer = self._layer(Op.BRIDGE, 60.0)
         assert layer.spacing_for(4000.0) == pytest.approx(COARSEST_SPACING)
         assert layer.spacing_for(94.0) == pytest.approx(COARSEST_SPACING)
@@ -249,7 +257,6 @@ class TestWhatTheGameIsTold:
         assert layer.metadata()['roads'][0]['structures'] == []
 
     def test_it_is_plain_json(self) -> None:
-        import json
         layer = RoadLayer(RoadPath(_line(height=60.0),
                                    ops=_spanning(Op.TUNNEL, 10, 30)))
         assert 'tunnel' in json.dumps(layer.metadata())
@@ -258,7 +265,6 @@ class TestWhatTheGameIsTold:
 class TestTheShippedWorld:
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=4096.0)
 
     def test_its_circuit_has_structures_on_it(self, world) -> None:
@@ -290,7 +296,6 @@ class TestTheShippedWorld:
         assert np.array_equal(holes(x, z), again(x, z))
 
     def test_turning_them_off_leaves_the_road_on_dirt(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         plain = ProceduralWorld(extent=4096.0, structures=False)
         assert bool(plain.circuit().on_ground.all())
 
@@ -341,7 +346,7 @@ class TestWhereAStructureMeetsTheGround:
         line = _line(height=0.0, count=41)
         path = RoadPath(line, ops=_spanning(Op.TUNNEL, 20, 40))
 
-        def hill(x, z):
+        def hill(x, _z):
             return np.clip((np.asarray(x, 'd') - 150.0) * 0.4, 0.0, 60.0)
         return path, conform_terrain(hill, path), hill
 
@@ -396,14 +401,13 @@ class TestTheGroundAtAPortal:
                                             count=81))
         portal = float(line[self.FIRST][0])
 
-        def hill(x, z):
+        def hill(x, _z):
             return np.clip((np.asarray(x, 'd') - portal + start) * slope,
                            0.0, 300.0)
         return path, conform_terrain(hill, path), hill, portal
 
     def crown(self):
         """How much ground the funnel leaves over the road at the mouth."""
-        from OpenGLContext.scenegraph.roadworks import TunnelProfile
         tunnel = TunnelProfile()
         return tunnel.clearance + tunnel.portal_border
 
@@ -419,7 +423,6 @@ class TestTheGroundAtAPortal:
         so ground left at the height of the face is behind it and ground left
         above the face stands in front of it. The funnel leaves it level with
         the top of the face and no higher."""
-        from OpenGLContext.scenegraph.roadworks import TunnelProfile, bore_opening
         path, conformed, _hill, portal = self._approach(slope=1.5)
         run = path.points[self.FIRST:self.LAST + 1]
         mouth = bore_opening(run, conformed, profile=path.profile,
@@ -451,7 +454,6 @@ class TestTheGroundAtAPortal:
 
     def test_it_meets_an_ordinary_hillside_inside_the_cut(self) -> None:
         """Which is why there is no step where the digging stops."""
-        from OpenGLContext_editor.world.road import PORTAL_CUT
         _path, conformed, hill, portal = self._approach()
         at = portal + PORTAL_CUT - 4.0
         assert float(conformed(np.array([at]), np.array([0.0]))[0]) \
@@ -503,7 +505,7 @@ class TestTheGroundAtAPortal:
         line = _line(height=0.0, count=41)
         path = RoadPath(line)
 
-        def hill(x, z):
+        def hill(x, _z):
             return np.full(np.shape(np.asarray(x, 'd')), 200.0)
         conformed = conform_terrain(hill, path)
         assert float(conformed(np.array([200.0]), np.array([600.0]))[0]) \
@@ -540,7 +542,6 @@ class TestTheRoadsOwnSectionTravelsWithIt:
                            verge_width=0.9, verge_drop=0.4, crossfall=0.03,
                            texture_length=18.0)
         found = RoadLayer(RoadPath(line, profile=mine)).metadata()['roads'][0]
-        import numpy as np
         rebuilt = RoadProfile(
             lane_width=found['profile']['laneWidth'],
             lanes=found['profile']['lanes'],
@@ -553,7 +554,6 @@ class TestTheRoadsOwnSectionTravelsWithIt:
         assert np.allclose(rebuilt.section(), mine.section())
 
     def test_it_is_plain_json(self) -> None:
-        import json
         assert json.loads(json.dumps(self._profile()))
 
 
@@ -569,7 +569,6 @@ class TestAPortalIsOpen:
 
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=2048.0, seed=11)
 
     @staticmethod
@@ -615,7 +614,6 @@ class TestTheHillOverABore:
 
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=4096.0)
 
     def bored(self, world):
@@ -642,7 +640,6 @@ class TestTheHillOverABore:
         Measured away from the portals, since a portal *is* dug -- see
         :class:`TestTheGroundAtAPortal` for the funnel and how far it reaches.
         """
-        from OpenGLContext_editor.world.road import PORTAL_CUT
         circuit, inside = self.bored(world)
         line = circuit.points
         portals = circuit.portals().points

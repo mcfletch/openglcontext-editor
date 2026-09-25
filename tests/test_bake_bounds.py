@@ -8,6 +8,7 @@ whose contents are nowhere near where the traversal thinks they are.
 
 import numpy as np
 import pytest
+from OpenGLContext.loaders.tiles3d.tileset import build_runtime_tileset
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 
@@ -87,7 +88,6 @@ class TestTheThreeDTilesFrame:
 
     def test_it_round_trips_through_the_runtime(self) -> None:
         """What the runtime reads back has to be the box that went in."""
-        from OpenGLContext.loaders.tiles3d.tileset import build_runtime_tileset
         box = BoundingBox((-8, 1, -20), (12, 9, 4))
         tileset = build_runtime_tileset(
             {'asset': {'version': '1.1'}, 'geometricError': 10.0,

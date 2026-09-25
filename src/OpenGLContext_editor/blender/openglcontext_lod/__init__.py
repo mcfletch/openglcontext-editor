@@ -40,7 +40,7 @@ def register() -> None:
     """Add the operators, the panel and the glTF export extension."""
     if _bpy is None:
         raise RuntimeError('this add-on runs inside Blender')
-    from . import exporter, ops
+    from . import exporter, ops  # noqa: PLC0415 they import bpy; this imports without it
 
     global glTF2ExportUserExtension
     glTF2ExportUserExtension = exporter.MSFTLODExtension
@@ -50,7 +50,7 @@ def register() -> None:
 def unregister() -> None:
     if _bpy is None:
         return
-    from . import ops
+    from . import ops  # noqa: PLC0415 it imports bpy; this imports without it
 
     global glTF2ExportUserExtension
     glTF2ExportUserExtension = None

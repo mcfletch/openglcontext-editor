@@ -75,7 +75,7 @@ class SculptStroke(HeightEdit):
         near = np.clip(1.0 - np.asarray(distance, dtype='d') / reach, 0.0, 1.0)
         return np.asarray(near ** max(float(self.falloff), 1e-6), dtype='d')
 
-    def delta(self, x: Any, z: Any, height: Any) -> np.ndarray:
+    def delta(self, x: Any, z: Any, height: Any) -> np.ndarray:  # noqa: ARG002 HeightEdit.delta protocol
         x = np.asarray(x, dtype='d')
         z = np.asarray(z, dtype='d')
         reach = self.profile(np.hypot(x - self.centre[0], z - self.centre[1]))

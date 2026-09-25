@@ -8,12 +8,26 @@ the baked world so that a game builds the same road the bake drew.
 """
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.road import RoadProfile, corner_speed
+from OpenGLContext.scenegraph.gantry import GantryProfile
+from OpenGLContext.scenegraph.road import (
+    RoadProfile,
+    corner_speed,
+    cornering_radius,
+    plan_curvature,
+)
 
-from OpenGLContext_editor.world.road import RoadPath, conform_terrain
+from OpenGLContext_editor.bake.bounds import BoundingBox
+from OpenGLContext_editor.bake.gantry import GantryLayer
+from OpenGLContext_editor.world.gantry import start_finish
+from OpenGLContext_editor.world.procedural import (
+    CIRCUIT_DESIGN_SPEED,
+    CIRCUIT_MAXIMUM_BANK,
+    ProceduralWorld,
+)
+from OpenGLContext_editor.world.road import RoadLayer, RoadPath, conform_terrain
 
 
-def _flat(x, z):
+def _flat(x, _z):
     return np.zeros_like(np.asarray(x, 'd'))
 
 
@@ -109,7 +123,6 @@ class TestTheGroundBesideABankedRoad:
 
 class TestTheLeanTravelsWithTheBakedWorld:
     def _layer(self, bank):
-        from OpenGLContext_editor.world.road import RoadLayer
         return RoadLayer(RoadPath(_straight(400.0, count=41, height=3.0),
                                   bank=np.full(41, bank)))
 
@@ -122,7 +135,6 @@ class TestTheLeanTravelsWithTheBakedWorld:
         assert self._layer(0.0).metadata()['roads'][0]['bank'] == []
 
     def test_the_surface_it_writes_leans(self) -> None:
-        from OpenGLContext_editor.bake.bounds import BoundingBox
         region = BoundingBox((-50, -50, -300), (50, 50, -100))
         level = self._layer(0.0).content(region, error=0.0)[0]
         leaning = self._layer(0.25).content(region, error=0.0)[0]
@@ -135,7 +147,6 @@ class TestTheLeanTravelsWithTheBakedWorld:
 
 class TestWhatTheCircuitIsLaidOutFor:
     def _circuit(self, **kwargs):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(structures=False, **kwargs).circuit()
 
     def test_its_corners_lean(self) -> None:
@@ -145,9 +156,7 @@ class TestWhatTheCircuitIsLaidOutFor:
         """Not one speed for the whole lap: the corners are drawn from a mix
         now, and a hairpin holds what a hairpin holds. What has to be true of
         each of them is that it holds the speed it was *laid out* for."""
-        from OpenGLContext.scenegraph.road import plan_curvature
 
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         path = world.circuit()
         curvature = np.abs(plan_curvature(path.points, closed=True))
@@ -158,12 +167,6 @@ class TestWhatTheCircuitIsLaidOutFor:
         assert np.all(held >= world.circuit_character().design_speed - 1e-6)
 
     def test_a_circuit_of_one_corner_holds_the_speed_it_was_laid_out_for(self) -> None:
-        from OpenGLContext.scenegraph.road import plan_curvature
-
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED,
-            ProceduralWorld,
-        )
         path = ProceduralWorld(structures=False, variety=0.0).circuit()
         curvature = np.abs(plan_curvature(path.points, closed=True))
         radius = np.where(curvature > 1e-9, 1.0 / np.maximum(curvature, 1e-12),
@@ -175,12 +178,7 @@ class TestWhatTheCircuitIsLaidOutFor:
     def test_banking_lets_it_corner_tighter_than_a_flat_road_would(self) -> None:
         """About a fifth tighter, which is what road banking is worth. Half
         again would be an oval, and this is a road."""
-        from OpenGLContext.scenegraph.road import cornering_radius
 
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED,
-            CIRCUIT_MAXIMUM_BANK,
-        )
         flat = cornering_radius(CIRCUIT_DESIGN_SPEED)
         banked = cornering_radius(CIRCUIT_DESIGN_SPEED,
                                   bank=CIRCUIT_MAXIMUM_BANK)
@@ -189,7 +187,6 @@ class TestWhatTheCircuitIsLaidOutFor:
 
 class TestTheStartLineOnABankedRoad:
     def _placement(self, bank):
-        from OpenGLContext_editor.world.gantry import start_finish
         return start_finish(RoadPath(_straight(200.0, height=5.0),
                                      RoadProfile(),
                                      bank=np.full(21, bank)), station=100.0)
@@ -207,9 +204,8 @@ class TestTheStartLineOnABankedRoad:
             RoadProfile().crossfall)
 
     def test_the_paint_lies_on_the_carriageway_rather_than_across_it(self) -> None:
-        from OpenGLContext_editor.bake.gantry import GantryLayer
         one = self._placement(0.10)
-        painted = GantryLayer(placement=one)._mesh.positions
+        painted = GantryLayer(placement=one)._mesh.positions  # noqa: SLF001 white-box test of the helper
         # The line spans the carriageway, so its two ends are a carriageway's
         # width apart in plan and the lean's worth apart in height.
         line = np.asarray(painted, dtype='d')
@@ -218,10 +214,8 @@ class TestTheStartLineOnABankedRoad:
 
     def test_the_legs_stay_upright(self) -> None:
         """A gantry is steel standing on two feet; the road leans, not it."""
-        from OpenGLContext.scenegraph.gantry import GantryProfile
 
-        from OpenGLContext_editor.bake.gantry import GantryLayer
         one = self._placement(0.10)
-        top = np.asarray(GantryLayer(placement=one)._mesh.positions,
+        top = np.asarray(GantryLayer(placement=one)._mesh.positions,  # noqa: SLF001 white-box test of the helper
                          dtype='d')[:, 1].max()
         assert top == pytest.approx(5.0 + GantryProfile().height, abs=0.2)

@@ -17,7 +17,7 @@ from OpenGLContext_editor.world.hydrology import (
 EXTENT = 2000.0
 
 
-def _slope(x, z):
+def _slope(x, _z):
     """Ground falling one in ten towards the east."""
     return 200.0 - np.asarray(x, dtype='d') * 0.1
 
@@ -67,7 +67,7 @@ class TestWhereWaterGoes:
         assert np.hypot(*path.points[-1]) < 100.0
 
     def test_a_spring_on_the_flat_goes_nowhere(self) -> None:
-        path = self._flow(lambda x, z: np.full(np.shape(x), 50.0))
+        path = self._flow(lambda x, _z: np.full(np.shape(x), 50.0))
         assert path.ended == 'basin'
         assert len(path.points) >= 1
 
@@ -222,7 +222,6 @@ class TestTheSurfaceOnIt:
         assert self._river().surface(_slope) is not None
 
     def test_the_water_runs_down_the_channel(self) -> None:
-        import numpy as np
         surface = self._river().surface(_slope)
         points = np.asarray(surface.positions)
         upstream = points[points[:, 0] < -600.0][:, 1].mean()
@@ -231,7 +230,6 @@ class TestTheSurfaceOnIt:
 
     def test_it_sits_in_the_bed_rather_than_over_the_bank(self) -> None:
         """Below the land the channel cut into, or it is a ribbon on a hill."""
-        import numpy as np
         channel = self._river()
         surface = channel.surface(_slope)
         points = np.asarray(surface.positions)
@@ -239,7 +237,6 @@ class TestTheSurfaceOnIt:
         assert (points[:, 1] < land).mean() > 0.9
 
     def test_a_bigger_river_is_wider(self) -> None:
-        import numpy as np
         line = np.array([[0.0, -100.0], [0.0, 100.0]])
         small = Channel(points=line, flow=np.array([1.0, 1.0]))
         big = Channel(points=line, flow=np.array([16.0, 16.0]))
@@ -247,6 +244,5 @@ class TestTheSurfaceOnIt:
             > np.ptp(np.asarray(small.surface(_slope).positions)[:, 0])
 
     def test_a_channel_too_short_to_carve_has_no_water(self) -> None:
-        import numpy as np
         assert Channel(points=np.array([[0.0, 0.0]]),
                        flow=np.array([1.0])).surface(_slope) is None

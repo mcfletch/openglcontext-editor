@@ -13,8 +13,10 @@ and are tested there.
 """
 import numpy as np
 import pytest
+from OpenGLContext.loaders.tiles3d.procedural import terrain_height
 from OpenGLContext.scenegraph.roadworks import TunnelProfile
 
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.structures import (
     APPROACH_LIMIT,
     CUTTING_LIMIT,
@@ -308,9 +310,6 @@ class TestARealAlignment:
 
     @pytest.fixture(scope='class')
     def circuit(self):
-        from OpenGLContext.loaders.tiles3d.procedural import terrain_height
-
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         path = world.circuit()
         natural = np.asarray(terrain_height(path.points[:, 0], path.points[:, 2]),
@@ -392,9 +391,7 @@ class TestStructuresThatMeet:
         it because only structures are left undisturbed, and a deck built
         through it would be the hill standing up through the carriageway.
         """
-        from OpenGLContext.loaders.tiles3d.procedural import terrain_height
 
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         world = ProceduralWorld(structures=False)
         line = world.circuit().points
         natural = np.asarray(terrain_height(line[:, 0], line[:, 2]), dtype='d')

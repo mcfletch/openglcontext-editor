@@ -113,7 +113,7 @@ class VegetationLayer:
                            (box.maximum[0], box.maximum[1] + tallest,
                             box.maximum[2]))
 
-    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
+    def content(self, region: BoundingBox, error: float) -> list[SceneNode]:  # noqa: ARG002 Layer.content protocol
         """Nothing: the forest is a table beside the tileset, not tile content."""
         return []
 

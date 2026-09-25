@@ -14,6 +14,10 @@ import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
 from OpenGLContext.scenegraph.roadsigns import LIMIT, WARNINGS
 
+from OpenGLContext_editor.world.procedural import (
+    CIRCUIT_DESIGN_SPEED,
+    ProceduralWorld,
+)
 from OpenGLContext_editor.world.road import RoadPath
 from OpenGLContext_editor.world.signs import (
     Warning,
@@ -157,7 +161,7 @@ class TestPuttingThemInTheWorld:
         assert abs(float(placed.position[0])) > PROFILE.total_width / 2.0 - 1.0
 
     def test_it_stands_on_the_ground(self) -> None:
-        placed = self._placed(ground=lambda x, z: np.full(np.shape(x), -3.0))[0]
+        placed = self._placed(ground=lambda x, _z: np.full(np.shape(x), -3.0))[0]
         assert float(placed.position[1]) == pytest.approx(-3.0, abs=0.01)
 
     def test_without_ground_it_stands_at_the_road_s_own_height(self) -> None:
@@ -177,7 +181,6 @@ class TestPuttingThemInTheWorld:
 class TestTheShippedCircuit:
     @pytest.fixture(scope='class')
     def circuit(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld().circuit()
 
     def test_it_gets_signs(self, circuit) -> None:
@@ -263,10 +266,6 @@ class TestTheShippedCircuitReadsAsARoad:
     def test_it_is_not_all_double_bends(self) -> None:
         """A circuit signed as one continuous chicane is a circuit whose signs
         say nothing."""
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_DESIGN_SPEED,
-            ProceduralWorld,
-        )
         found = warn_of(ProceduralWorld().circuit(), CIRCUIT_DESIGN_SPEED)
         kinds = {one.kind for one in found}
         doubles = sum(one.kind == 'double-bend' for one in found)

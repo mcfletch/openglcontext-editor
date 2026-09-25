@@ -6,6 +6,7 @@ everywhere and there is far too much of it -- so what travels is the recipe: a
 clump, a card, how dense, and which of the splat map's layers it grows on.
 """
 import json
+import os
 
 import numpy as np
 import pytest
@@ -13,6 +14,10 @@ from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
 from OpenGLContext.scenegraph.vegetation.field import TreeSpecies
 
 from OpenGLContext_editor.bake.vegetation import VegetationLayer
+from OpenGLContext_editor.world.species import (
+    shipped_cover,
+    species_are_available,
+)
 
 
 def _species(tmp_path, name='fir'):
@@ -147,10 +152,6 @@ class TestTheCoverRecord:
 
 class TestTheShippedCover:
     def _cover(self):
-        from OpenGLContext_editor.world.species import (
-            shipped_cover,
-            species_are_available,
-        )
         if not species_are_available():
             pytest.skip("the example world's assets are not installed")
         return shipped_cover()
@@ -164,7 +165,6 @@ class TestTheShippedCover:
         assert len({one.name for one in self._cover()}) > 1
 
     def test_its_files_are_where_it_says(self) -> None:
-        import os
         for one in self._cover():
             assert os.path.exists(one.card)
             if one.clump:

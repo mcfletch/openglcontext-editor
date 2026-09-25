@@ -15,6 +15,7 @@ from OpenGLContext.scenegraph.props import Prop, rock_mesh
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.props import PropLayer
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 
 REGION = BoundingBox((-500.0, -50.0, -500.0), (500.0, 50.0, 500.0))
 
@@ -87,7 +88,6 @@ class TestWhatIsCollided:
 class TestTheShippedWorld:
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         # `forest='tiles'` because this is about props, and the default
         # forest is drawn from the demo's tree files -- an optional
         # install, which a suite about boulders should not require.
@@ -128,7 +128,6 @@ class TestTheShippedWorld:
 
     def test_a_world_with_no_road_still_has_some(self) -> None:
         """A landscape has rocks in it whether or not anyone built a road."""
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         bare = ProceduralWorld(road=False, extent=1024.0, ground='tiles',
                                forest='tiles')
         assert bare.prop_layer() is not None

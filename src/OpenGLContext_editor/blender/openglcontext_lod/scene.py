@@ -498,7 +498,7 @@ def register_extension() -> None:
     add-ons* -- so the package has to be registered as one for the LODs to be
     written.
     """
-    from . import ops
+    from . import ops  # noqa: PLC0415 ops imports this module
 
     ops.register()
 

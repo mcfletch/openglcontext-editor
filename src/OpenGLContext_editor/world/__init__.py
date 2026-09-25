@@ -14,6 +14,6 @@ a file.
 # anything reads one, and a file names a kind rather than a module. Importing
 # them here is what makes ``base_from_json`` / ``edit_from_json`` know the kinds
 # this package ships, whichever of its modules the caller reached for first.
-from OpenGLContext_editor.world import hydrology as _hydrology  # noqa: E402,F401
-from OpenGLContext_editor.world import presets as _presets  # noqa: E402,F401
-from OpenGLContext_editor.world import sculpt as _sculpt  # noqa: E402,F401
+from OpenGLContext_editor.world import hydrology as _hydrology  # noqa: F401
+from OpenGLContext_editor.world import presets as _presets  # noqa: F401
+from OpenGLContext_editor.world import sculpt as _sculpt  # noqa: F401

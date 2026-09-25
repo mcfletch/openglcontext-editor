@@ -6,6 +6,8 @@ import wave
 
 import numpy as np
 import pytest
+from OpenGLContext.loaders.gltf import loader
+from OpenGLContext.scenegraph.zone import AUDIO, ENVIRONMENT, REVERB
 
 from OpenGLContext_editor.bake.zones import (
     DOCUMENT,
@@ -40,7 +42,7 @@ def with_run(op, start, end, length=1000.0, count=201):
     return straight(length, count, ops)
 
 
-def trees_beside(road, start, end, spacing=4.0, offset=12.0):
+def trees_beside(start, end, spacing=4.0, offset=12.0):
     """A row of trees each side of the road from ``start`` to ``end``."""
     s = np.arange(start, end, spacing)
     return np.concatenate([np.stack([s, np.zeros_like(s), np.full_like(s, side)], axis=-1)
@@ -87,25 +89,25 @@ class TestPlaces:
 
     def test_plain_road_through_trees_is_forest(self):
         road = straight()
-        places = road_places(road, trees_beside(road, 0.0, 400.0))
+        places = road_places(road, trees_beside(0.0, 400.0))
         forest = [p for p in places if p.kind == FOREST]
         assert forest and max(p.end for p in forest) <= 400.0 + 1e-6
 
     def test_open_ground_has_no_place(self):
         road = straight()
         assert road_places(road, np.zeros((0, 3))) == []
-        assert road_places(road, trees_beside(road, 0.0, 1000.0, spacing=200.0)) == []
+        assert road_places(road, trees_beside(0.0, 1000.0, spacing=200.0)) == []
 
     def test_a_structure_is_not_also_forest(self):
         road = with_run(Op.CAUSEWAY, 0.0, 1000.0)
-        places = road_places(road, trees_beside(road, 0.0, 1000.0))
+        places = road_places(road, trees_beside(0.0, 1000.0))
         assert {p.kind for p in places} == {CAUSEWAY}
 
 
 class TestTheLayer:
     def _layer(self):
         road = with_run(Op.TUNNEL, 300.0, 380.0)
-        places = road_places(road, trees_beside(road, 500.0, 900.0),
+        places = road_places(road, trees_beside(500.0, 900.0),
                              tunnel_half_width=6.0)
         sounds = {'birdsong': AmbientSound('birdsong', lambda: np.zeros(800), 0.5),
                   'surf': AmbientSound('surf', lambda: np.zeros(800), 0.5)}
@@ -120,8 +122,6 @@ class TestTheLayer:
         assert record['document'] == DOCUMENT and record['count'] > 1
 
     def test_the_document_is_zones_the_engine_reads(self, tmp_path):
-        from OpenGLContext.loaders.gltf import loader
-        from OpenGLContext.scenegraph.zone import AUDIO, ENVIRONMENT, REVERB
         layer = self._layer()
         for name, data in layer.assets().items():
             path = tmp_path / name

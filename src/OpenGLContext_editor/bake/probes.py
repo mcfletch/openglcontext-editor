@@ -32,6 +32,14 @@ from typing import Any
 
 import numpy as np
 from OpenGLContext import atomicfiles
+from OpenGLContext.passes.zonebake import bake_zone_lights
+from OpenGLContext.scenegraph.basenodes import sceneGraph
+from OpenGLContext.scenegraph.imagebasedlight import encode_rgbd, sh_fit
+from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
+from OpenGLContext.scenegraph.zone import Zone
+from OpenGLContext.viewer.environment import horizon_background
+from OpenGLContext.viewer.sceneviewer import ViewerContext
+from PIL import Image
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +51,6 @@ PROBE_DIRECTORY = 'probes'
 
 
 def _png(values: np.ndarray) -> bytes:
-    from OpenGLContext.scenegraph.imagebasedlight import encode_rgbd
-    from PIL import Image
     buffer = io.BytesIO()
     Image.fromarray(encode_rgbd(values)).save(buffer, 'PNG')
     return buffer.getvalue()
@@ -66,22 +72,18 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
             os.path.join(directory, 'tileset.json')):
         return 0
     try:
-        from OpenGLContext.eglcontext import EGLContext
+        # EGL may be absent: the bake then says so and leaves capture to run time.
+        from OpenGLContext.eglcontext import EGLContext  # noqa: PLC0415 optional platform
     except (ImportError, OSError) as error:   # pragma: no cover - no EGL here
         log.warning('no offscreen context (%s); zones capture at run time', error)
         return 0
-    from OpenGLContext.passes.zonebake import bake_zone_lights
-    from OpenGLContext.scenegraph.basenodes import sceneGraph
-    from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
 
     terrain = TilesTerrain(os.path.join(directory, 'tileset.json'), workers=2)
     if terrain.zones is None or not terrain.zones.zones:
         terrain.shutdown()
         return 0
 
-    def around(world: Any) -> list:
-        from OpenGLContext.viewer.environment import horizon_background
-        from OpenGLContext.viewer.sceneviewer import ViewerContext
+    def around(_terrain: Any) -> list:
         return [horizon_background(), *ViewerContext.defaultLights(1000.0)]
 
     lighting = (scene or around)(terrain)
@@ -123,7 +125,6 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
 def _zone_names(scene: Any) -> dict[int, str]:
     """Each ``Zone`` node of a loaded zones document, by id, to the name of the
     glTF node that carries it."""
-    from OpenGLContext.scenegraph.zone import Zone
     names = {}
     for index, transform in scene.node_transforms.items():
         name = scene.node_names.get(index)
@@ -135,7 +136,6 @@ def _zone_names(scene: Any) -> dict[int, str]:
 
 def _light(name: str, irradiance: Any, mips: Any, written: dict[str, bytes]) -> dict:
     """One zone's ``EXT_lights_image_based`` light, its faces added to ``written``."""
-    from OpenGLContext.scenegraph.imagebasedlight import sh_fit
     images = []
     for level, faces in enumerate(mips):
         level_names = []

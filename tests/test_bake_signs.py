@@ -5,17 +5,20 @@ placed many times rather than a mesh each. The plate's picture is written once
 beside the tileset and named by every tile that carries that kind, the way the
 road surface is: embedded per tile it would arrive again with every tile.
 """
+import io
 import json
 
 import numpy as np
 import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
+from PIL import Image
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.signs import (
     ATLAS_IMAGE,
     SignLayer,
 )
+from OpenGLContext_editor.world.procedural import ProceduralWorld
 from OpenGLContext_editor.world.signs import Placement
 
 PROFILE = RoadProfile(lane_width=3.6, lanes=2)
@@ -53,9 +56,6 @@ class TestWhatItWrites:
 
 class TestThePictures:
     def test_they_are_real_images(self) -> None:
-        import io
-
-        from PIL import Image
         for data in _layer().assets().values():
             assert Image.open(io.BytesIO(data)).size[0] > 32
 
@@ -71,7 +71,6 @@ class TestThePictures:
 class TestTheShippedWorld:
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         # A quarter of the shipped world's side, which is the same landscape and
         # the same generator at a resolution a test can afford.
         return ProceduralWorld(extent=1024.0, field_resolution=257,
@@ -85,7 +84,6 @@ class TestTheShippedWorld:
         assert any(getattr(one, 'name', '') == 'signs' for one in world.layers())
 
     def test_a_world_with_no_road_has_none(self) -> None:
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         assert ProceduralWorld(road=False).sign_layer() is None
 
     def test_they_stand_beside_the_road_not_on_it(self, world) -> None:
@@ -110,12 +108,11 @@ class TestASignStandsWhereItCanBeSeen:
 
     @pytest.fixture(scope='class')
     def world(self):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=1024.0, field_resolution=257,
                                control_size=256, forest='tiles')
 
     def test_every_sign_is_inside_the_cleared_corridor(self, world) -> None:
-        corridor = world._corridor()
+        corridor = world._corridor()  # noqa: SLF001 white-box test of the helper
         course = world.circuit()
         for placed in world.sign_layer().placements:
             found = course.sample(np.array([placed.position[0]]),

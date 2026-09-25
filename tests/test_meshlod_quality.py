@@ -27,6 +27,7 @@ def _tetrahedron():
     return positions, normals.astype("f4"), indices
 
 
+@pytest.mark.usefixtures('gl_context')
 class TestDrawingTheEdges:
     """``edges=True`` puts the triangle structure on top of the shading.
 
@@ -35,7 +36,7 @@ class TestDrawingTheEdges:
     the fill is what makes a gallery of levels legible.
     """
 
-    def test_the_edges_darken_the_inside_without_moving_the_outline(self, gl_context):
+    def test_the_edges_darken_the_inside_without_moving_the_outline(self):
         positions, normals, indices = _tetrahedron()
         with quality.LODProbe(size=96) as probe:
             plain = probe.render(positions, normals, indices, 4.0, 1.8, (0.0, 0.0, 0.0))
@@ -51,7 +52,7 @@ class TestDrawingTheEdges:
         # And inside it, the wireframe can only take light away.
         assert int(wired[covered].sum()) < int(plain[covered].sum())
 
-    def test_a_plain_render_is_unchanged_by_the_option_existing(self, gl_context):
+    def test_a_plain_render_is_unchanged_by_the_option_existing(self):
         positions, normals, indices = _tetrahedron()
         with quality.LODProbe(size=64) as probe:
             once = probe.render(positions, normals, indices, 4.0, 1.8, (0.0, 0.0, 0.0))
@@ -61,10 +62,11 @@ class TestDrawingTheEdges:
         assert np.array_equal(once, again)
 
 
+@pytest.mark.usefixtures('gl_context')
 class TestWhatALevelCostsToDraw:
     """A level's triangle count is not what a renderer pays; drawing it is."""
 
-    def test_it_reports_what_it_drew(self, gl_context):
+    def test_it_reports_what_it_drew(self):
         positions, normals, indices = _tetrahedron()
         with quality.LODProbe(size=64) as probe:
             cost = probe.frame_cost(
@@ -75,7 +77,7 @@ class TestWhatALevelCostsToDraw:
         assert cost.median_ms > 0.0
         assert cost.fps == pytest.approx(1000.0 / cost.median_ms)
 
-    def test_it_leaves_the_picture_the_plain_render_would_have(self, gl_context):
+    def test_it_leaves_the_picture_the_plain_render_would_have(self):
         """The number comes from drawing the mesh, not from counting it."""
         positions, normals, indices = _tetrahedron()
         with quality.LODProbe(size=64) as probe:
@@ -86,7 +88,7 @@ class TestWhatALevelCostsToDraw:
             drawn = probe.read()
         assert np.array_equal(drawn, wanted)
 
-    def test_it_refuses_to_measure_nothing(self, gl_context):
+    def test_it_refuses_to_measure_nothing(self):
         positions, normals, indices = _tetrahedron()
         with quality.LODProbe(size=32) as probe:
             with pytest.raises(ValueError, match="frames"):
@@ -143,7 +145,7 @@ class TestObjectPop:
 
 class TestSafeDistance:
     #: A level looks worse the closer it is, so a sweep falls as it goes out.
-    DISTANCES = [1.0, 2.0, 4.0, 8.0, 16.0]
+    DISTANCES = (1.0, 2.0, 4.0, 8.0, 16.0)
 
     def test_it_finds_where_the_pop_falls_under_budget(self):
         pops = [0.40, 0.20, 0.05, 0.01, 0.00]
@@ -198,7 +200,7 @@ class TestSafeDistanceIsNotFooledByTheNearField:
     within budget, found from the far end inwards.
     """
 
-    DISTANCES = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+    DISTANCES = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0)
 
     def test_zeroes_at_the_near_end_are_not_a_pass(self):
         pops = [0.0, 0.0, 0.50, 0.30, 0.01, 0.0]

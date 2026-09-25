@@ -360,7 +360,7 @@ def hold_corners(plan: Any, minimum: Any, closed: bool = False,
         before = line[index - 1]
         here = line[index]
         after = line[(index + 1) % len(line)]
-        room = _corner_room(legs, index, len(line), closed)
+        room = _corner_room(legs, index, closed)
         arc = _fillet(before, here, after, float(radii[index]), room, spacing)
         made.append(arc)
     if not closed:
@@ -368,8 +368,7 @@ def hold_corners(plan: Any, minimum: Any, closed: bool = False,
     return np.vstack(made)
 
 
-def _corner_room(legs: np.ndarray, index: int, count: int,
-                 closed: bool) -> float:
+def _corner_room(legs: np.ndarray, index: int, closed: bool) -> float:
     """How far along either leg this corner's fillet may reach."""
     incoming = legs[index - 1] if (closed or index > 0) else legs[0]
     outgoing = legs[index % len(legs)] if closed else legs[min(index, len(legs) - 1)]

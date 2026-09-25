@@ -9,11 +9,19 @@ each of those is still a limit the whole way.
 """
 import numpy as np
 import pytest
+from OpenGLContext.scenegraph.road import corner_speed, plan_curvature
 
+from OpenGLContext_editor.world.procedural import (
+    CIRCUIT_MAX_GRADE,
+    CIRCUIT_STEEP_GRADE,
+    ProceduralWorld,
+    circuit_plan,
+)
 from OpenGLContext_editor.world.road import follow_terrain
+from OpenGLContext_editor.world.route import _neighbours, _radius, hold_corners
 
 
-def _flat(x, z):
+def _flat(x, _z):
     return np.zeros_like(np.asarray(x, 'd'))
 
 
@@ -66,7 +74,7 @@ class TestADesignSpeedThatVaries:
         z = np.linspace(0.0, -600.0, 121)
         plan = np.stack([np.zeros(121), z], axis=-1)
 
-        def ridge(x, zz):
+        def ridge(_x, zz):
             return 40.0 * np.exp(-((np.asarray(zz, 'd') + 300.0) / 70.0) ** 2)
         return follow_terrain(plan, ridge, spacing=5.0, smoothing=0.0,
                               maximum_grade=0.12, design_speed=speed)
@@ -132,7 +140,6 @@ class TestCornersThatDifferFromEachOther:
 
     def _radii(self, held, plan):
         """The tightest radius the built line reaches near each drawn corner."""
-        from OpenGLContext_editor.world.route import _neighbours, _radius
         before, after = _neighbours(held, True)
         radius = _radius(before, held, after)
         found = []
@@ -142,22 +149,17 @@ class TestCornersThatDifferFromEachOther:
         return found
 
     def test_one_radius_still_holds_every_corner(self) -> None:
-        from OpenGLContext_editor.world.route import hold_corners
         plan = self._square()
         found = self._radii(hold_corners(plan, 120.0, closed=True), plan)
         assert np.allclose(found, 120.0, rtol=0.05)
 
     def test_a_radius_per_corner_gives_each_one_its_own(self) -> None:
-        from OpenGLContext_editor.world.route import hold_corners
         plan = self._square()
         wanted = np.array([40.0, 120.0, 240.0, 120.0])
         found = self._radii(hold_corners(plan, wanted, closed=True), plan)
         assert np.allclose(found, wanted, rtol=0.08)
 
     def test_a_hairpin_is_tighter_than_the_road_it_is_on(self) -> None:
-        from OpenGLContext.scenegraph.road import corner_speed
-
-        from OpenGLContext_editor.world.route import hold_corners
         plan = self._square()
         wanted = np.array([45.0, 260.0, 260.0, 260.0])
         found = self._radii(hold_corners(plan, wanted, closed=True), plan)
@@ -165,14 +167,12 @@ class TestCornersThatDifferFromEachOther:
         assert min(corner_speed(r) for r in found[1:]) * 3.6 > 180.0
 
     def test_a_radius_of_the_wrong_length_is_refused(self) -> None:
-        from OpenGLContext_editor.world.route import hold_corners
         with pytest.raises(ValueError, match='radi'):
             hold_corners(self._square(), np.array([40.0, 120.0]), closed=True)
 
 
 class TestACircuitWithSomeVarietyInIt:
     def _plan(self, **kwargs):
-        from OpenGLContext_editor.world.procedural import circuit_plan
         return circuit_plan(1300.0, 1000.0, **kwargs)
 
     def _legs(self, plan):
@@ -219,12 +219,10 @@ class TestACircuitThatIsNotTheSameRoadAllTheWayRound:
     for, a climb, a stretch left rough and a clearing where one is needed."""
 
     def _world(self, variety):
-        from OpenGLContext_editor.world.procedural import ProceduralWorld
         return ProceduralWorld(extent=4096.0, structures=False,
                                variety=variety)
 
     def _corners(self, path):
-        from OpenGLContext.scenegraph.road import plan_curvature
         turning = np.abs(plan_curvature(path.points, closed=True))
         return np.where(turning > 1e-9, 1.0 / np.maximum(turning, 1e-12),
                         np.inf)
@@ -248,7 +246,6 @@ class TestACircuitThatIsNotTheSameRoadAllTheWayRound:
         assert self._corners(world.circuit()).min() < world.corner_radius() * 0.5
 
     def test_it_gets_a_corner_worth_braking_for(self) -> None:
-        from OpenGLContext.scenegraph.road import corner_speed
         path = self._world(1.0).circuit()
         held = [corner_speed(float(r), bank=float(b)) * 3.6
                 for r, b in zip(self._corners(path), path.bank, strict=True)]
@@ -256,7 +253,6 @@ class TestACircuitThatIsNotTheSameRoadAllTheWayRound:
 
     def test_it_still_has_somewhere_to_go_quickly(self) -> None:
         """A lap that is all slow corners is a lap nobody passes on."""
-        from OpenGLContext.scenegraph.road import corner_speed
         path = self._world(1.0).circuit()
         held = np.array([corner_speed(float(r), bank=float(b)) * 3.6
                          for r, b in zip(self._corners(path), path.bank,
@@ -264,10 +260,6 @@ class TestACircuitThatIsNotTheSameRoadAllTheWayRound:
         assert float(np.mean(held > 190.0)) > 0.4
 
     def test_it_climbs_harder_where_the_land_does(self) -> None:
-        from OpenGLContext_editor.world.procedural import (
-            CIRCUIT_MAX_GRADE,
-            CIRCUIT_STEEP_GRADE,
-        )
         found = self._grades(self._world(1.0).circuit()).max()
         assert found > CIRCUIT_MAX_GRADE * 1.15
         assert found <= CIRCUIT_STEEP_GRADE + 1e-6

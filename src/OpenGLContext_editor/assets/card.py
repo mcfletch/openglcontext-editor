@@ -29,6 +29,77 @@ import ctypes
 from typing import Any
 
 import numpy as np
+from OpenGL.GL import (
+    GL_ARRAY_BUFFER,
+    GL_CLAMP_TO_EDGE,
+    GL_COLOR_ATTACHMENT0,
+    GL_COLOR_BUFFER_BIT,
+    GL_CULL_FACE,
+    GL_DEPTH_ATTACHMENT,
+    GL_DEPTH_BUFFER_BIT,
+    GL_DEPTH_COMPONENT24,
+    GL_DEPTH_TEST,
+    GL_ELEMENT_ARRAY_BUFFER,
+    GL_FALSE,
+    GL_FLOAT,
+    GL_FRAGMENT_SHADER,
+    GL_FRAMEBUFFER,
+    GL_FRAMEBUFFER_COMPLETE,
+    GL_LINEAR,
+    GL_LINEAR_MIPMAP_LINEAR,
+    GL_RENDERBUFFER,
+    GL_RGBA,
+    GL_RGBA8,
+    GL_STATIC_DRAW,
+    GL_TEXTURE0,
+    GL_TEXTURE_2D,
+    GL_TEXTURE_MAG_FILTER,
+    GL_TEXTURE_MIN_FILTER,
+    GL_TEXTURE_WRAP_S,
+    GL_TEXTURE_WRAP_T,
+    GL_TRIANGLES,
+    GL_TRUE,
+    GL_UNSIGNED_BYTE,
+    GL_UNSIGNED_INT,
+    GL_VERTEX_SHADER,
+    glActiveTexture,
+    glBindBuffer,
+    glBindFramebuffer,
+    glBindRenderbuffer,
+    glBindTexture,
+    glBindVertexArray,
+    glBufferData,
+    glCheckFramebufferStatus,
+    glClear,
+    glClearColor,
+    glDisable,
+    glDrawElements,
+    glEnable,
+    glEnableVertexAttribArray,
+    glFramebufferRenderbuffer,
+    glFramebufferTexture2D,
+    glGenBuffers,
+    glGenerateMipmap,
+    glGenFramebuffers,
+    glGenRenderbuffers,
+    glGenTextures,
+    glGenVertexArrays,
+    glGetUniformLocation,
+    glReadPixels,
+    glRenderbufferStorage,
+    glTexImage2D,
+    glTexParameteri,
+    glUniform1f,
+    glUniform1i,
+    glUniformMatrix4fv,
+    glUseProgram,
+    glVertexAttribPointer,
+    glViewport,
+)
+from OpenGL.GL.shaders import compileProgram, compileShader
+from OpenGLContext.scenegraph.vegetation.clumps import load_clump_glb
+from OpenGLContext.testing.glcontext import hidden_window
+from PIL import Image
 
 __all__ = ['bake_card', 'CARD_SIZE', 'WIDEST']
 
@@ -85,77 +156,6 @@ def bake_card(model: str, mesh: int | str, texture: Any, out: str,
     The returned width is the plant's width over its height, which is what the
     billboard node wants for its quad.
     """
-    from OpenGL.GL import (
-        GL_ARRAY_BUFFER,
-        GL_CLAMP_TO_EDGE,
-        GL_COLOR_ATTACHMENT0,
-        GL_COLOR_BUFFER_BIT,
-        GL_CULL_FACE,
-        GL_DEPTH_ATTACHMENT,
-        GL_DEPTH_BUFFER_BIT,
-        GL_DEPTH_COMPONENT24,
-        GL_DEPTH_TEST,
-        GL_ELEMENT_ARRAY_BUFFER,
-        GL_FALSE,
-        GL_FLOAT,
-        GL_FRAGMENT_SHADER,
-        GL_FRAMEBUFFER,
-        GL_FRAMEBUFFER_COMPLETE,
-        GL_LINEAR,
-        GL_LINEAR_MIPMAP_LINEAR,
-        GL_RENDERBUFFER,
-        GL_RGBA,
-        GL_RGBA8,
-        GL_STATIC_DRAW,
-        GL_TEXTURE0,
-        GL_TEXTURE_2D,
-        GL_TEXTURE_MAG_FILTER,
-        GL_TEXTURE_MIN_FILTER,
-        GL_TEXTURE_WRAP_S,
-        GL_TEXTURE_WRAP_T,
-        GL_TRIANGLES,
-        GL_TRUE,
-        GL_UNSIGNED_BYTE,
-        GL_UNSIGNED_INT,
-        GL_VERTEX_SHADER,
-        glActiveTexture,
-        glBindBuffer,
-        glBindFramebuffer,
-        glBindRenderbuffer,
-        glBindTexture,
-        glBindVertexArray,
-        glBufferData,
-        glCheckFramebufferStatus,
-        glClear,
-        glClearColor,
-        glDisable,
-        glDrawElements,
-        glEnable,
-        glEnableVertexAttribArray,
-        glFramebufferRenderbuffer,
-        glFramebufferTexture2D,
-        glGenBuffers,
-        glGenerateMipmap,
-        glGenFramebuffers,
-        glGenRenderbuffers,
-        glGenTextures,
-        glGenVertexArrays,
-        glGetUniformLocation,
-        glReadPixels,
-        glRenderbufferStorage,
-        glTexImage2D,
-        glTexParameteri,
-        glUniform1f,
-        glUniform1i,
-        glUniformMatrix4fv,
-        glUseProgram,
-        glVertexAttribPointer,
-        glViewport,
-    )
-    from OpenGL.GL.shaders import compileProgram, compileShader
-    from OpenGLContext.scenegraph.vegetation.clumps import load_clump_glb
-    from OpenGLContext.testing.glcontext import hidden_window
-    from PIL import Image
 
     points, normals, uvs, indices, embedded = load_clump_glb(model, mesh=mesh)
     image = (embedded if texture is None
@@ -255,6 +255,5 @@ def card_coverage(path: str) -> float:
     to read, and one that covers almost all of it is a plant that overflowed the
     frame -- either way the bake wants looking at rather than shipping.
     """
-    from PIL import Image
     return float((np.asarray(Image.open(path).convert('RGBA'))[..., 3] > 10
                   ).mean())
