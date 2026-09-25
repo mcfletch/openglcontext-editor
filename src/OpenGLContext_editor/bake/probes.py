@@ -104,6 +104,8 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
         with Baker(size=size) as context:
             context.OnDraw(force=1)
             flat = renderpass.current_pass()
+            if flat is None:
+                raise RuntimeError('the bake context drew no render pass')
             for index, zone in enumerate(zones):
                 placed = {id(p.zone): p for p in flat.zones}.get(id(zone))
                 setting = zone.setting(ENVIRONMENT)

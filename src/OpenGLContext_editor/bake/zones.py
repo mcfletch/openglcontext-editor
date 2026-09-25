@@ -201,7 +201,7 @@ class ZonesLayer:
         played = self._played()
         emitter = {sound.name: index for index, sound in enumerate(played)}
         nodes = []
-        shapes = []
+        shapes: list[dict[str, Any]] = []
         for record in self.zones:
             block: dict[str, Any] = {'shape': len(shapes), 'priority': record.priority,
                                      'blend': record.blend}

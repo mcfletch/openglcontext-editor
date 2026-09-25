@@ -165,7 +165,7 @@ def _open_stretches(covered: list, length: float) -> list:
     return out
 
 
-def _split(start: float, end: float, chunk: float) -> list:
+def _split(start: float, end: float, chunk: float) -> list[tuple[float, float]]:
     count = max(1, int(math.ceil((end - start) / max(chunk, 1e-6))))
     edges = np.linspace(start, end, count + 1)
     return [(float(a), float(b)) for a, b in zip(edges[:-1], edges[1:], strict=True)]
