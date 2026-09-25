@@ -77,7 +77,7 @@ def sidecar_name(path: str, level: int) -> str:
 
 def _mesh(level: Any) -> PBRMesh:
     """One level of a chain as the mesh the writer takes."""
-    arrays = {
+    arrays: dict[str, Any] = {
         field: np.ascontiguousarray(level.attributes[name], dtype="<f4")
         for name, field in _ARRAYS.items()
         if name in level.attributes

@@ -294,13 +294,14 @@ def bake(source: PlantSource, directory: str,
     encoded = io.BytesIO()
     texture.save(encoded, format='PNG', optimize=True)
 
-    material = PBRMaterial(alphaMode='MASK', alphaCutoff=ALPHA_CUTOFF,
-                           doubleSided=True, metallic=0.0, roughness=0.9)
     # One image object for every rung of every variant: the writer keys its
     # image table on identity, so sharing the object is what stops a megabyte
     # of texture being written once per mesh.
-    material.textures = {'baseColor': EncodedImage(
-        encoded.getvalue(), mime_type='image/png', srgb=True)}
+    material = PBRMaterial(alphaMode='MASK', alphaCutoff=ALPHA_CUTOFF,
+                           doubleSided=True, metallic=0.0, roughness=0.9,
+                           textures={'baseColor': EncodedImage(
+                               encoded.getvalue(), mime_type='image/png',
+                               srgb=True)})
 
     writer = GLTFWriter(generator='OpenGLContext-editor plant bake')
     species: list[CoverSpecies] = []

@@ -1378,7 +1378,7 @@ class RoadLayer:
                            for kind, start, end in self.path.structure_runs()],
             # How the bores' mouths were cut out of the ground
             # (:class:`~OpenGLContext.scenegraph.roadworks.BoreCut`).
-            'bores': (self.bores or BoreCut(tunnel=self.tunnel)).to_json(),
+            'bores': (self.bores or BoreCut(tunnel=self.tunnel or TunnelProfile())).to_json(),
         }], 'luminaires': self.luminaires()}
 
     def luminaires(self) -> list:
