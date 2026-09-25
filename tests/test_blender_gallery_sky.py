@@ -113,6 +113,29 @@ def _glb_with_nothing_in_it():
     return header + struct.pack('<II', len(body), 0x4E4F534A) + body
 
 
+def _glb_with_binary(data):
+    """A glB whose binary chunk holds ``data`` behind one bufferView."""
+    body = json.dumps({'asset': {'version': '2.0'},
+                       'scene': 0, 'scenes': [{'nodes': []}], 'nodes': [],
+                       'buffers': [{'byteLength': len(data)}],
+                       'bufferViews': [{'buffer': 0, 'byteOffset': 0,
+                                        'byteLength': len(data)}]}).encode('utf-8')
+    body += b' ' * (-len(body) % 4)
+    padded = data + b'\0' * (-len(data) % 4)
+    return (struct.pack('<III', 0x46546C67, 2, 12 + 8 + len(body) + 8 + len(padded))
+            + struct.pack('<II', len(body), 0x4E4F534A) + body
+            + struct.pack('<II', len(padded), 0x004E4942) + padded)
+
+
+def _binary(blob):
+    """The binary chunk of a glB."""
+    chunk, _kind = struct.unpack('<II', blob[12:20])
+    at = 20 + chunk
+    size, kind = struct.unpack('<II', blob[at:at + 8])
+    assert kind == 0x004E4942
+    return blob[at + 8:at + 8 + size]
+
+
 @pytest.fixture(scope='module')
 def written():
     """One small world with a sky in it, read by several tests."""
@@ -144,7 +167,40 @@ class TestWritingItIntoTheFile:
         texture = doc['textures'][index]
 
         assert 0 <= texture['source'] < len(doc['images'])
-        assert doc['images'][texture['source']]['uri'].startswith('data:image/')
+
+    def test_the_picture_is_in_the_binary_chunk_not_the_json(self, written):
+        """A data URI is a third larger and lands in the JSON every loader
+        parses; a glB carries its images in its binary chunk."""
+        doc = _document(written)
+        image = doc['images'][doc['textures'][-1]['source']]
+        assert 'uri' not in image
+        assert image['mimeType'] == 'image/jpeg'
+        view = doc['bufferViews'][image['bufferView']]
+        assert view['buffer'] == 0 and 'uri' not in doc['buffers'][0]
+        chunk = _binary(written)
+        assert len(chunk) >= doc['buffers'][0]['byteLength']
+        start = view['byteOffset']
+        assert chunk[start:start + 2] == b'\xff\xd8'           # a JPEG
+
+    def test_the_binary_chunk_already_there_is_kept(self):
+        blob = _glb_with_binary(b'\x01\x02\x03\x04\x05')
+        written = sky.with_sky(blob, sky.panorama(width=64, height=32, seed=1))
+        doc = _document(written)
+        assert doc['bufferViews'][0] == {'buffer': 0, 'byteOffset': 0, 'byteLength': 5}
+        assert _binary(written)[:5] == b'\x01\x02\x03\x04\x05'
+        assert doc['bufferViews'][-1]['byteOffset'] % 4 == 0
+
+    def test_roofing_twice_leaves_one_sky(self):
+        """A build run twice over the same file must not stack skies."""
+        once = sky.with_sky(_glb_with_nothing_in_it(),
+                            sky.panorama(width=64, height=32, seed=1))
+        twice = sky.with_sky(once, sky.panorama(width=64, height=32, seed=2))
+        doc = _document(twice)
+        assert len(doc['images']) == 1
+        assert len(doc['textures']) == 1
+        assert len(doc['samplers']) == 1
+        assert len(doc['extensions'][sky.EXTENSION]['skies']) == 1
+        assert len(twice) < len(once) * 1.5
 
     def test_the_extension_is_not_required(self, written):
         """A viewer that has never heard of it must still open the world."""

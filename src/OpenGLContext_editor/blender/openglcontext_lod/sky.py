@@ -23,7 +23,6 @@ document. They are apart because the first is worth looking at on its own.
 
 from __future__ import annotations
 
-import base64
 import io
 import json
 import math
@@ -57,6 +56,7 @@ SUN_WIDTH = 0.45
 
 #: The GLB container: magic, the JSON chunk's type, and the BIN chunk's.
 _MAGIC = 0x46546C67
+_BIN_CHUNK = 0x004E4942
 _JSON_CHUNK = 0x4E4F534A
 
 
@@ -173,8 +173,8 @@ def panorama(width: int = 2048, height: int = 1024, seed: int = 11,
         np.clip(picture * 255.0 + 0.5, 0, 255).astype('u1'), mode='RGB')
 
 
-def _data_uri(image: Any, quality: int = 88) -> str:
-    """``image`` as a JPEG data URI, which is a glTF image with no file beside it.
+def _jpeg(image: Any, quality: int = 88) -> bytes:
+    """``image`` as JPEG bytes.
 
     A sky is a photograph rather than a diagram -- gradients and cloud, no flat
     areas and no text -- so JPEG costs a fifth of the PNG and shows nothing of
@@ -183,43 +183,91 @@ def _data_uri(image: Any, quality: int = 88) -> str:
     buffer = io.BytesIO()
     image.convert('RGB').save(buffer, format='JPEG', quality=quality,
                               optimize=True)
-    return 'data:image/jpeg;base64,' + base64.b64encode(
-        buffer.getvalue()).decode('ascii')
+    return buffer.getvalue()
 
 
 def _chunks(blob: bytes) -> tuple[dict, bytes]:
-    """A glB's JSON document and everything after that chunk."""
+    """A glB's JSON document and its binary chunk's bytes (empty if none)."""
     magic, version, _length = struct.unpack('<III', blob[:12])
     if magic != _MAGIC or version != 2:
         raise ValueError('not a glTF 2.0 binary file')
     size, kind = struct.unpack('<II', blob[12:20])
     if kind != _JSON_CHUNK:
         raise ValueError('the first chunk of a glB is its JSON')
-    return json.loads(blob[20:20 + size]), blob[20 + size:]
+    document = json.loads(blob[20:20 + size])
+    at = 20 + size
+    if len(blob) >= at + 8:
+        length, kind = struct.unpack('<II', blob[at:at + 8])
+        if kind == _BIN_CHUNK:
+            return document, blob[at + 8:at + 8 + length]
+    return document, b''
 
 
-def _rebuilt(document: dict, rest: bytes) -> bytes:
-    """A glB carrying ``document``, with its binary chunk untouched."""
+def _rebuilt(document: dict, binary: bytes) -> bytes:
+    """A glB carrying ``document`` and ``binary`` as its binary chunk."""
     body = json.dumps(document, separators=(',', ':')).encode('utf-8')
     body += b' ' * (-len(body) % 4)
-    return (struct.pack('<III', _MAGIC, 2, 12 + 8 + len(body) + len(rest))
-            + struct.pack('<II', len(body), _JSON_CHUNK) + body + rest)
+    chunks = struct.pack('<II', len(body), _JSON_CHUNK) + body
+    if binary:
+        binary += b'\0' * (-len(binary) % 4)
+        chunks += struct.pack('<II', len(binary), _BIN_CHUNK) + binary
+    return struct.pack('<III', _MAGIC, 2, 12 + len(chunks)) + chunks
+
+
+def _without_sky(document: dict, binary: bytes) -> bytes:
+    """Take out a sky :func:`with_sky` wrote earlier; the binary chunk left.
+
+    Its image, texture and sampler are the last of each, as this module
+    appends them, and its bytes the last of the chunk; anything else in the
+    document is left as it was.
+    """
+    skies = (document.get('extensions') or {}).pop(EXTENSION, None)
+    if skies is None:
+        return binary
+    textures, images = document.get('textures', []), document.get('images', [])
+    samplers, views = document.get('samplers', []), document.get('bufferViews', [])
+    if textures and textures[-1].get('name') == 'Sky':
+        texture = textures.pop()
+        if texture.get('sampler') == len(samplers) - 1:
+            samplers.pop()
+        if texture.get('source') == len(images) - 1:
+            image = images.pop()
+            view = image.get('bufferView')
+            if view is not None and view == len(views) - 1:
+                binary = binary[:views.pop()['byteOffset']]
+    return binary
 
 
 def with_sky(blob: bytes, image: Any, ambient: float = 1.0) -> bytes:
-    """``blob`` with ``image`` added as the document's sky; the new glB.
+    """``blob`` with ``image`` as the document's sky; the new glB.
 
-    The picture goes in as an ordinary glTF image, texture and sampler, so a
-    reader that has never heard of the extension sees a texture nothing uses
-    and draws the world exactly as before. The extension is listed as *used*
-    and never as required, for the same reason.
+    The picture goes in as an ordinary glTF image, in the glB's binary chunk
+    behind a bufferView, with a texture and sampler, so a reader that has never
+    heard of the extension sees a texture nothing uses and draws the world
+    exactly as before. The extension is listed as *used* and never as
+    required, for the same reason. A sky this wrote before is replaced.
     """
-    document, rest = _chunks(blob)
+    document, binary = _chunks(blob)
+    binary = _without_sky(document, binary)
+    buffers = document.setdefault('buffers', [])
+    if buffers and 'uri' in buffers[0]:
+        raise ValueError('buffer 0 of this glB is a file of its own, not its '
+                         'binary chunk')
+    picture = _jpeg(image)
+    binary += b'\0' * (-len(binary) % 4)
+    views = document.setdefault('bufferViews', [])
+    views.append({'buffer': 0, 'byteOffset': len(binary),
+                  'byteLength': len(picture)})
+    binary += picture
+    if buffers:
+        buffers[0]['byteLength'] = len(binary)
+    else:
+        buffers.append({'byteLength': len(binary)})
+
     images = document.setdefault('images', [])
     textures = document.setdefault('textures', [])
     samplers = document.setdefault('samplers', [])
-
-    images.append({'uri': _data_uri(image), 'mimeType': 'image/jpeg',
+    images.append({'bufferView': len(views) - 1, 'mimeType': 'image/jpeg',
                    'name': 'Sky'})
     # Linear filtering and a repeat in longitude: the panorama meets itself
     # there, and clamping it would draw the seam it was made to avoid.
@@ -238,4 +286,4 @@ def with_sky(blob: bytes, image: Any, ambient: float = 1.0) -> bytes:
             'ambientSkyContribution': float(ambient),
         }],
     }
-    return _rebuilt(document, rest)
+    return _rebuilt(document, binary)

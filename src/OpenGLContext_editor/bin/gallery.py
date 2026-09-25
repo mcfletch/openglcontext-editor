@@ -20,7 +20,7 @@ is built from.
 Blender file -- the one an author opens to see how the world is put together,
 and the one the add-on's own operators were used to make.
 
-**Blender does the export.** The levels are cut by Blender's Decimate modifier
+Blender does the export. The levels are cut by Blender's Decimate modifier
 and written by the add-on in
 ``OpenGLContext_editor/blender/openglcontext_lod``, so what this produces is
 what an author gets from *File > Export > glTF 2.0* with the add-on installed,
@@ -110,7 +110,14 @@ def build(content: str, output: str, bays: int = 30, levels: int = 6,
           blend: str | None = None, blender_binary: str | None = None,
           impostor: int = 0, impostor_image: int = 256,
           timeout: float = 3600.0) -> str:
-    """Drive Blender over the content directory; return the glB written."""
+    """The glB Blender wrote from the content directory, with its sky.
+
+    Blender exits 0 after a traceback in ``--background``, so the build is
+    done only when ``build.py`` reports ``WROTE:`` for ``output``; a file an
+    earlier run left there is removed first, so it cannot pass for this one.
+    """
+    if os.path.exists(output):
+        os.remove(output)
     script = os.path.join(blender.addon_directory(), 'build.py')
     argv = ['-P', script, '--',
             '--content', content, '--output', os.path.abspath(output),
@@ -123,10 +130,13 @@ def build(content: str, output: str, bays: int = 30, levels: int = 6,
         argv += ['--blend', os.path.abspath(blend)]
     done = blender.run(argv, blender=blender_binary, check=False,
                        timeout=timeout)
+    wrote = False
     for line in done.stdout.splitlines():
         if line.startswith(('BUILT:', 'WROTE:', 'FAILED:')):
             print(line)
-    if done.returncode or not os.path.exists(output):
+        if line.startswith('WROTE: %s ' % (os.path.abspath(output),)):
+            wrote = True
+    if done.returncode or not wrote or not os.path.exists(output):
         sys.stderr.write(done.stdout[-4000:])
         sys.stderr.write(done.stderr[-4000:])
         raise SystemExit('Blender did not write %s' % (output,))
