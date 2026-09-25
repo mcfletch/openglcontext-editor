@@ -20,8 +20,8 @@ def _species(tmp_path, name='fir'):
                  '%s_leaf.png' % name, '%s_imp.png' % name):
         (tmp_path / part).write_bytes(b'x')
     return TreeSpecies(name=name, mesh=str(tmp_path / ('%s.npz' % name)),
-                       solid_texture=str(tmp_path / ('%s_bark.png' % name)),
-                       foliage_texture=str(tmp_path / ('%s_leaf.png' % name)),
+                       solidTexture=str(tmp_path / ('%s_bark.png' % name)),
+                       foliageTexture=str(tmp_path / ('%s_leaf.png' % name)),
                        impostor=str(tmp_path / ('%s_imp.png' % name)))
 
 

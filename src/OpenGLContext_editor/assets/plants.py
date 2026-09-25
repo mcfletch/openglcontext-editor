@@ -385,27 +385,25 @@ def bake(source: PlantSource, directory: str,
             writer.add_node(SceneNode(name=name, mesh=mesh))
         species.append(CoverSpecies(
             name=variant.name, card='%s_card.png' % (variant.name,),
-            clump=model, clump_mesh=variant.name,
-            clump_far_mesh='%s_far' % (variant.name,),
+            clump=model, clumpMesh=variant.name,
+            clumpFarMesh='%s_far' % (variant.name,),
             density=density, height=round(variant.height, 4),
-            patchiness=patchiness, canopy=canopy,
+            patchiness=patchiness, canopy=list(canopy or ()),
             **({} if patch_metres is None
-               else {'patch_metres': patch_metres})))
+               else {'patchMetres': patch_metres})))
     writer.write(os.path.join(directory, model))
 
     if card:
         # The card is the geometry rendered front-on, so how wide it came out
         # is how wide the plant is -- which is exactly what the billboard node
         # needs for its quad, and is not a figure anyone should be guessing.
-        from dataclasses import replace
-
         from OpenGLContext_editor.assets.card import bake_card
         for index, (variant, entry) in enumerate(
                 zip(found, species, strict=True)):
             width = bake_card(os.path.join(directory, model), variant.name,
                               texture, os.path.join(directory, entry.card),
                               size=card_size)
-            species[index] = replace(entry, card_width=round(width, 4))
+            species[index] = entry.varied(cardWidth=round(width, 4))
     _credit(directory, source)
     return species
 

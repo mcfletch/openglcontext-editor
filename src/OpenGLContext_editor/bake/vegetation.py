@@ -32,7 +32,7 @@ from __future__ import annotations
 import io
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -161,8 +161,8 @@ class VegetationLayer:
         """
         written: dict[str, bytes] = {self._table_name(): self._table()}
         sources = [source for entry in self.species
-                   for source in (entry.mesh, entry.solid_texture,
-                                  entry.foliage_texture, entry.impostor)]
+                   for source in (entry.mesh, entry.solidTexture,
+                                  entry.foliageTexture, entry.impostor)]
         for entry in self._cover_species():
             sources.extend(part for part in (entry.card, entry.clump) if part)
         for source in sources:
@@ -189,11 +189,10 @@ class VegetationLayer:
 
     def _written(self, entry: TreeSpecies) -> TreeSpecies:
         """A species as the world carries it: its own copies, under the world."""
-        return replace(
-            entry,
+        return entry.varied(
             mesh=self._under(entry.mesh),
-            solid_texture=self._under(entry.solid_texture),
-            foliage_texture=self._under(entry.foliage_texture),
+            solidTexture=self._under(entry.solidTexture),
+            foliageTexture=self._under(entry.foliageTexture),
             impostor=self._under(entry.impostor))
 
     def _under(self, source: str) -> str:

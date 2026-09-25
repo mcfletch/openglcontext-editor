@@ -40,26 +40,26 @@ __all__ = ['shipped_species', 'shipped_credits', 'species_directory',
 #: maples give the valleys something broadleaf so a lap is not one tree
 #: repeated.
 SHIPPED = (
-    TreeSpecies(name='fir', mesh='fir.npz', solid_texture='fir_bark.png',
-                foliage_texture='fir_branch.png', impostor='fir_imp.png',
-                card_width=0.50),
-    TreeSpecies(name='noel', mesh='noel.npz', solid_texture='noel_bark.png',
-                foliage_texture='noel_branch.png', impostor='noel_imp.png',
-                card_width=0.55),
+    TreeSpecies(name='fir', mesh='fir.npz', solidTexture='fir_bark.png',
+                foliageTexture='fir_branch.png', impostor='fir_imp.png',
+                cardWidth=0.50),
+    TreeSpecies(name='noel', mesh='noel.npz', solidTexture='noel_bark.png',
+                foliageTexture='noel_branch.png', impostor='noel_imp.png',
+                cardWidth=0.55),
     TreeSpecies(name='maple0', mesh='maple0.npz',
-                solid_texture='maple_bark.png',
-                foliage_texture='maple_leaves.png',
+                solidTexture='maple_bark.png',
+                foliageTexture='maple_leaves.png',
                 impostor='maple_imp0.png',
                 solid=('bP', 'bN', 'bU', 'bI'),
                 foliage=('cP', 'cN', 'cU', 'cI'),
-                card_width=0.72),
+                cardWidth=0.72),
     TreeSpecies(name='maple2', mesh='maple2.npz',
-                solid_texture='maple_bark.png',
-                foliage_texture='maple_leaves.png',
+                solidTexture='maple_bark.png',
+                foliageTexture='maple_leaves.png',
                 impostor='maple_imp2.png',
                 solid=('bP', 'bN', 'bU', 'bI'),
                 foliage=('cP', 'cN', 'cU', 'cI'),
-                card_width=0.72),
+                cardWidth=0.72),
 )
 
 #: What the example world grows between its trees when its art carries no
@@ -117,8 +117,8 @@ def shipped_species(directory: str | None = None) -> list[TreeSpecies]:
     found = []
     for entry in SHIPPED:
         species = entry.beside(where)
-        for part in (species.mesh, species.solid_texture,
-                     species.foliage_texture, species.impostor):
+        for part in (species.mesh, species.solidTexture,
+                     species.foliageTexture, species.impostor):
             if not os.path.exists(part):
                 raise LookupError(
                     "%s is part of the '%s' tree and is not in %s"

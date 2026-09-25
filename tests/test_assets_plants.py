@@ -230,14 +230,14 @@ class TestWhatTheBakeWrites:
 
     def test_each_variant_names_its_own_two_rungs(self, tmp_path) -> None:
         _source_, _out, species = self._baked(tmp_path)
-        assert species[0].clump_mesh == 'fern_a'
-        assert species[0].clump_far_mesh == 'fern_a_far'
+        assert species[0].clumpMesh == 'fern_a'
+        assert species[0].clumpFarMesh == 'fern_a_far'
 
     def test_what_it_wrote_is_what_the_engine_reads(self, tmp_path) -> None:
         _source_, out, species = self._baked(tmp_path)
         path = str(out / species[0].clump)
         points, _n, _uv, indices, texture = load_clump_glb(
-            path, mesh=species[0].clump_mesh)
+            path, mesh=species[0].clumpMesh)
         assert len(indices) and len(points)
         assert texture.mode == 'RGBA'
         assert float(points[:, 1].max()) == pytest.approx(1.0)   # height-normalised
@@ -252,8 +252,8 @@ class TestWhatTheBakeWrites:
     def test_the_far_rung_is_no_dearer_than_the_near_one(self, tmp_path) -> None:
         _source_, out, species = self._baked(tmp_path)
         path = str(out / species[0].clump)
-        near = load_clump_glb(path, mesh=species[0].clump_mesh)[3]
-        far = load_clump_glb(path, mesh=species[0].clump_far_mesh)[3]
+        near = load_clump_glb(path, mesh=species[0].clumpMesh)[3]
+        far = load_clump_glb(path, mesh=species[0].clumpFarMesh)[3]
         assert len(far) <= len(near)
 
     def test_a_dense_plant_is_brought_down_to_the_budget(self, tmp_path) -> None:

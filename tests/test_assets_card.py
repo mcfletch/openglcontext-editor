@@ -32,21 +32,21 @@ class TestWhatTheCardComesOutAs:
     def test_it_writes_a_picture_with_an_alpha_channel(self, plant) -> None:
         model, species, out = plant
         target = str(out / 'leaf_card.png')
-        bake_card(model, species.clump_mesh, None, target, size=64)
+        bake_card(model, species.clumpMesh, None, target, size=64)
         assert Image.open(target).mode == 'RGBA'
 
     def test_the_transparent_part_is_the_silhouette(self, plant) -> None:
         """What no triangle covered is what the card has to leave out."""
         model, species, out = plant
         target = str(out / 'leaf_card.png')
-        bake_card(model, species.clump_mesh, None, target, size=64)
+        bake_card(model, species.clumpMesh, None, target, size=64)
         covered = card_coverage(target)
         assert 0.02 < covered < 0.95
 
     def test_the_plant_is_drawn_not_just_cleared(self, plant) -> None:
         model, species, out = plant
         target = str(out / 'leaf_card.png')
-        bake_card(model, species.clump_mesh, None, target, size=64)
+        bake_card(model, species.clumpMesh, None, target, size=64)
         picture = np.asarray(Image.open(target))
         lit = picture[picture[..., 3] > 10]
         assert len(lit)
@@ -55,14 +55,14 @@ class TestWhatTheCardComesOutAs:
     def test_it_says_how_wide_the_plant_was(self, plant) -> None:
         """The billboard is one unit tall and this many across."""
         model, species, _out = plant
-        width = bake_card(model, species.clump_mesh, None,
+        width = bake_card(model, species.clumpMesh, None,
                           str(_out / 'leaf_card.png'), size=64)
         assert width == pytest.approx(1.0, abs=0.2)   # the fixture leaf is square
 
     def test_a_square_plant_gets_a_square_card(self, plant) -> None:
         model, species, out = plant
         target = str(out / 'leaf_card.png')
-        bake_card(model, species.clump_mesh, None, target, size=32)
+        bake_card(model, species.clumpMesh, None, target, size=32)
         assert Image.open(target).size == (32, 32)
 
 
@@ -85,7 +85,7 @@ class TestACardIsShapedLikeThePlant:
     def test_a_wide_plant_gets_a_wide_card(self, tmp_path) -> None:
         model, species, out = self._wide(tmp_path, 4.0)
         target = str(out / 'mat_card.png')
-        bake_card(model, species.clump_mesh, None, target, size=64)
+        bake_card(model, species.clumpMesh, None, target, size=64)
         width, height = Image.open(target).size
         assert height == 64
         assert width > 2 * height
@@ -95,7 +95,7 @@ class TestACardIsShapedLikeThePlant:
         shape is mostly a waste of memory."""
         model, species, out = self._wide(tmp_path, 20.0)
         target = str(out / 'mat_card.png')
-        bake_card(model, species.clump_mesh, None, target, size=64)
+        bake_card(model, species.clumpMesh, None, target, size=64)
         width, height = Image.open(target).size
         assert width <= 4 * height
 
@@ -104,11 +104,11 @@ class TestACardIsShapedLikeThePlant:
         """Which is the point. Squeezed into a square, a plant four times wider
         than tall occupies a quarter of the height and the rest is sky."""
         model, species, out = self._wide(tmp_path / 'square', 1.0)
-        bake_card(model, species.clump_mesh, None, str(out / 'card.png'),
+        bake_card(model, species.clumpMesh, None, str(out / 'card.png'),
                   size=64)
         square = card_coverage(str(out / 'card.png'))
         model, species, out = self._wide(tmp_path / 'wide', 4.0)
-        bake_card(model, species.clump_mesh, None, str(out / 'card.png'),
+        bake_card(model, species.clumpMesh, None, str(out / 'card.png'),
                   size=64)
         assert card_coverage(str(out / 'card.png')) == pytest.approx(
             square, abs=0.05)
@@ -122,7 +122,7 @@ class TestABakedPlantGetsItsCardMeasured:
         source = _source(tmp_path, nodes=[('leaf', (0, 0, 0))])
         out = tmp_path / 'assets'
         species = plants.bake(source, str(out), card=True, card_size=64)
-        assert species[0].card_width == pytest.approx(1.0, abs=0.2)
+        assert species[0].cardWidth == pytest.approx(1.0, abs=0.2)
         assert (out / species[0].card).exists()
 
 
