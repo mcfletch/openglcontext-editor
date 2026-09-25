@@ -6,6 +6,7 @@ the bake exists to satisfy -- rather than only inspecting the JSON.
 """
 
 import json
+import os
 
 import numpy as np
 import pytest
@@ -21,6 +22,12 @@ from OpenGLContext_editor.bake.tileset import (
 
 def _tile(low, high, error, **kwargs):
     return BakedTile(BoundingBox(low, high), geometric_error=error, **kwargs)
+
+
+def _names(uris):
+    """The file names of the content a tileset read, which the reader resolves
+    against the directory the tileset is read beside."""
+    return [os.path.basename(uri) for uri in uris]
 
 
 def _parsed(root, **kwargs):
@@ -53,13 +60,13 @@ class TestOneTile:
 
     def test_content_survives(self) -> None:
         parsed = _parsed(_tile((0, 0, 0), (1, 1, 1), 1.0, content_uris=['t0.glb']))
-        assert parsed.root.content_uris == ['t0.glb']
+        assert _names(parsed.root.content_uris) == ['t0.glb']
 
     def test_several_contents_survive(self) -> None:
         """1.1 lets one tile carry terrain and its vegetation as separate glTF."""
         parsed = _parsed(_tile((0, 0, 0), (1, 1, 1), 1.0,
                                content_uris=['terrain.glb', 'trees.glb']))
-        assert parsed.root.content_uris == ['terrain.glb', 'trees.glb']
+        assert _names(parsed.root.content_uris) == ['terrain.glb', 'trees.glb']
 
     def test_a_single_content_is_written_the_1_0_way(self) -> None:
         """`content` rather than `contents`, so a 1.0 reader can load it too."""
@@ -90,7 +97,7 @@ class TestATree:
     def test_children_survive(self) -> None:
         parsed = _parsed(self._nested())
         assert len(parsed.root.children) == 2
-        assert sorted(c.content_uri for c in parsed.root.children) == ['a.glb', 'b.glb']
+        assert sorted(_names(c.content_uri for c in parsed.root.children)) == ['a.glb', 'b.glb']
 
     def test_refinement_is_stated_once_at_the_root(self) -> None:
         """REPLACE is inherited, so repeating it on every tile is dead weight

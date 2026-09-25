@@ -108,9 +108,10 @@ def cache_dir(directory: str | None = None) -> str:
 def _open_capped(url: str, max_bytes: int) -> bytes:
     """``url``'s bytes, reading no more than ``max_bytes`` of them.
 
-    A redirect is followed only to one of :data:`HOSTS`.
+    ``url`` and every redirect from it are held to :data:`HOSTS`.
     """
-    with resolver.open_url(url, redirects=resolver.AllowedHosts(HOSTS),
+    hosts = resolver.AllowedHosts(HOSTS)
+    with resolver.open_url(hosts.check(url), redirects=hosts,
                            timeout=120, agent=USER_AGENT) as answer:
         return resolver.stream_capped(answer, max_bytes)
 
