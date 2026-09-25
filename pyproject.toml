@@ -54,6 +54,9 @@ dependencies = [
     # because making levels of detail is what this package does; the engine
     # draws them and needs none of it.
     "opengl_decimate>=0.1.0a1",
+    # The zone bake makes an area's ambience with `synth.surf` and
+    # `synth.birdsong`, which 0.4.0a1 is the first version to carry.
+    "omi_audio>=0.4.0a1",
 ]
 
 [project.optional-dependencies]
