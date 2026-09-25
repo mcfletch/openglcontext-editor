@@ -270,6 +270,21 @@ class TestWhatTheBakeWrites:
         assert len(load_clump_glb(path, mesh='bush')[3]) // 3 <= 320
         assert len(load_clump_glb(path, mesh='bush_far')[3]) // 3 <= 90
 
+    def test_without_cards_a_species_names_none(self, tmp_path) -> None:
+        """A manifest naming a card nobody baked fails a world bake later."""
+        _source_, out, species = self._baked(tmp_path)
+        assert [one.card for one in species] == ['', '']
+
+    def test_a_card_is_named_for_its_asset_as_well_as_its_plant(
+            self, tmp_path) -> None:
+        """Two scans may both hold a node called ``Plant``."""
+        source = _source(tmp_path, nodes=[('leaf', (0, 0, 0))])
+        out = tmp_path / 'out'
+        (out).mkdir()
+        (out / 'fern_02_leaf_card.png').write_bytes(b'baked earlier')
+        species = plants.bake(source, str(out), card=False)
+        assert species[0].card == 'fern_02_leaf_card.png'
+
     def test_it_writes_what_the_plant_has_to_be_credited_as(self, tmp_path) -> None:
         source, out, _species = self._baked(tmp_path)
         assert source.credit in (out / 'CREDITS.txt').read_text()

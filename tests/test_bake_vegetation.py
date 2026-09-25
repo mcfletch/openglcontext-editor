@@ -100,6 +100,27 @@ class TestTheCoverRecord:
         assets = _layer(tmp_path, cover=shared).assets()
         assert len([name for name in assets if name.endswith('fern.glb')]) == 1
 
+    def test_files_named_alike_in_two_places_are_both_carried(
+            self, tmp_path) -> None:
+        """Two sets baked into two directories both call their card
+        ``card.png``; each species keeps its own."""
+        made = []
+        for name in ('fern', 'shrub'):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / 'card.png').write_bytes(name.encode())
+            (tmp_path / name / 'clump.glb').write_bytes(name.encode())
+            made.append(CoverSpecies(
+                name=name, card=str(tmp_path / name / 'card.png'),
+                clump=str(tmp_path / name / 'clump.glb')))
+        layer = _layer(tmp_path, cover=made)
+        assets = layer.assets()
+        grown = self._grown(layer)['species']
+        assert len({one['card'] for one in grown}) == 2
+        assert len({one['clump'] for one in grown}) == 2
+        for one in grown:
+            assert assets[one['card']] == one['name'].encode()
+            assert assets[one['clump']] == one['name'].encode()
+
     def test_it_says_what_it_grows_on(self, tmp_path) -> None:
         layer = _layer(tmp_path, cover=_cover(tmp_path),
                        cover_on=['grass', 'forest_floor'])

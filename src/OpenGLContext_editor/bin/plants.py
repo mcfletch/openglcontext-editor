@@ -18,6 +18,8 @@ import os
 import sys
 from collections.abc import Sequence
 
+from OpenGLContext import atomicfiles
+
 from OpenGLContext_editor.assets import plants, polyhaven
 
 
@@ -63,9 +65,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument('--patch-metres', type=float, default=None,
                         metavar='M', help='roughly how far across one bed is')
     parser.add_argument('--canopy', type=float, nargs=2, default=None,
-                        metavar=('DIM', 'BRIGHT'),
-                        help='the band of canopy light this plant grows in, '
-                             '0 under a closed canopy to 1 in the open')
+                        metavar=('LEAST', 'MOST'),
+                        help='the band of tree cover this plant grows under: '
+                             '0 on open ground, 1 with a crown of tree over '
+                             'every square metre (SplatTerrain.canopy_cover)')
     parser.add_argument('--density', type=float, default=0.35,
                         help='density for any asset that names none')
     parser.add_argument('--no-cards', action='store_true',
@@ -74,7 +77,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Fetch and bake every named asset; write what grew."""
+    """The exit status, 0 once every named asset is fetched and baked and
+    ``cover.json`` names them; 1 when one cannot be fetched."""
     options = build_arg_parser().parse_args(
         sys.argv[1:] if argv is None else list(argv))
     grown = []
@@ -102,12 +106,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _write(directory: str, grown: list) -> str:
-    """Add ``grown`` to the directory's ``cover.json``, by name.
+    """The path of the directory's ``cover.json``, with ``grown`` added by name.
 
     Merged rather than replaced, because plants do not all want the same
     settings: a shrub of a hundred and fifty thousand triangles needs a budget
     a grass tuft does not, so a set is built up over several runs into one
-    directory. A species baked again replaces the entry it had.
+    directory. A species baked again from the same asset replaces the entry it
+    had; one of the same name from another asset (two scans may both call a
+    node ``Plant``) raises ``ValueError`` and nothing is written.
     """
     manifest = os.path.join(directory, 'cover.json')
     named = {}
@@ -115,11 +121,18 @@ def _write(directory: str, grown: list) -> str:
         with open(manifest, encoding='utf-8') as handle:
             for entry in json.load(handle).get('species', ()):
                 named[entry['name']] = entry
+    baked: dict[str, str] = {}
     for one in grown:
-        named[one.name] = one.to_json()
-    with open(manifest, 'w', encoding='utf-8') as handle:
-        json.dump({'species': [named[key] for key in sorted(named)]}, handle,
-                  indent=1)
+        record = one.to_json()
+        earlier = baked.get(one.name, (named.get(one.name) or {}).get('clump'))
+        if earlier is not None and earlier != record['clump']:
+            raise ValueError(
+                "%r is a plant in both %s and %s; bake one of them into "
+                "another directory" % (one.name, earlier, record['clump']))
+        baked[one.name] = record['clump']
+        named[one.name] = record
+    atomicfiles.write_text(manifest, json.dumps(
+        {'species': [named[key] for key in sorted(named)]}, indent=1))
     return manifest
 
 

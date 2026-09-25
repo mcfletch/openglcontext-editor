@@ -40,6 +40,25 @@ class TestTheSetItWrites:
         assert len(written['species']) == 1
         assert written['species'][0]['density'] == 0.25
 
+    def test_a_plant_of_another_asset_by_the_same_name_is_refused(
+            self, tmp_path) -> None:
+        """Two scans may both call a node ``Plant``; neither may take the
+        other's entry."""
+        command._write(str(tmp_path), [_entry('plant', clump='fern_02.glb')])
+        with pytest.raises(ValueError, match='fern_02.glb'):
+            command._write(str(tmp_path),
+                           [_entry('plant', clump='shrub_04.glb')])
+        written = json.loads((tmp_path / 'cover.json').read_text())
+        assert written['species'][0]['clump'] == 'fern_02.glb'
+
+    def test_two_assets_in_one_run_by_the_same_name_are_refused(
+            self, tmp_path) -> None:
+        with pytest.raises(ValueError):
+            command._write(str(tmp_path),
+                           [_entry('plant', clump='fern_02.glb'),
+                            _entry('plant', clump='shrub_04.glb')])
+        assert not (tmp_path / 'cover.json').exists()
+
     def test_what_it_writes_reads_back_as_species(self, tmp_path) -> None:
         command._write(str(tmp_path), [_entry('fern_a', density=0.3)])
         written = json.loads((tmp_path / 'cover.json').read_text())
@@ -47,6 +66,14 @@ class TestTheSetItWrites:
 
 
 class TestHowItIsAsked:
+    def test_the_canopy_band_is_tree_closure(self) -> None:
+        """The band is how much tree cover a plant grows under, 0 on open
+        ground, as the engine reads it; not how much light reaches it."""
+        found = command.build_arg_parser()._option_string_actions['--canopy']
+        assert found.metavar == ('LEAST', 'MOST')
+        assert 'open ground' in found.help
+        assert 'light' not in found.help
+
     def test_a_plain_name_takes_the_default_density(self) -> None:
         assert command._wanted('fern_02') == ('fern_02', None)
 

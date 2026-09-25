@@ -148,7 +148,7 @@ class VegetationLayer:
     def _grown(self, entry: CoverSpecies) -> dict:
         """A cover species as the world carries it: its own copies, under it."""
         record = entry.to_json()
-        record['card'] = self._under(entry.card)
+        record['card'] = self._under(entry.card) if entry.card else ''
         record['clump'] = self._under(entry.clump) if entry.clump else None
         return record
 
@@ -160,16 +160,9 @@ class VegetationLayer:
         sharing one bark texture -- is written once.
         """
         written: dict[str, bytes] = {self._table_name(): self._table()}
-        sources = [source for entry in self.species
-                   for source in (entry.mesh, entry.solidTexture,
-                                  entry.foliageTexture, entry.impostor)]
-        for entry in self._cover_species():
-            sources.extend(part for part in (entry.card, entry.clump) if part)
-        for source in sources:
-            name = self._under(source)
-            if name not in written:
-                with open(source, 'rb') as handle:
-                    written[name] = handle.read()
+        for source, name in self._placed().items():
+            with open(source, 'rb') as handle:
+                written[name] = handle.read()
         return written
 
     def _table_name(self) -> str:
@@ -196,5 +189,32 @@ class VegetationLayer:
             impostor=self._under(entry.impostor))
 
     def _under(self, source: str) -> str:
-        """Where a species' file lands, relative to the tileset."""
-        return '%s/%s' % (SPECIES_DIRECTORY, os.path.basename(source))
+        """Where a species' file lands, relative to the tileset.
+
+        Under its own name, and where two files from different directories
+        share a name, the second and later take a number after it, so each
+        species keeps its own. The same file named twice lands once.
+        """
+        placed = self._placed()
+        return placed[os.path.abspath(source)]
+
+    def _placed(self) -> dict[str, str]:
+        """Every species file's place under the tileset, by its absolute path."""
+        sources = [source for entry in self.species
+                   for source in (entry.mesh, entry.solidTexture,
+                                  entry.foliageTexture, entry.impostor)]
+        for entry in self._cover_species():
+            sources.extend(part for part in (entry.card, entry.clump) if part)
+        placed: dict[str, str] = {}
+        taken: set[str] = set()
+        for source in map(os.path.abspath, sources):
+            if source in placed:
+                continue
+            stem, extension = os.path.splitext(os.path.basename(source))
+            name, number = stem + extension, 1
+            while name in taken:
+                number += 1
+                name = '%s-%d%s' % (stem, number, extension)
+            taken.add(name)
+            placed[source] = '%s/%s' % (SPECIES_DIRECTORY, name)
+        return placed
