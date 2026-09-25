@@ -13,20 +13,19 @@ it mounted, and the render pass does the rest (``docs/zones.rst``).
 :class:`AmbientSound` is a looping sound zones may play, carried as a WAV file
 beside the document. :class:`ZonesLayer` is the bake layer that writes them:
 no content in any tile, a record in the tileset's extras, and the document and
-its sounds as assets. :func:`zone_records` turns a road's
+its sounds as assets, written by the engine's
+:meth:`~OpenGLContext.loaders.gltf.writer.GLTFWriter.add_zone` beside the
+reader that loads them. :func:`zone_records` turns a road's
 :class:`~OpenGLContext_editor.world.places.Place` list into records, with each
 kind of place's environment, reverb and ambience.
 """
 from __future__ import annotations
 
-import io
-import json
-import wave
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-import numpy as np
+from OpenGLContext.loaders.gltf.writer import GlobalSound, GLTFWriter, ZoneNode, zone_box
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.places import (
@@ -39,7 +38,7 @@ from OpenGLContext_editor.world.places import (
 
 __all__ = [
     'DOCUMENT', 'AmbientSound', 'ZoneRecord', 'ZonesLayer', 'PLACE_SETTINGS',
-    'zone_records', 'place_sounds', 'wav_bytes',
+    'zone_records', 'place_sounds',
 ]
 
 #: What the zones document is called beside the tileset.
@@ -67,6 +66,16 @@ class AmbientSound:
     def uri(self) -> str:
         return 'audio/%s.wav' % (self.name,)
 
+    def wav_bytes(self) -> bytes:
+        """The sound as the WAV file written at :attr:`uri`."""
+        from omi_audio.clip import Clip
+        return Clip(self.make(), SAMPLE_RATE, self.name).wav_bytes()
+
+    def emitter(self) -> GlobalSound:
+        """The sound as the global emitter the zones document names."""
+        return GlobalSound(self.name, self.uri, gain=self.gain,
+                           mime_type='audio/wav')
+
 
 @dataclass(frozen=True)
 class ZoneRecord:
@@ -87,18 +96,6 @@ class ZoneRecord:
     environment: dict | None = None
     reverb: dict | None = None
     sounds: tuple[str, ...] = ()
-
-
-def wav_bytes(samples: Any, sample_rate: int = SAMPLE_RATE) -> bytes:
-    """Mono float samples as a 16-bit PCM WAV file."""
-    pcm = (np.clip(np.asarray(samples, dtype='d'), -1.0, 1.0) * 32767.0).astype('<i2')
-    buffer = io.BytesIO()
-    with wave.open(buffer, 'wb') as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(int(sample_rate))
-        handle.writeframes(pcm.tobytes())
-    return buffer.getvalue()
 
 
 def place_sounds(seed: int = 0) -> dict[str, AmbientSound]:
@@ -179,9 +176,9 @@ class ZonesLayer:
         """The zones document, and every sound a zone plays."""
         if not self.zones:
             return {}
-        written = {DOCUMENT: (json.dumps(self.document(), indent=1) + '\n').encode('utf-8')}
+        written = {DOCUMENT: self._writer().to_gltf()}
         for sound in self._played():
-            written[sound.uri] = wav_bytes(sound.make())
+            written[sound.uri] = sound.wav_bytes()
         return written
 
     def _played(self) -> list[AmbientSound]:
@@ -198,42 +195,17 @@ class ZonesLayer:
 
     def document(self) -> dict[str, Any]:
         """The zones as a glTF 2.0 document, with ``KHR_implicit_shapes`` shapes."""
-        played = self._played()
-        emitter = {sound.name: index for index, sound in enumerate(played)}
-        nodes = []
-        shapes: list[dict[str, Any]] = []
+        document: dict[str, Any] = self._writer().document()
+        return document
+
+    def _writer(self) -> GLTFWriter:
+        self._played()
+        writer = GLTFWriter(generator='OpenGLContext_editor zones')
         for record in self.zones:
-            block: dict[str, Any] = {'shape': len(shapes), 'priority': record.priority,
-                                     'blend': record.blend}
-            shapes.append({'type': 'box', 'box': {'size': list(record.size)}})
-            if record.environment is not None:
-                block['environment'] = record.environment
-            if record.reverb is not None:
-                block['reverb'] = record.reverb
-            if record.sounds:
-                block['extensions'] = {'KHR_audio_emitter': {
-                    'emitters': [emitter[name] for name in record.sounds]}}
-            nodes.append({'name': record.name, 'translation': list(record.centre),
-                          'rotation': list(record.rotation),
-                          'extensions': {'OGLC_zone': block}})
-        used = ['OGLC_zone', 'KHR_implicit_shapes']
-        extensions: dict[str, Any] = {'KHR_implicit_shapes': {'shapes': shapes}}
-        if played:
-            used.append('KHR_audio_emitter')
-            extensions['KHR_audio_emitter'] = {
-                'audio': [{'uri': sound.uri, 'mimeType': 'audio/wav'} for sound in played],
-                'sources': [{'name': sound.name, 'audio': index, 'loop': True,
-                             'autoplay': True}
-                            for index, sound in enumerate(played)],
-                'emitters': [{'name': sound.name, 'type': 'global', 'gain': sound.gain,
-                              'sources': [index]}
-                             for index, sound in enumerate(played)],
-            }
-        return {
-            'asset': {'version': '2.0', 'generator': 'OpenGLContext_editor zones'},
-            'extensionsUsed': used,
-            'extensions': extensions,
-            'scene': 0,
-            'scenes': [{'nodes': list(range(len(nodes)))}],
-            'nodes': nodes,
-        }
+            writer.add_zone(ZoneNode(
+                record.name, zone_box(record.size), translation=record.centre,
+                rotation=record.rotation, priority=record.priority,
+                blend=record.blend, environment=record.environment,
+                reverb=record.reverb,
+                sounds=tuple(self.sounds[name].emitter() for name in record.sounds)))
+        return writer

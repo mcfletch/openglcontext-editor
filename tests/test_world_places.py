@@ -12,7 +12,6 @@ from OpenGLContext_editor.bake.zones import (
     AmbientSound,
     ZonesLayer,
     place_sounds,
-    wav_bytes,
     zone_records,
 )
 from OpenGLContext_editor.world.places import (
@@ -163,6 +162,6 @@ class TestTheLayer:
 def test_the_places_sound_like_their_places():
     sounds = place_sounds(seed=3)
     assert set(sounds) == {'birdsong', 'surf'}
-    with wave.open(io.BytesIO(wav_bytes(sounds['surf'].make()))) as handle:
+    with wave.open(io.BytesIO(sounds['surf'].wav_bytes())) as handle:
         assert handle.getnchannels() == 1
         assert handle.getnframes() == handle.getframerate() * 14
