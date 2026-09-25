@@ -45,6 +45,19 @@ class TestABoundingBox:
         assert box.contains((0, 0, 0))          # the low corner is inside
         assert not box.contains((2.5, 1, 1))
 
+    def test_the_high_faces_belong_to_the_next_box(self) -> None:
+        """Siblings share a face, and a point on it is in exactly one."""
+        low = BoundingBox((0, 0, 0), (2, 2, 2))
+        high = BoundingBox((2, 0, 0), (4, 2, 2))
+        on_the_face = (2.0, 1.0, 1.0)
+        assert [bool(low.holds(on_the_face)[0]),
+                bool(high.holds(on_the_face)[0])] == [False, True]
+
+    def test_it_says_which_of_many_points_it_holds(self) -> None:
+        box = BoundingBox((0, 0, 0), (2, 2, 2))
+        points = np.array([(0, 0, 0), (1, 1, 1), (2, 1, 1), (-1, 1, 1)], 'd')
+        assert box.holds(points).tolist() == [True, True, False, False]
+
     def test_it_expands(self) -> None:
         box = BoundingBox((0, 0, 0), (1, 1, 1)).expanded(0.5)
         assert box.minimum.tolist() == [-0.5, -0.5, -0.5]

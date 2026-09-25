@@ -97,6 +97,18 @@ class BoundingBox:
         p = np.asarray(point, dtype='d')
         return bool(np.all(p >= self.minimum) and np.all(p <= self.maximum))
 
+    def holds(self, points: Point) -> npt.NDArray[np.bool_]:
+        """Which of ``points`` (N, 3) belong to this box as a cell of a tile
+        tree: on or above each low face and below each high one.
+
+        Half-open, unlike :meth:`contains`, so a point on a face two sibling
+        cells share belongs to exactly one of them -- a tile tree refines by
+        replacement, and a placement in both is drawn twice.
+        """
+        at = np.asarray(points, dtype='d').reshape(-1, 3)
+        found: npt.NDArray[np.bool_] = np.all((at >= self.minimum) & (at < self.maximum), axis=1)
+        return found
+
     # -- derivation ------------------------------------------------------------
 
     def __or__(self, other: BoundingBox | None) -> BoundingBox:

@@ -186,7 +186,15 @@ class _BakeState:
 
 def _partition(region: BoundingBox, depth: int,
                axes: tuple[bool, ...]) -> OctreeNode:
-    """A cell tree over ``region``, subdividing only along ``axes``."""
+    """A cell tree over ``region``, subdividing only along ``axes``.
+
+    A cell holds what is on its low faces and not its high ones
+    (:meth:`BoundingBox.holds`), so the root's high faces are moved out by
+    the smallest step there is: what lies on the edge of ``region`` is inside
+    the tree.
+    """
+    region = BoundingBox(region.minimum,
+                         np.nextafter(region.maximum, np.inf))
     root = OctreeNode(region, level=0)
     _grow(root, depth, axes)
     return root

@@ -231,7 +231,7 @@ class TestAnInstanceLayer:
         layer, positions = self._layer()
         region = BoundingBox((-100, -10, -100), (0, 10, 0))
         nodes = layer.content(region, error=1.0)
-        expected = sum(1 for p in positions if region.contains(p))
+        expected = int(region.holds(positions).sum())
         assert nodes[0].instances.count() == expected
 
     def test_an_empty_region_yields_nothing(self) -> None:

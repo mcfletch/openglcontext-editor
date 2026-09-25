@@ -399,9 +399,7 @@ class InstanceLayer:
         return chosen
 
     def content(self, region: BoundingBox, error: float) -> list[SceneNode]:
-        inside = np.nonzero(
-            np.all((self.positions >= region.minimum)
-                   & (self.positions <= region.maximum), axis=1))[0]
+        inside = np.nonzero(region.holds(self.positions))[0]
         if not len(inside):
             return []
         if len(inside) > self.max_instances:

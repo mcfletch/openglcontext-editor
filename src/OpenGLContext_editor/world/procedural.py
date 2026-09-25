@@ -266,9 +266,8 @@ ROCK_SHAPES = 4
 #: Loose stone per square metre, how big one is in metres, and how many shapes
 #: are cut. This is what a hillside is made of rather than what a car runs into:
 #: knee-high at most, meshed into the tiles that are close enough to draw it
-#: (:class:`~OpenGLContext_editor.bake.stones.StoneLayer`), and carrying no
-#: collider, so the surface a car is driven on is the landscape and not a field
-#: of pebbles.
+#: (:class:`~OpenGLContext_editor.bake.stones.StoneLayer`), and stood up by a
+#: game as a dome a wheel rides over rather than a block that stops it.
 #:
 #: Dense enough that a hillside seen from a standing start has stone in it, and
 #: sparse enough that the world is a landscape and not a scree slope: about one

@@ -357,8 +357,9 @@ written beside the tileset, not only into the pictures:
   none of it: `ProceduralWorld.grain_applies` fades it from 0 on the made
   ground to 1 beyond the corridor, because a hummock in the carriageway is one
   a grader took out;
-- every stone travels in the tileset's `extras.stones` and a game stands the
-  ones near it up as *domes* — a wheel rides over one, a walker stands on one,
+- every stone travels in a table beside the tileset (`stones.npz`, named with
+  its count by `extras.stones`), and a game stands the ones near it up as
+  *domes* with the engine's `PropColliders.baked` — a wheel rides over one, a walker stands on one,
   and a block the size of a stone would be a kerb across the hillside. Its own
   channel rather than the world's `props`, because a boulder has to stop a car
   from a long way off and a stone only has to be there where the wheel is.

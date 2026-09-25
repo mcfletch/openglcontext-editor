@@ -14,11 +14,14 @@ levels fine enough to draw them. A tile of a few hundred stones is then a few
 kilobytes of placements over a shape it already carries, where the same stones
 written out as geometry would be most of what the world weighs.
 
-**A stone is part of the ground, so it is solid.** Walk onto one and you stand
-on it; drive over one and the wheel rides over it. Its record travels in the
-tileset's ``extras`` the way a boulder's does, and a game stands the ones near
-it up with :class:`~OpenGLContext.physics.props.PropColliders` -- as a *dome*
-rather than a boulder's box, because a block the size of a stone is a kerb
+A stone is part of the ground, so it is solid. Walk onto one and you stand
+on it; drive over one and the wheel rides over it. The stones travel as a
+binary table beside the tileset (``stones.npz``,
+:func:`~OpenGLContext.scenegraph.props.props_table`), which the tileset's
+``extras.stones`` names with the count, and a game stands the ones near it up
+with :meth:`PropColliders.baked
+<OpenGLContext.physics.props.PropColliders.baked>` -- as a *dome* rather than
+a boulder's box, because a block the size of a stone is a kerb
 across the hillside. What separates the two is what they are for: a boulder is
 an obstacle, held for hundreds of metres around because a car has to be stopped
 by it; a stone is ground, and matters where a wheel is.
@@ -32,7 +35,7 @@ from typing import Any
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
-from OpenGLContext.scenegraph.props import Prop
+from OpenGLContext.scenegraph.props import Prop, props_table
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.scatter import yaw_quaternions
@@ -47,6 +50,9 @@ from OpenGLContext_editor.world.scatter import yaw_quaternions
 #: is down to the stone itself holds the ground bare through the levels where a
 #: player is looking straight at it.
 DETAIL = 5.0
+
+#: What the table of every stone is called beside the tileset.
+TABLE = 'stones.npz'
 
 #: The most stone one tile carries. The tree refines with REPLACE, so a tile
 #: stands in for its whole subtree and a stone fine enough to draw is written
@@ -93,6 +99,13 @@ class StoneLayer:
                                 dtype='d').reshape(-1, 3)
         self._radii = np.asarray([one.radius for one in self.stones],
                                  dtype='d').reshape(-1)
+        #: Each stone's kind, as an index into :meth:`kinds`.
+        number = {kind: index for index, kind in enumerate(self.kinds())}
+        self._kind = np.asarray([number[one.kind] for one in self.stones],
+                                dtype='i4')
+        self._scales = np.asarray([one.scale for one in self.stones],
+                                  dtype='f4')
+        self._yaws = np.asarray([one.yaw for one in self.stones], dtype='d')
 
     def kinds(self) -> list[str]:
         """The kinds this layer actually places, in a settled order."""
@@ -115,38 +128,46 @@ class StoneLayer:
         mine = self._in(region, error)
         if not mine:
             return []
+        held = np.asarray(mine, dtype=np.intp)
         found: list[SceneNode] = []
-        for kind in self.kinds():
-            wearing = [index for index in mine
-                       if self.stones[index].kind == kind]
-            if not wearing:
+        for number, kind in enumerate(self.kinds()):
+            wearing = held[self._kind[held] == number]
+            if not len(wearing):
                 continue
-            size = np.asarray([self.stones[i].scale for i in wearing], dtype='f')
+            size = self._scales[wearing]
             found.append(SceneNode(
                 mesh=self.prototypes[kind],
                 instances=InstanceSet(
                     translations=self._plan[wearing].astype('f'),
-                    rotations=yaw_quaternions(
-                        [self.stones[i].yaw for i in wearing]),
+                    rotations=yaw_quaternions(self._yaws[wearing]),
                     scales=np.repeat(size[:, None], 3, axis=1)),
                 name='%s-%s' % (self.name, kind)))
         return found
 
     def metadata(self) -> dict[str, Any]:
-        """Every stone, for the game that has to stand on them.
+        """Where the table of every stone is, and how many it holds.
 
         Its own channel rather than the world's ``props``, because the two are
         held at different reaches: a boulder is something to be stopped by from
-        a long way off, and a stone is what is under the wheel.
+        a long way off, and a stone is what is under the wheel. A table rather
+        than JSON, because the tileset's ``extras`` is parsed by everything
+        that opens the world and a default world's stone is tens of thousands.
         """
-        return {'stones': [one.to_json() for one in self.stones]}
+        if not self.stones:
+            return {}
+        return {'stones': {'table': TABLE, 'count': len(self.stones)}}
+
+    def assets(self) -> dict[str, bytes]:
+        """The table of every stone, beside the tileset."""
+        if not self.stones:
+            return {}
+        return {TABLE: props_table(self.stones)}
 
     def _in(self, region: BoundingBox, error: float) -> list[int]:
         """Which stones this tile holds and is fine enough to draw."""
         if not len(self.stones):
             return []
-        held = np.all((self._plan >= region.minimum)
-                      & (self._plan <= region.maximum), axis=1)
+        held = region.holds(self._plan)
         mine = np.nonzero(held & (self._radii * self.detail >= float(error)))[0]
         if len(mine) > self.max_stones:
             # An even stride rather than a random sample: the thinned set is

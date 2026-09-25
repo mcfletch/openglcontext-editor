@@ -102,8 +102,7 @@ class PropLayer:
 
 
 def _inside(position: Any, region: BoundingBox) -> bool:
-    at = np.asarray(position, dtype='d')
-    return bool(np.all(at >= region.minimum) and np.all(at <= region.maximum))
+    return bool(region.holds(position)[0])
 
 
 def _yaws(angles: Sequence[float]) -> np.ndarray:

@@ -6,7 +6,6 @@ it. The table a game stands up travels in the tileset beside the boulders'.
 """
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.props import Prop
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.stones import StoneLayer
@@ -106,8 +105,12 @@ class TestStandingOnOne:
         return _world(road=False, ground='tiles').stone_layer()
 
     def test_every_stone_travels_for_a_game_to_stand_up(self) -> None:
+        from OpenGLContext.scenegraph.props import props_from_table
         layer = self._layer()
-        assert len(layer.metadata()['stones']) == len(layer.stones)
+        record = layer.metadata()['stones']
+        assert record['count'] == len(layer.stones)
+        assert len(props_from_table(layer.assets()[record['table']])) \
+            == len(layer.stones)
 
     def test_each_is_a_dome_rather_than_a_block(self) -> None:
         """A block the size of a stone is a kerb across the hillside."""
@@ -126,8 +129,9 @@ class TestStandingOnOne:
         the table is what is asserted rather than what the table says."""
         from omi_physics.world import PhysicsWorld
         from OpenGLContext.physics.props import PropColliders
+        from OpenGLContext.scenegraph.props import props_from_table
         layer = self._layer()
-        stones = [Prop.from_json(one) for one in layer.metadata()['stones']]
+        stones = props_from_table(layer.assets()['stones.npz'])
         one = min(stones, key=lambda s: float(np.hypot(s.position[0],
                                                        s.position[2])))
         world = PhysicsWorld()

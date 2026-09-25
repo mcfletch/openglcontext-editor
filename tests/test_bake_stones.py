@@ -7,7 +7,7 @@ world where a wheel is.
 """
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.props import Prop, rock_mesh
+from OpenGLContext.scenegraph.props import Prop, props_from_table, rock_mesh
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.stones import StoneLayer
@@ -34,6 +34,15 @@ def _stones(count=12, radius=0.4, spread=40.0):
         prototypes=SHAPES)
 
 
+def _stood(layer):
+    """The stones a game stands up: the table the layer writes beside the
+    tileset, read as the engine reads it."""
+    record = layer.metadata()['stones']
+    found = props_from_table(layer.assets()[record['table']])
+    assert record['count'] == len(found)
+    return found
+
+
 def _region(low=-50.0, high=50.0):
     return BoundingBox((low, -500.0, low), (high, 500.0, high))
 
@@ -49,7 +58,8 @@ class TestWhereLooseStoneIs:
         assert empty.content(_region(), error=0.1) == []
 
     def test_only_the_stones_in_the_tile_are_written(self) -> None:
-        found = _placed(_stones().content(_region(-50.0, 0.0), error=0.1))
+        west = BoundingBox((-50.0, -500.0, -50.0), (0.0, 500.0, 50.0))
+        found = _placed(_stones().content(west, error=0.1))
         assert float(found[:, 0].max()) <= 0.001
 
     def test_a_tile_holding_none_of_them_writes_nothing(self) -> None:
@@ -117,7 +127,7 @@ class TestWhatOneTileMayDraw:
         """A stone a thinned tile left out is still something to stand on."""
         stones = _stones(count=40)
         stones.max_stones = 4
-        assert len(stones.metadata()['stones']) == 40
+        assert len(_stood(stones)) == 40
 
 
 class TestWhatATileGets:
@@ -152,28 +162,50 @@ class TestWhatATileGets:
         position, so nothing has to be kept in step afterwards."""
         stones = _stones(count=4)
         drawn = _placed(stones.content(_region(), 0.1))
-        stood = np.asarray([one['at'] for one in stones.metadata()['stones']])
+        stood = np.asarray([one.position for one in _stood(stones)])
         assert np.allclose(np.sort(drawn[:, 0]), np.sort(stood[:, 0]),
                            atol=1e-3)
 
 
 class TestTheTableAGameStandsUp:
     def test_every_stone_is_in_it(self) -> None:
-        assert len(_stones(count=9).metadata()['stones']) == 9
+        assert len(_stood(_stones(count=9))) == 9
 
     def test_each_is_a_dome_rather_than_a_block(self) -> None:
         """A stone is ground: a wheel rides over one. A block the size of it is
         a kerb across the hillside."""
-        for one in _stones().metadata()['stones']:
-            assert one['shape'] == 'dome'
+        for one in _stood(_stones()):
+            assert one.shape == 'dome'
 
     def test_and_reads_back_as_the_prop_it_was(self) -> None:
         stones = _stones(count=3)
-        read = [Prop.from_json(one) for one in stones.metadata()['stones']]
-        assert [one.position for one in read] \
-            == [tuple(one.position) for one in stones.stones]
+        read = _stood(stones)
+        assert np.allclose([one.position for one in read],
+                           [one.position for one in stones.stones], atol=1e-5)
+
+    def test_the_tileset_names_the_table_and_no_more(self) -> None:
+        """Everything that opens a world parses its extras; tens of thousands
+        of stones as JSON is megabytes of it."""
+        import json
+        many = _stones(count=5000)
+        assert len(json.dumps(many.metadata())) < 100
+        assert set(many.assets()) == {many.metadata()['stones']['table']}
 
     def test_it_is_its_own_channel_and_not_the_world_s_props(self) -> None:
         """The two are held at different reaches, so a game that merged them
         would carry every stone in the world as far as it carries a boulder."""
         assert 'props' not in _stones().metadata()
+
+
+class TestAStoneOnTheEdgeOfATile:
+    """Two sibling tiles share a face, and a stone lying exactly on it is in
+    one of them: the tree refines by replacement, so a stone in both is drawn
+    twice."""
+
+    def test_it_is_in_one_tile_and_not_both(self) -> None:
+        stones = StoneLayer(stones=[Prop(kind='stone0', position=(0.0, 0.0, 0.0),
+                                         radius=0.4, height=0.4, shape='dome')],
+                            prototypes=SHAPES)
+        west = _placed(stones.content(_region(-50.0, 0.0), 0.1))
+        east = _placed(stones.content(_region(0.0, 50.0), 0.1))
+        assert len(west) + len(east) == 1
