@@ -1,27 +1,27 @@
 """Fetching a published plant, and the maps a cutout one needs beside it.
 
-`Poly Haven <https://polyhaven.com/>`_ publishes scanned models under **CC0**,
-which asks for no attribution and places no condition on redistribution -- so a
-world baked from one can ship the result. Credit is given anyway, in
-:func:`credit`, because it is the decent thing and costs a line.
+`Poly Haven <https://polyhaven.com/>`_ publishes scanned models under CC0,
+which asks for no attribution and places no condition on redistribution, so a
+world baked from one can ship the result. :func:`credit` writes a line naming
+the asset and its authors for the world's credits.
 
     from OpenGLContext_editor.assets import polyhaven
 
     source = polyhaven.fetch('fern_02', 'downloads')
     species = plants.bake(source, 'assets')
 
-**The glTF download is not enough on its own.** Its base colour is published as
+The glTF download is not enough on its own. Its base colour is published as
 a JPEG, and a JPEG has no alpha channel, so a plant made of alpha-cut cards
 arrives with its cutout missing -- the model would draw as a fan of opaque
 rectangles. The mask is published separately, under whichever of ``Alpha``,
 ``opacity`` or ``Mask`` that asset happens to use, and :func:`fetch` brings it
 along so the bake can put it back.
 
-**Nothing is fetched twice.** Downloads and the library's own answers are kept
-in a per-user cache -- :func:`cache_dir`, beside the rest of OpenGLContext's
-cached assets -- so re-baking, or baking the same plant into a second world,
-asks Poly Haven for nothing. They give this work away; hammering them for bytes
-already on the disk is not a way to say thank you. ``OPENGLCONTEXT_POLYHAVEN``
+Downloads and the library's own answers are kept in a per-user cache --
+:func:`cache_dir`, beside the rest of OpenGLContext's cached assets -- so
+re-baking, or baking the same plant into a second world, asks Poly Haven for
+nothing. Each file is written under a temporary name and moved into place
+whole, so a file at its name is a complete one. ``OPENGLCONTEXT_POLYHAVEN``
 names somewhere else, and a caller may pass a directory of its own.
 
 Nothing here is needed at play time.
@@ -30,9 +30,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from OpenGLContext import atomicfiles
 
 from OpenGLContext_editor.assets.plants import PlantSource
 
@@ -70,7 +73,19 @@ HOSTS = ('api.polyhaven.com', 'dl.polyhaven.org', 'polyhaven.com')
 #: this is room for the largest thing published and a bound on the rest.
 MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
+#: What a slug may be: the library's names are letters, digits, underscores
+#: and hyphens, and a slug is joined into cache paths.
+SLUG = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*\Z')
+
 Transport = Callable[[str], bytes]
+
+
+def _slug(slug: str) -> str:
+    """``slug`` unchanged, or ``ValueError`` where it is not one."""
+    if not SLUG.match(slug):
+        raise ValueError("%r is not a Poly Haven slug (letters, digits, '_' "
+                         "and '-')" % (slug,))
+    return slug
 
 
 def cache_dir(directory: str | None = None) -> str:
@@ -90,12 +105,13 @@ def cache_dir(directory: str | None = None) -> str:
 
 
 def _open_capped(url: str, max_bytes: int) -> bytes:
-    """``url``'s bytes, reading no more than ``max_bytes`` of them."""
-    from urllib.request import Request, urlopen
+    """``url``'s bytes, reading no more than ``max_bytes`` of them.
 
+    A redirect is followed only to one of :data:`HOSTS`.
+    """
     from OpenGLContext.loaders import resolver
-    with urlopen(Request(url, headers={'User-Agent': USER_AGENT}),  # noqa: S310
-                 timeout=120) as answer:
+    with resolver.open_url(url, redirects=resolver.AllowedHosts(HOSTS),
+                           timeout=120, agent=USER_AGENT) as answer:
         return resolver.stream_capped(answer, max_bytes)
 
 
@@ -118,14 +134,12 @@ def _asked(kind: str, slug: str, transport: Transport | None,
     of eight plants would otherwise ask sixteen questions every time it ran.
     """
     where = os.path.join(cache_dir(directory), '_api',
-                         '%s-%s.json' % (kind, slug))
-    if os.path.exists(where) and os.path.getsize(where):
+                         '%s-%s.json' % (kind, _slug(slug)))
+    if os.path.exists(where):
         with open(where, encoding='utf-8') as handle:
             return dict(json.load(handle))
     answer = json.loads((transport or _get)('%s/%s/%s' % (API, kind, slug)))
-    os.makedirs(os.path.dirname(where), exist_ok=True)
-    with open(where, 'w', encoding='utf-8') as handle:
-        json.dump(answer, handle)
+    atomicfiles.write_text(where, json.dumps(answer))
     return dict(answer)
 
 
@@ -144,10 +158,9 @@ def files(slug: str, transport: Transport | None = None,
 def credit(slug: str, described: dict | None = None,
            transport: Transport | None = None,
            directory: str | None = None) -> str:
-    """One line naming an asset and who made it.
+    """One line naming an asset, its authors, its page and its licence.
 
-    CC0 requires none of this. It is written because the work was given away
-    and saying whose it was costs nothing.
+    CC0 requires no attribution; the line is for a world's credits.
     """
     described = (described if described is not None
                  else info(slug, transport, directory))
@@ -193,13 +206,9 @@ def _under(directory: str, relative: str) -> str:
 
 
 def _save(url: str, path: str, transport: Transport | None) -> str:
-    """``url`` at ``path``, unless it is already there."""
-    if os.path.exists(path) and os.path.getsize(path):
-        return path
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    data = (transport or _get)(url)
-    with open(path, 'wb') as handle:
-        handle.write(data)
+    """``path``, holding ``url``'s bytes: fetched unless already there."""
+    if not os.path.exists(path):
+        atomicfiles.write_bytes(path, (transport or _get)(url))
     return path
 
 
@@ -218,7 +227,7 @@ def _mask_url(published: dict, resolution: str) -> str | None:
 
 def fetch(slug: str, directory: str | None = None, resolution: str = '1k',
           transport: Transport | None = None) -> Download:
-    """Download ``slug`` into ``directory`` and say what came.
+    """The :class:`Download` of ``slug``, fetched into ``directory``.
 
     Takes the glTF at ``resolution`` with the files it names, and the cutout
     mask from beside it. ``directory`` defaults to the shared per-user
@@ -226,11 +235,11 @@ def fetch(slug: str, directory: str | None = None, resolution: str = '1k',
     and a second world asking for the same plant both cost nothing.
     """
     directory = cache_dir(directory)
-    published = files(slug, transport, directory)
+    published = files(_slug(slug), transport, directory)
     if 'gltf' not in published:
+        # A material -- a ground texture, say -- has maps and no geometry.
         raise LookupError(
             "%s publishes no glTF; this bakes models, not materials" % (slug,))
-        # A material -- a ground texture, say -- has maps and no geometry.
     sizes = published['gltf']
     if resolution not in sizes:
         raise LookupError("%s is not published at %s, only at %s"

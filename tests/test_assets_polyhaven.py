@@ -167,6 +167,50 @@ class TestNotAskingTwiceForWhatIsAlreadyHere:
             tmp_path / 'OpenGLContext' / 'polyhaven')
 
 
+class TestAnInterruptedWrite:
+    """A cached file is trusted by being there, so a write that stops part way
+    must leave nothing at the name a later run reads."""
+
+    @pytest.fixture
+    def interrupted(self, monkeypatch):
+        """The process stops after writing and before the file is in place."""
+        def stop(source, target):
+            raise KeyboardInterrupt
+        monkeypatch.setattr('os.replace', stop)
+
+    def test_a_download_is_not_left_part_written(self, tmp_path,
+                                                 interrupted) -> None:
+        with pytest.raises(KeyboardInterrupt):
+            polyhaven._save('https://dl/x.bin', str(tmp_path / 'x.bin'),
+                            lambda url: b'the whole file')
+        assert not (tmp_path / 'x.bin').exists()
+
+    def test_an_answer_is_not_left_part_written(self, tmp_path,
+                                                interrupted) -> None:
+        with pytest.raises(KeyboardInterrupt):
+            polyhaven.files('fern_02', _transport(_library()), str(tmp_path))
+        assert not (tmp_path / '_api' / 'files-fern_02.json').exists()
+
+
+class TestWhatAnAssetMayBeCalled:
+    """A slug names a file and a directory in the cache."""
+
+    @pytest.mark.parametrize('slug', ['../outside', 'a/b', '/etc/passwd', '',
+                                      '..', 'fern 02'])
+    def test_a_name_that_is_not_a_slug_is_refused(self, tmp_path, slug) -> None:
+        seen = []
+        with pytest.raises(ValueError):
+            polyhaven.fetch(slug, str(tmp_path),
+                            transport=_transport(_library(), seen))
+        assert seen == []
+        assert not (tmp_path / 'outside').exists()
+
+    @pytest.mark.parametrize('slug', ['fern_02', 'Periwinkle-1', 'shrub'])
+    def test_a_published_slug_is_taken(self, tmp_path, slug) -> None:
+        assert polyhaven.fetch(slug, str(tmp_path),
+                               transport=_transport(_library())).slug == slug
+
+
 class TestTheCreditItWrites:
     def test_it_names_the_work_and_everyone_who_made_it(self) -> None:
         line = polyhaven.credit('fern_02', transport=_transport(_library()))

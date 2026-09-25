@@ -109,6 +109,27 @@ class TestWhereBytesMayBeFetchedFrom:
             polyhaven._get('file:///etc/passwd')
 
 
+class TestWhereARedirectMayGo:
+    def test_every_hop_is_held_to_the_same_hosts(self, monkeypatch):
+        """A URL on an allowed host may answer with a redirect to any other."""
+        from OpenGLContext.loaders import resolver
+        opened = []
+
+        def open_url(url, redirects, timeout=30, agent=None):
+            opened.append(redirects)
+            raise OSError('no network here')
+        monkeypatch.setattr(resolver, 'open_url', open_url)
+
+        with pytest.raises(IOError):
+            polyhaven._get('https://dl.polyhaven.org/file/x.gltf')
+
+        policy, = opened
+        assert policy.refusal('https://dl.polyhaven.org/file/x.gltf',
+                              'https://evil.example/payload')
+        assert policy.refusal('https://dl.polyhaven.org/file/x.gltf',
+                              'https://dl.polyhaven.org/file/y.gltf') is None
+
+
 class TestHowMuchMayArrive:
     def test_a_body_is_capped(self, monkeypatch):
         """A download is read into memory before it is written."""
