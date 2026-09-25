@@ -7,14 +7,15 @@ played. This captures them once, when the world is baked, and writes what the
 capture made into the world as ``EXT_lights_image_based`` lights: a zone then
 names its light, and the renderer uploads it with nothing drawn.
 
-The capture is the engine's own
-(:meth:`~OpenGLContext.passes.zonepass.ZonesMixin.renderZoneProbes`): the
-baked world is opened in an offscreen context, the camera is stood at each
-zone's capture point with the tiles around it streamed in, and frames are
-drawn until the zone has had every capture it asks for. Its probe layer is
-read back (:meth:`~OpenGLContext.passes.ibl.IBLProbe.read_layer`): the
-prefiltered mips become RGBD PNG faces, and the irradiance cube becomes nine
-spherical-harmonic coefficients (:func:`~OpenGLContext.scenegraph.imagebasedlight.sh_fit`).
+The capture is the engine's
+(:func:`~OpenGLContext.passes.zonebake.bake_zone_lights`): the baked world is
+opened in an offscreen context that asks for the PBR pass and the full probe
+on itself, the tiles around each zone's capture point are streamed in before
+every frame, and what each zone captured comes back as irradiance faces and
+prefiltered mips. This module writes them: the mips become RGBD PNG faces,
+the irradiance cube nine spherical-harmonic coefficients
+(:func:`~OpenGLContext.scenegraph.imagebasedlight.sh_fit`), and the zones
+document names each zone's light, found by the zone node's name.
 
 It needs a GPU the offscreen context can open (EGL on Linux). Where there is
 none, :func:`bake_probes` says so and leaves the zones capturing at run time.
@@ -30,6 +31,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from OpenGLContext import atomicfiles
 
 log = logging.getLogger(__name__)
 
@@ -38,9 +40,6 @@ __all__ = ['bake_probes', 'PROBE_DIRECTORY', 'EXTENSION']
 EXTENSION = 'EXT_lights_image_based'
 #: Where the probe faces are written, beside the zones document.
 PROBE_DIRECTORY = 'probes'
-#: How many frames one zone is given to stream its surroundings and finish
-#: its captures before it is written with what it has.
-FRAMES_PER_ZONE = 40
 
 
 def _png(values: np.ndarray) -> bytes:
@@ -55,30 +54,25 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
                 size: tuple[int, int] = (256, 256),
                 scene: Callable[[Any], list] | None = None,
                 progress: Callable[[int, int], None] | None = None) -> int:
-    """Capture every zone of the world in ``directory`` and write its light.
+    """How many zones of the world in ``directory`` were baked and written.
 
     ``scene`` gives the nodes to light the world with around the terrain --
-    a sky, a sun -- and defaults to the engine viewer's own. Returns how many
-    zones were baked; nought where no offscreen context could be opened or
-    the world has no zones, which leaves them capturing at run time.
+    a sky, a sun -- and defaults to the engine viewer's own. Nought where no
+    offscreen context could be opened or the world has no zones, which leaves
+    them capturing at run time.
     """
     path = os.path.join(directory, document)
-    if not os.path.exists(path):
+    if not os.path.exists(path) or not os.path.exists(
+            os.path.join(directory, 'tileset.json')):
         return 0
-    # The capture is the PBR pass's, with the full probe it fills layers of.
-    os.environ['OPENGLCONTEXT_RENDERER'] = 'pbr'
-    os.environ['OPENGLCONTEXT_PROFILE'] = 'core'
-    os.environ['OPENGLCONTEXT_IBL'] = 'full'
     try:
         from OpenGLContext.eglcontext import EGLContext
     except (ImportError, OSError) as error:   # pragma: no cover - no EGL here
         log.warning('no offscreen context (%s); zones capture at run time', error)
         return 0
-    from OpenGLContext.passes import renderpass
+    from OpenGLContext.passes.zonebake import bake_zone_lights
     from OpenGLContext.scenegraph.basenodes import sceneGraph
-    from OpenGLContext.scenegraph.imagebasedlight import sh_fit
     from OpenGLContext.scenegraph.tilesterrain import TilesTerrain
-    from OpenGLContext.scenegraph.zone import ENVIRONMENT
 
     terrain = TilesTerrain(os.path.join(directory, 'tileset.json'), workers=2)
     if terrain.zones is None or not terrain.zones.zones:
@@ -93,94 +87,110 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
     lighting = (scene or around)(terrain)
 
     class Baker(EGLContext):
+        renderer = 'pbr'
+        profile = 'core'
+
         def OnInit(self) -> None:
             self.sg = sceneGraph(children=[*lighting, terrain])
 
-    zones = list(terrain.zones.zones)
-    written: dict[str, bytes] = {}
-    lights: list[dict] = []
-    by_zone: dict[int, int] = {}
+    def stream(eye: tuple[float, float, float]) -> None:
+        terrain.update_for_camera(np.asarray(eye, 'd'), size[1])
+        terrain.wait_for_loads(timeout=5.0)
+
+    names = _zone_names(terrain.zones)
     try:
-        with Baker(size=size) as context:
-            context.OnDraw(force=1)
-            flat = renderpass.current_pass()
-            if flat is None:
-                raise RuntimeError('the bake context drew no render pass')
-            for index, zone in enumerate(zones):
-                placed = {id(p.zone): p for p in flat.zones}.get(id(zone))
-                setting = zone.setting(ENVIRONMENT)
-                if placed is None or setting is None or not bool(setting.capture):
-                    continue
-                eye = placed.to_world(setting.captureCentre)
-                context.platform.setPosition(tuple(float(v) for v in eye))
-                key = id(zone)
-                for _frame in range(FRAMES_PER_ZONE):
-                    terrain.update_for_camera(np.asarray(eye, 'd'), size[1])
-                    terrain.wait_for_loads(timeout=5.0)
-                    context.OnDraw(force=1)
-                    schedule = flat._zoneCaptures
-                    if (schedule is not None and schedule.captured(key) >= schedule.bounces + 1
-                            and not schedule.waiting):
-                        break
-                schedule = flat._zoneCaptures
-                layer = None if schedule is None else schedule.layer(key)
-                if layer is None:
-                    log.warning('zone %d was not captured; it captures at run time', index)
-                    continue
-                irradiance, mips = flat._ibl_probe.read_layer(layer)
-                light = len(lights)
-                images = []
-                for level, faces in enumerate(mips):
-                    names = []
-                    for face, pixels in enumerate(faces):
-                        name = '%s/zone%d-m%d-f%d.png' % (PROBE_DIRECTORY, light, level, face)
-                        written[name] = _png(pixels)
-                        names.append(name)
-                    images.append(names)
-                coefficients = sh_fit([face * math.pi for face in irradiance])
-                lights.append({'name': 'zone-%d' % (index,),
-                               'irradianceCoefficients': coefficients.tolist(),
-                               'specularImageSize': int(mips[0][0].shape[0]),
-                               'specularImages': images})
-                by_zone[index] = light
-                if progress is not None:
-                    progress(index + 1, len(zones))
+        with Baker(size=size, ibl='full') as context:
+            baked = bake_zone_lights(context, before_frame=stream, progress=progress)
     finally:
         terrain.shutdown()
+    written: dict[str, bytes] = {}
+    lights: dict[str, dict] = {}
+    for one in baked:
+        name = names.get(id(one.zone))
+        if not name:
+            log.warning('a baked zone has no node name to be found by; it '
+                        'captures at run time')
+            continue
+        lights[name] = _light(name, one.irradiance, one.mips, written)
     if not lights:
         return 0
-    for name, data in written.items():
-        target = os.path.join(directory, name)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, 'wb') as handle:
-            handle.write(data)
-    _rewrite(path, by_zone, lights)
+    for relative, data in written.items():
+        atomicfiles.write_bytes(os.path.join(directory, relative), data)
+    _rewrite(path, lights)
     return len(lights)
 
 
-def _rewrite(path: str, by_zone: dict[int, int], lights: list[dict]) -> None:
-    """Point each baked zone at its light, and add the lights and their images."""
-    with open(path) as handle:
+def _zone_names(scene: Any) -> dict[int, str]:
+    """Each ``Zone`` node of a loaded zones document, by id, to the name of the
+    glTF node that carries it."""
+    from OpenGLContext.scenegraph.zone import Zone
+    names = {}
+    for index, transform in scene.node_transforms.items():
+        name = scene.node_names.get(index)
+        for child in getattr(transform, 'children', ()):
+            if isinstance(child, Zone) and name:
+                names[id(child)] = name
+    return names
+
+
+def _light(name: str, irradiance: Any, mips: Any, written: dict[str, bytes]) -> dict:
+    """One zone's ``EXT_lights_image_based`` light, its faces added to ``written``."""
+    from OpenGLContext.scenegraph.imagebasedlight import sh_fit
+    images = []
+    for level, faces in enumerate(mips):
+        level_names = []
+        for face, pixels in enumerate(faces):
+            relative = '%s/%s-m%d-f%d.png' % (PROBE_DIRECTORY, name, level, face)
+            written[relative] = _png(pixels)
+            level_names.append(relative)
+        images.append(level_names)
+    coefficients = sh_fit([face * math.pi for face in irradiance])
+    return {'name': name, 'irradianceCoefficients': coefficients.tolist(),
+            'specularImageSize': int(mips[0][0].shape[0]),
+            'specularImages': images}
+
+
+def _rewrite(path: str, lights: dict[str, dict]) -> None:
+    """Point each baked zone, found by its node's name, at its light.
+
+    A zone that already names a light from an earlier bake has that light and
+    its images replaced; every other zone's light is kept.
+    """
+    with open(path, encoding='utf-8') as handle:
         doc = json.load(handle)
     images = doc.setdefault('images', [])
-    for light in lights:
-        light['specularImages'] = [
-            [_image(images, name) for name in level] for level in light['specularImages']]
-    doc.setdefault('extensions', {})[EXTENSION] = {'lights': lights}
-    used = set(doc.get('extensionsUsed', [])) | {EXTENSION}
-    doc['extensionsUsed'] = sorted(used)
-    zone_nodes = [node for node in doc.get('nodes', [])
-                  if 'OGLC_zone' in (node.get('extensions') or {})]
-    for index, node in enumerate(zone_nodes):
-        if index not in by_zone:
+    existing = doc.setdefault('extensions', {}).setdefault(EXTENSION, {}).setdefault(
+        'lights', [])
+    dropped: set[int] = set()
+    for node in doc.get('nodes', []):
+        block = (node.get('extensions') or {}).get('OGLC_zone')
+        light = lights.get(node.get('name'))
+        if block is None or light is None:
             continue
-        block = node['extensions']['OGLC_zone']
+        light = dict(light, specularImages=[
+            [_image(images, uri) for uri in level] for level in light['specularImages']])
+        named = (block.get('extensions') or {}).get(EXTENSION) or {}
+        index = named.get('light')
+        if isinstance(index, int) and 0 <= index < len(existing):
+            dropped.update(i for level in existing[index].get('specularImages', ())
+                           for i in level)
+            existing[index] = light
+        else:
+            index = len(existing)
+            existing.append(light)
         environment = dict(block.get('environment') or {})
         environment.pop('capture', None)
         block['environment'] = environment
-        block.setdefault('extensions', {})[EXTENSION] = {'light': by_zone[index]}
-    with open(path, 'w') as handle:
-        handle.write(json.dumps(doc, indent=1) + '\n')
+        block.setdefault('extensions', {})[EXTENSION] = {'light': index}
+    if dropped:
+        kept = [i for i in range(len(images)) if i not in dropped]
+        moved = {old: new for new, old in enumerate(kept)}
+        doc['images'] = [images[i] for i in kept]
+        for light in existing:
+            light['specularImages'] = [[moved[i] for i in level]
+                                       for level in light['specularImages']]
+    doc['extensionsUsed'] = sorted(set(doc.get('extensionsUsed', [])) | {EXTENSION})
+    atomicfiles.write_text(path, json.dumps(doc, indent=1) + '\n')
 
 
 def _image(images: list, uri: str) -> int:
