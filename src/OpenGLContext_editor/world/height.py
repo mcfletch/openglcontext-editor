@@ -22,13 +22,17 @@ into every frame and every tile of every world afterwards.
 """
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import numpy as np
+from OpenGLContext.loaders.documentvalues import DocumentValues
 from OpenGLContext.loaders.tiles3d.procedural import terrain_height
+
+log = logging.getLogger(__name__)
 
 __all__ = ['HeightBase', 'HeightEdit', 'HeightSource', 'ProceduralBase',
            'base_from_json', 'edit_from_json', 'register_base', 'register_edit']
@@ -119,7 +123,8 @@ class ProceduralBase(HeightBase):
 
     @classmethod
     def from_json(cls, document: dict[str, Any]) -> ProceduralBase:
-        return cls(relief=float(document.get('relief', DEFAULT_RELIEF)))
+        return cls(relief=DocumentValues(logger=log).number(
+            document.get('relief'), DEFAULT_RELIEF, 'procedural relief'))
 
 
 #: The base and edit kinds a project file may name. A kind that is not here is

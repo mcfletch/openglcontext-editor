@@ -12,10 +12,12 @@ when it is opened tomorrow.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import numpy as np
+from OpenGLContext.loaders.documentvalues import DocumentValues
 from OpenGLContext.loaders.tiles3d.procedural import (
     SHIPPED_TERRAIN,
     TerrainProfile,
@@ -23,6 +25,8 @@ from OpenGLContext.loaders.tiles3d.procedural import (
 )
 
 from OpenGLContext_editor.world.height import HeightBase, register_base
+
+log = logging.getLogger(__name__)
 
 __all__ = ['PRESETS', 'Preset', 'PresetBase']
 
@@ -120,6 +124,7 @@ class PresetBase(HeightBase):
 
     @classmethod
     def from_json(cls, document: dict[str, Any]) -> PresetBase:
+        values = DocumentValues(logger=log)
         return cls(name=str(document.get('name', 'shipped')),
-                   relief=float(document.get('relief', 1.0)),
-                   seed=int(document.get('seed', 0)))
+                   relief=values.number(document.get('relief'), 1.0, 'preset relief'),
+                   seed=values.integer(document.get('seed'), 0, 'preset seed'))

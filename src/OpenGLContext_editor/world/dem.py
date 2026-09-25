@@ -16,6 +16,7 @@ the project so the same ground comes back when it is opened again.
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -23,8 +24,11 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import numpy as np
+from OpenGLContext.loaders.documentvalues import DocumentValues
 
 from OpenGLContext_editor.world.height import HeightBase, register_base
+
+log = logging.getLogger(__name__)
 
 __all__ = ['VOID', 'DEMBase', 'ElevationGrid', 'LocalFrame', 'corner_from_name',
            'local_frame', 'read_hgt']
@@ -251,9 +255,10 @@ class DEMBase(HeightBase):
 
     @classmethod
     def from_json(cls, document: dict[str, Any]) -> DEMBase:
-        centre = document.get('centre', (0.0, 0.0))
+        values = DocumentValues(logger=log)
         datum = document.get('datum')
+        centre = values.vector(document.get('centre'), (0.0, 0.0), 'DEM centre', length=2)
         return cls(path=str(document.get('path', '')),
-                   centre=(float(centre[0]), float(centre[1])),
-                   datum=None if datum is None else float(datum),
-                   relief=float(document.get('relief', 1.0)))
+                   centre=(centre[0], centre[1]),
+                   datum=None if datum is None else values.number(datum, 0.0, 'DEM datum'),
+                   relief=values.number(document.get('relief'), 1.0, 'DEM relief'))

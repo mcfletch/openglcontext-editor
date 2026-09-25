@@ -12,13 +12,17 @@ samples inside each.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import numpy as np
+from OpenGLContext.loaders.documentvalues import DocumentValues
 from OpenGLContext.loaders.tiles3d.procedural import fbm
 
 from OpenGLContext_editor.world.height import HeightEdit, register_edit
+
+log = logging.getLogger(__name__)
 
 __all__ = ['SculptStroke']
 
@@ -97,10 +101,14 @@ class SculptStroke(HeightEdit):
 
     @classmethod
     def from_json(cls, document: dict[str, Any]) -> SculptStroke:
-        centre = document.get('centre', (0.0, 0.0))
-        return cls(centre=(float(centre[0]), float(centre[1])),
-                   radius=float(document.get('radius', 100.0)),
-                   amount=float(document.get('amount', 20.0)),
-                   falloff=float(document.get('falloff', 2.0)),
-                   detail=float(document.get('detail', 0.35)),
-                   seed=int(document.get('seed', 0)))
+        values = DocumentValues(logger=log)
+        centre = values.vector(document.get('centre'), (0.0, 0.0), 'stroke centre', length=2)
+        return cls(centre=(centre[0], centre[1]),
+                   radius=values.number(document.get('radius'), 100.0, 'stroke radius',
+                                        minimum=0.0),
+                   amount=values.number(document.get('amount'), 20.0, 'stroke amount'),
+                   falloff=values.number(document.get('falloff'), 2.0, 'stroke falloff',
+                                         minimum=0.0),
+                   detail=values.number(document.get('detail'), 0.35, 'stroke detail',
+                                        minimum=0.0),
+                   seed=values.integer(document.get('seed'), 0, 'stroke seed'))

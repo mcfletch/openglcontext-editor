@@ -19,13 +19,17 @@ wider, deeper bed than either branch above it.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import numpy as np
+from OpenGLContext.loaders.documentvalues import DocumentValues
 
 from OpenGLContext_editor.world.height import HeightEdit, register_edit
+
+log = logging.getLogger(__name__)
 
 __all__ = ['Channel', 'FlowPath', 'Spring', 'channels_for', 'flow_from']
 
@@ -361,9 +365,12 @@ class Channel(HeightEdit):
         flow = np.asarray(document.get('flow', ()), dtype='d')
         if len(flow) != len(points):
             flow = np.ones(len(points), dtype='d')
+        values = DocumentValues(logger=log)
         return cls(points=points, flow=flow,
-                   width=float(document.get('width', BED_WIDTH)),
-                   depth=float(document.get('depth', BED_DEPTH)))
+                   width=values.number(document.get('width'), BED_WIDTH,
+                                       'channel width', minimum=0.0),
+                   depth=values.number(document.get('depth'), BED_DEPTH,
+                                       'channel depth', minimum=0.0))
 
 
 def _nearest(line: np.ndarray, x: np.ndarray,
