@@ -97,7 +97,7 @@ def cache_dir(directory: str | None = None) -> str:
     other account can pre-seed a file this user then bakes into a world.
     """
     if directory is None:
-        directory = os.environ.get(CACHE_VARIABLE) or ''
+        directory = os.environ.get(CACHE_VARIABLE) or ''  # noqa: TID251 the cache's own override, read where the cache is found
     if not directory:
         directory = os.path.join(userpaths.appdatadirectory(), 'OpenGLContext',
                                  'polyhaven')
@@ -135,7 +135,7 @@ def _asked(kind: str, slug: str, transport: Transport | None,
     where = os.path.join(cache_dir(directory), '_api',
                          '%s-%s.json' % (kind, _slug(slug)))
     if os.path.exists(where):
-        with open(where, encoding='utf-8') as handle:
+        with open(where, encoding='utf-8') as handle:  # noqa: OGC111 kind is this module's own question, and _slug refuses all but letters, digits, '_' and '-'
             return dict(json.load(handle))
     answer = json.loads((transport or _get)('%s/%s/%s' % (API, kind, slug)))
     atomicfiles.write_text(where, json.dumps(answer))

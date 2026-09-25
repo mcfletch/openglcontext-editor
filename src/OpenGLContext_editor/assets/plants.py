@@ -44,6 +44,7 @@ from typing import Any
 
 import numpy as np
 from opengl_decimate import SimplifyOptions, collapse_sequence
+from OpenGLContext import atomicfiles
 from OpenGLContext.loaders.gltf import load_gltf, parse_gltf
 from OpenGLContext.loaders.gltf.animation import compute_world_matrices
 from OpenGLContext.loaders.gltf.writer import (
@@ -356,5 +357,4 @@ def _credit(directory: str, source: PlantSource) -> None:
     if source.credit in lines:
         return
     lines.append(source.credit)
-    with open(path, 'w', encoding='utf-8') as handle:
-        handle.write('\n'.join(lines) + '\n')
+    atomicfiles.write_text(path, '\n'.join(lines) + '\n')

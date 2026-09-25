@@ -40,6 +40,8 @@ import sys
 import zipfile
 from collections.abc import Sequence
 
+from OpenGLContext import atomicfiles
+
 try:
     import tomllib
 except ImportError:                       # Python 3.10; tomli is the same reader
@@ -79,7 +81,7 @@ def addon_directory() -> str:
 
 def executable(blender: str | None = None) -> str:
     """The Blender to drive: ``blender``, ``$BLENDER``, or one on the path."""
-    for candidate in (blender, os.environ.get('BLENDER')) + _SEARCH:
+    for candidate in (blender, os.environ.get('BLENDER')) + _SEARCH:  # noqa: TID251 the user's own Blender, read each time one is looked for
         if candidate and shutil.which(candidate):
             return shutil.which(candidate)          # type: ignore[return-value]
         if candidate and os.path.exists(candidate):
@@ -116,13 +118,13 @@ def run(arguments: Sequence[str], blender: str | None = None,
 def user_addon_directory(blender_version: str) -> str:
     """Where a user's own add-ons live for ``blender_version`` (``'4.5'``)."""
     if sys.platform == 'win32':
-        base = os.path.join(os.environ.get('APPDATA', ''), 'Blender Foundation',
+        base = os.path.join(os.environ.get('APPDATA', ''), 'Blender Foundation',  # noqa: TID251 where Windows keeps this user's settings
                             'Blender')
     elif sys.platform == 'darwin':
         base = os.path.expanduser('~/Library/Application Support/Blender')
     else:
         base = os.path.join(
-            os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config')),
+            os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config')),  # noqa: TID251 where this user's desktop keeps settings
             'blender')
     return os.path.join(base, blender_version, 'scripts', 'addons')
 
@@ -141,10 +143,9 @@ def install(blender_version: str | None = None,
         into = user_addon_directory(blender_version)
     target = os.path.join(into, ADDON)
     os.makedirs(into, exist_ok=True)
-    if os.path.exists(target):
-        shutil.rmtree(target)
-    shutil.copytree(addon_directory(), target,
-                    ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    with atomicfiles.staged_directory(target) as staging:
+        shutil.copytree(addon_directory(), staging, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     return target
 
 
@@ -176,7 +177,8 @@ def package(into: str | None = None) -> str:
     os.makedirs(into, exist_ok=True)
     path = os.path.join(into, '%s-%s.zip' % (ADDON, addon_version()))
     source = addon_directory()
-    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
+    with (atomicfiles.staged_file(path, 'wb') as handle,
+          zipfile.ZipFile(handle, 'w', zipfile.ZIP_DEFLATED) as archive):
         for root, directories, files in os.walk(source):
             directories[:] = [d for d in directories if d != '__pycache__']
             for leaf in sorted(files):

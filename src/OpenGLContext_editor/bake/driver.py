@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from OpenGLContext import atomicfiles
 from OpenGLContext.loaders.gltf.writer import GLTFWriter, SceneNode
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -154,8 +155,7 @@ def _write_assets(layers: Sequence[Layer], directory: str) -> list[str]:
         for name, data in (getattr(layer, 'assets', dict)() or {}).items():
             path = os.path.join(directory, name)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'wb') as handle:
-                handle.write(data)
+            atomicfiles.write_bytes(path, data)
             written.append(name)
     return written
 

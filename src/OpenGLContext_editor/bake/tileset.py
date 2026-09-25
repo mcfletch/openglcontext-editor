@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from OpenGLContext import atomicfiles
 
 from OpenGLContext_editor import __version__
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -148,11 +149,10 @@ def write_tileset(root: BakedTile, directory: str, name: str = 'tileset.json',
     document = tileset_document(root, geometric_error=geometric_error,
                                 credits=credits, up_axis=up_axis, extras=extras)
     path = os.path.join(directory, name)
-    with open(path, 'w') as handle:
-        json.dump(document, handle, separators=(',', ':'))
+    atomicfiles.write_text(path, json.dumps(document, separators=(',', ':')))
     if credits:
-        with open(os.path.join(directory, 'CREDITS.txt'), 'w') as handle:
-            handle.write("Sources for the data this world was baked from.\n\n")
-            for line in credits:
-                handle.write("- %s\n" % line)
+        atomicfiles.write_text(
+            os.path.join(directory, 'CREDITS.txt'),
+            "Sources for the data this world was baked from.\n\n"
+            + ''.join("- %s\n" % line for line in credits))
     return path

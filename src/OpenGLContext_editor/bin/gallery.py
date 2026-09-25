@@ -31,11 +31,10 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 from collections.abc import Sequence
 
-from OpenGLContext import userpaths
+from OpenGLContext import atomicfiles, userpaths
 from OpenGLContext.loaders import cc0
 
 from OpenGLContext_editor import blender
@@ -79,7 +78,7 @@ def assemble(into: str | None = None, resolution: str = '1k') -> str:
             leaf = {'color': 'color.jpg', 'roughness': 'roughness.jpg',
                     'normal': 'normal.jpg'}.get(kind)
             if leaf:
-                shutil.copyfile(path, os.path.join(target, leaf))
+                atomicfiles.copy_file(path, os.path.join(target, leaf))
 
     for recipe in recipes.MATERIALS.values():
         notices.append('%s -- CC0, https://ambientcg.com/view?id=%s'
@@ -99,10 +98,9 @@ def _write_credits(directory: str, notices: Sequence[str]) -> None:
     for notice in notices:
         if notice and notice not in seen:
             seen.append(notice)
-    with open(os.path.join(directory, 'CREDITS.txt'), 'w') as handle:
-        handle.write('The bust gallery is built from public-domain art.\n\n')
-        handle.write('\n'.join(seen))
-        handle.write('\n')
+    atomicfiles.write_text(os.path.join(directory, 'CREDITS.txt'),
+                           'The bust gallery is built from public-domain art.\n\n'
+                           + '\n'.join(seen) + '\n')
 
 
 def build(content: str, output: str, bays: int = 30, levels: int = 6,
@@ -160,8 +158,7 @@ def roof(path: str, plan: layout.Gallery | None = None) -> str:
     panorama = sky.panorama(sun_azimuth=plan.sun_azimuth(),
                             sun_elevation=plan.sun_elevation())
     written = sky.with_sky(blob, panorama)
-    with open(path, 'wb') as handle:
-        handle.write(written)
+    atomicfiles.write_bytes(path, written)
     print('SKY: %dx%d panorama, %+.1f KB'
           % (panorama.width, panorama.height,
              (len(written) - len(blob)) / 1024.0))
