@@ -33,6 +33,7 @@ from OpenGLContext.scenegraph.road import (
 from OpenGLContext.scenegraph.roadsigns import SignProfile
 from OpenGLContext.scenegraph.roadworks import (
     BORE_APPROACH_CELLS,
+    BoreCut,
     TunnelProfile,
 )
 from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, LayerRule, Relief
@@ -1020,7 +1021,7 @@ class ProceduralWorld:
         return RoadLayer(self.circuit(), wetness=self.wetness,
                          ground=self.natural(), shade=self.canopy_shade(),
                          start=self.start_station(), posted=self.posted,
-                         tunnel=self.tunnel_profile())
+                         tunnel=self.tunnel_profile(), bores=self.bore_cut())
 
     def ground_spacing(self) -> float:
         """How far apart the ground is sampled, in metres.
@@ -1197,9 +1198,19 @@ class ProceduralWorld:
         """
         if not self.road:
             return None
-        return self.circuit().bore_openings(
-            self.height_fn(), tunnel=self.tunnel_profile(),
-            approach=BORE_APPROACH_CELLS * self.ground_spacing())
+        return self.circuit().bore_openings(self.height_fn(), self.bore_cut())
+
+    def bore_cut(self) -> BoreCut:
+        """How this world's bores are cut out of its ground.
+
+        The tunnel's face as :meth:`tunnel_profile` widens it, the road's own
+        width cleared for :data:`BORE_APPROACH_CELLS` cells of the finest
+        ground in front of each face. The road records it
+        (:meth:`circuit_layer`), so a game cuts its collider with the mouths
+        the tiles were cut with.
+        """
+        return BoreCut(tunnel=self.tunnel_profile(),
+                       approach=BORE_APPROACH_CELLS * self.ground_spacing())
 
     def _tree_slopes(self, positions: Any) -> Any:
         """How steep the ground is under each tree, as rise over run."""

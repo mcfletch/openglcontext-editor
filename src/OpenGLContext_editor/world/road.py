@@ -46,12 +46,11 @@ from OpenGLContext.scenegraph.road import (
     widened_sections,
 )
 from OpenGLContext.scenegraph.roadworks import (
-    BORE_INSET,
+    BoreCut,
     BridgeProfile,
     CausewayProfile,
     TunnelProfile,
     barrier_material,
-    bore_opening,
     bridge_meshes,
     causeway_meshes,
     concrete_material,
@@ -101,10 +100,15 @@ class Portals(NamedTuple):
     face is the cutting the road arrives in and what is behind it is the hill
     the road runs under, and nothing else tells the two apart: both are ground
     beside a stretch of road that is not laid on the land.
+
+    ``runs`` is the centreline of the bore each face belongs to, one (N, 3)
+    array per face, so what is measured from a portal is measured from its own
+    road and not from another stretch that passes near it.
     """
 
     points: np.ndarray
     inward: np.ndarray
+    runs: tuple = ()
 
 
 #: Below this many samples a query is answered in one go: grouping them by
@@ -349,19 +353,20 @@ class RoadPath:
         ground does about it is :func:`conform_terrain`'s funnel, and the way it
         faces is what separates the hill behind it from the cutting in front.
         """
-        ends = [(at, step)
-                for kind, first, last in _op_runs(self.ops)
-                if kind is Op.TUNNEL and last > first
-                for at, step in ((first, 1), (last, -1))]
+        ends = [(run[at], run[at + step], run)
+                for run in self.runs(Op.TUNNEL) if len(run) > 1
+                for at, step in ((0, 1), (-1, -1))]
         if not ends:
             return Portals(np.zeros((0, 3), dtype='d'),
                            np.zeros((0, 3), dtype='d'))
-        points = np.asarray([self.points[at] for at, _step in ends], dtype='d')
-        inward = np.asarray([self.points[at + step] - self.points[at]
-                             for at, step in ends], dtype='d')
+        points = np.asarray([self.points[at] for at, _next, _run in ends],
+                            dtype='d')
+        inward = np.asarray([self.points[beyond] - self.points[at]
+                             for at, beyond, _run in ends], dtype='d')
         inward[:, 1] = 0.0
         length = np.linalg.norm(inward, axis=1, keepdims=True)
-        return Portals(points, inward / np.where(length > 0.0, length, 1.0))
+        return Portals(points, inward / np.where(length > 0.0, length, 1.0),
+                       tuple(self.points[run] for _at, _next, run in ends))
 
     def ops_at(self, stations: Any) -> np.ndarray:
         """What is built at each of these distances along the road.
@@ -412,41 +417,41 @@ class RoadPath:
         return np.maximum(self.clearance[:-1], self.clearance[1:])
 
     def bore_openings(self, ground: HeightFn,
-                      tunnel: TunnelProfile | None = None,
-                      inset: float = BORE_INSET,
-                      approach: float = 0.0) -> Holes | None:
+                      cut: BoreCut | None = None) -> Holes | None:
         """Where this road's bores break the surface of the ground.
 
         ``holes(x, z) -> mask``, true where the ground stands inside a bore, or
-        None for a road with no bore in it. Every mouth in one answer, since a
-        surface is cut once
-        (:func:`~OpenGLContext.scenegraph.roadworks.bore_opening`, which each
-        stretch is measured by).
-
-        ``ground`` is the surface being cut, ``approach`` how far in front of
-        each face the road's own width is cleared whatever the ground is doing,
-        and ``inset`` how far inside the face the opening is drawn so the face
-        covers the edge of the cut.
+        None for a road with no bore in it: every mouth of every run in
+        :meth:`tunnel_runs`, as ``cut`` describes them
+        (:meth:`~OpenGLContext.scenegraph.roadworks.BoreCut.openings`).
+        ``ground`` is the surface being cut.
         """
-        mouths = [
-            bore_opening(self.points[first:last + 1], ground,
-                         profile=self.profile, tunnel=tunnel,
-                         inset=inset, approach=approach)
-            for kind, first, last in _op_runs(self.ops)
-            # A bore the road carries on one point of its line has no direction
-            # to build a mouth along.
-            if kind is Op.TUNNEL and last > first]
-        if not mouths:
-            return None
+        return (cut or BoreCut()).openings(self.tunnel_runs(), ground,
+                                           profile=self.profile)
 
-        def opened(x: Any, z: Any) -> np.ndarray:
-            shape = np.broadcast(np.asarray(x, dtype='d'),
-                                 np.asarray(z, dtype='d')).shape
-            found = np.zeros(shape, dtype=bool)
-            for mouth in mouths:
-                found |= mouth(x, z)
-            return found
-        return opened
+    @property
+    def closed(self) -> bool:
+        """Whether the line returns to its start: a circuit."""
+        return bool(np.allclose(self.points[0], self.points[-1]))
+
+    def runs(self, op: Op) -> list[np.ndarray]:
+        """The point indices of each stretch built as ``op``, in road order.
+
+        On a circuit the line's first and last points are one place, so a
+        stretch across the start is one run: the indices from its last point
+        to the line's end, then from after the shared first point on.
+        """
+        found = [np.arange(first, last + 1)
+                 for kind, first, last in _op_runs(self.ops) if kind is op]
+        last = len(self.ops) - 1
+        if (self.closed and len(found) > 1 and found[0][0] == 0
+                and found[-1][-1] == last):
+            found = [np.concatenate([found[-1], found[0][1:]])] + found[1:-1]
+        return found
+
+    def tunnel_runs(self) -> list[np.ndarray]:
+        """The centreline under each bore, (N, 3), in road order."""
+        return [self.points[run] for run in self.runs(Op.TUNNEL)]
 
     def structure_runs(self) -> list[tuple[Op, float, float]]:
         """Every stretch that is not plain dirt, as ``(op, from, to)`` metres.
@@ -1114,8 +1119,7 @@ def conform_terrain(height_fn: HeightFn, path: RoadPath,
         approach = np.zeros(natural.shape, dtype=bool)
         if len(portals.points):
             natural = np.minimum(
-                natural, _portal_funnel(x, z, portals.points, road_height,
-                                        face + widening, crown,
+                natural, _portal_funnel(x, z, portals, face + widening, crown,
                                         earthwork_slope, portal_cut))
             approach = _in_front_of(x, z, portals, face + widening)
         near = distance < reach
@@ -1169,34 +1173,42 @@ def _in_front_of(x: Any, z: Any, portals: Portals,
     return found
 
 
-def _portal_funnel(x: Any, z: Any, portals: np.ndarray, road: np.ndarray,
-                   face: float, crown: float, slope: float,
-                   reach: float) -> np.ndarray:
+def _portal_funnel(x: Any, z: Any, portals: Portals, face: float,
+                   crown: float, slope: float, reach: float) -> np.ndarray:
     """How high the ground may stand near a portal, in world units.
 
     A cone on each portal: level with the top of its face out to the face's own
     edge, and rising at ``slope`` from there. Ground above it is ground standing
     over the mouth, and what a machine would take away.
 
-    Measured from ``road`` -- the carriageway's own height at each point, which
-    over the bore is the bore's -- rather than from the portal's. A bore on a
-    climb rises under its cut, and a cone hung off the portal alone would thin
-    the cover a few metres in until the mouth reached back through it.
+    Measured from the road the portal belongs to -- at each point, the height
+    of the nearest point of its own bore's centreline -- rather than from the
+    portal's height. A bore on a climb rises under its cut, and a cone hung off
+    the portal alone would thin the cover a few metres in until the mouth
+    reached back through it. Its own bore's and not the nearest stretch of
+    road's: on a hairpin another stretch may pass the portal at another
+    height.
 
     Past ``reach`` from a portal the ground is left as it is: a hillside is met
     well inside that and nothing is cut at all beyond where it is met, and one
     steep enough not to be met there is a hillside rather than a doorway.
     """
-    x = np.asarray(x, dtype='d')
-    z = np.asarray(z, dtype='d')
-    limit = np.full(np.broadcast(x, z).shape, np.inf)
-    for point in portals:
+    x, z = np.broadcast_arrays(np.asarray(x, dtype='d'),
+                               np.asarray(z, dtype='d'))
+    limit = np.full(x.shape, np.inf)
+    for point, run in zip(portals.points, portals.runs, strict=True):
         gap = np.hypot(x - point[0], z - point[2])
-        limit = np.where(
-            gap <= face + reach,
-            np.minimum(limit,
-                       road + crown + slope * np.maximum(gap - face, 0.0)),
-            limit)
+        held = gap <= face + reach
+        if not np.any(held):
+            continue
+        near_x, near_z = x[held], z[held]
+        nearest = np.argmin(
+            (near_x[:, None] - run[None, :, 0]) ** 2
+            + (near_z[:, None] - run[None, :, 2]) ** 2, axis=1)
+        road = run[nearest, 1]
+        limit[held] = np.minimum(
+            limit[held],
+            road + crown + slope * np.maximum(gap[held] - face, 0.0))
     return limit
 
 
@@ -1281,6 +1293,9 @@ class RoadLayer:
     bridge: BridgeProfile | None = None
     causeway: CausewayProfile | None = None
     tunnel: TunnelProfile | None = None
+    #: How the road's bores were cut out of the ground, written with the road
+    #: so a game cuts its collider the same way; None writes the defaults.
+    bores: BoreCut | None = None
     structure_material: PBRMaterial | None = None
     barrier: PBRMaterial | None = None
     transition: float = TRANSITION_LENGTH
@@ -1361,6 +1376,9 @@ class RoadLayer:
                             'from': round(start, 3),
                             'to': round(end, 3)}
                            for kind, start, end in self.path.structure_runs()],
+            # How the bores' mouths were cut out of the ground
+            # (:class:`~OpenGLContext.scenegraph.roadworks.BoreCut`).
+            'bores': (self.bores or BoreCut(tunnel=self.tunnel)).to_json(),
         }], 'luminaires': self.luminaires()}
 
     def luminaires(self) -> list:
@@ -1375,14 +1393,13 @@ class RoadLayer:
         findable in a pile of triangles, and the tile it is in comes and goes.
         """
         found: list = []
-        for kind, first, last in _op_runs(self.path.ops):
-            if kind is not Op.TUNNEL or last - first < 1:
+        for run in self.path.runs(Op.TUNNEL):
+            if len(run) < 2:
                 continue
-            run = self.path.points[first:last + 1]
             found.extend(
                 [round(float(v), 3) for v in point]
-                for point in tunnel_lamps(run, self.tunnel,
-                                          bank=self.path.bank[first:last + 1]))
+                for point in tunnel_lamps(self.path.points[run], self.tunnel,
+                                          bank=self.path.bank[run]))
         return found
 
     def assets(self) -> dict[str, bytes]:

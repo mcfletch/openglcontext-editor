@@ -9,6 +9,7 @@ layer that writes the deck and the bore into the tiles they cross.
 import numpy as np
 import pytest
 from OpenGLContext.scenegraph.road import RoadProfile
+from OpenGLContext.scenegraph.roadworks import BoreCut, TunnelProfile
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.road import RoadLayer, RoadPath, conform_terrain
@@ -267,6 +268,26 @@ class TestTheShippedWorld:
 
     def test_the_road_path_knows_about_them(self, world) -> None:
         assert not bool(world.circuit().on_ground.all())
+
+    def test_the_road_records_how_its_bores_were_cut(self, world) -> None:
+        """So a game cuts its collider with the mouths the tiles were cut
+        with, rather than with figures of its own."""
+        record = world.circuit_layer().metadata()['roads'][0]['bores']
+        cut = BoreCut.from_json(record)
+        assert cut == world.bore_cut()
+        assert cut.tunnel.portal_border == world.tunnel_profile().portal_border
+        assert cut.approach > 0.0
+
+    def test_the_tiles_are_cut_with_the_recorded_mouths(self, world) -> None:
+        cut = BoreCut.from_json(
+            world.circuit_layer().metadata()['roads'][0]['bores'])
+        again = cut.openings(world.circuit().tunnel_runs(), world.height_fn(),
+                             profile=world.circuit().profile)
+        holes = world.bore_openings()
+        portal = world.circuit().portals().points
+        x = portal[:, 0][:, None] + np.linspace(-20.0, 20.0, 21)[None, :]
+        z = portal[:, 2][:, None] + np.linspace(-20.0, 20.0, 21)[None, :]
+        assert np.array_equal(holes(x, z), again(x, z))
 
     def test_turning_them_off_leaves_the_road_on_dirt(self) -> None:
         from OpenGLContext_editor.world.procedural import ProceduralWorld
@@ -694,9 +715,71 @@ class TestTheOpeningsABoresMouthNeeds:
 
     def test_a_wider_approach_clears_more_of_the_cutting(self) -> None:
         path = self._path()
-        near = path.bore_openings(self._ridge(), approach=1.0)
-        far = path.bore_openings(self._ridge(), approach=30.0)
+        near = path.bore_openings(self._ridge(), BoreCut(approach=1.0))
+        far = path.bore_openings(self._ridge(), BoreCut(approach=30.0))
         x = np.linspace(0.0, 400.0, 401)
         z = np.zeros_like(x)
         assert int(np.asarray(far(x, z)).sum()) \
             > int(np.asarray(near(x, z)).sum())
+
+
+class TestABoreAcrossTheStartOfACircuit:
+    """A closed circuit's line begins and ends at one point, so a bore through
+    the start line is one bore whose run the line's two ends split."""
+
+    def _circuit(self, count=73):
+        turn = np.linspace(0.0, 2.0 * np.pi, count)
+        points = np.stack([500.0 * np.cos(turn), np.zeros(count),
+                           500.0 * np.sin(turn)], axis=-1)
+        points[-1] = points[0]
+        ops = [Op.DIRT] * count
+        for index in list(range(0, 6)) + list(range(count - 6, count)):
+            ops[index] = Op.TUNNEL
+        return RoadPath(points, ops=ops)
+
+    def test_it_has_two_portals(self) -> None:
+        portals = self._circuit().portals()
+        assert len(portals.points) == 2
+        path = self._circuit()
+        assert {tuple(np.round(one, 3)) for one in portals.points} == {
+            tuple(np.round(path.points[5], 3)),
+            tuple(np.round(path.points[-6], 3))}
+
+    def test_its_run_is_one_run(self) -> None:
+        runs = self._circuit().tunnel_runs()
+        assert len(runs) == 1
+        assert len(runs[0]) == 11             # 6 + 6, the shared point once
+
+    def test_an_open_road_s_ends_are_its_own(self) -> None:
+        path = RoadPath(_line(), ops=_spanning(Op.TUNNEL, 0, 5))
+        assert len(path.tunnel_runs()) == 1
+        assert len(path.portals().points) == 2
+
+
+class TestAPortalOnAHairpin:
+    """A road that doubles back may pass beside its own portal on another
+    stretch at another height. The ground at the portal is cut from the bore's
+    own road, not from whichever stretch is nearest."""
+
+    def _path(self):
+        approach = [(-100.0 + 10.0 * i, 0.0, 0.0) for i in range(10)]
+        bore = [(10.0 * i, 0.0, 0.0) for i in range(11)]
+        turn = [(100.0, 5.0, 30.0)]
+        above = [(100.0 - 10.0 * i, 20.0, 15.0) for i in range(21)]
+        points = np.asarray(approach + bore + turn + above, dtype='d')
+        ops = ([Op.DIRT] * 10 + [Op.TUNNEL] * 11 + [Op.BRIDGE]
+               + [Op.BRIDGE] * 21)
+        return RoadPath(points, ops=ops)
+
+    def test_the_cut_hangs_from_the_bore_s_own_road(self) -> None:
+        path = self._path()
+        high = _ground(50.0)
+        conformed = conform_terrain(high, path)
+        # Nearer the stretch overhead (7 m) than the portal (11 m).
+        at_x, at_z = np.array([-8.0]), np.array([8.0])
+        assert float(path.sample(at_x, at_z, radius=100.0).height[0]) \
+            == pytest.approx(20.0, abs=1.0)
+        tunnel = TunnelProfile()
+        crown = tunnel.clearance + tunnel.portal_border
+        assert float(conformed(at_x, at_z)[0]) < 20.0
+        assert float(conformed(at_x, at_z)[0]) >= crown - 1e-6
