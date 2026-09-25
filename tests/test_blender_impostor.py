@@ -210,3 +210,23 @@ class TestEachTileHoldsTheViewItShould:
         # +X emits red, -X emits green: the two sides cannot look alike.
         assert min(c[0] for c in east) > max(c[0] for c in west)
         assert min(c[1] for c in west) > max(c[1] for c in east)
+
+
+class TestWhichEngineRendersTheViews:
+    """EEVEE is named BLENDER_EEVEE_NEXT in Blender 4.2 to 4.x and
+    BLENDER_EEVEE again from 5.0; the bake takes whichever is offered."""
+
+    def test_blender_4_names_it_next(self):
+        from OpenGLContext_editor.blender.openglcontext_lod import impostorspec
+        offered = ['BLENDER_EEVEE_NEXT', 'BLENDER_WORKBENCH', 'CYCLES']
+        assert impostorspec.render_engine(offered) == 'BLENDER_EEVEE_NEXT'
+
+    def test_blender_5_names_it_eevee(self):
+        from OpenGLContext_editor.blender.openglcontext_lod import impostorspec
+        offered = ['BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES']
+        assert impostorspec.render_engine(offered) == 'BLENDER_EEVEE'
+
+    def test_without_eevee_the_workbench_draws(self):
+        from OpenGLContext_editor.blender.openglcontext_lod import impostorspec
+        assert impostorspec.render_engine(['BLENDER_WORKBENCH', 'CYCLES']) \
+            == 'BLENDER_WORKBENCH'

@@ -10,11 +10,19 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ['HEMI', 'PROPERTY_HEMI', 'PROPERTY_VIEWS', 'VIEWS', 'mark', 'of']
+__all__ = ['ENGINES', 'HEMI', 'PROPERTY_HEMI', 'PROPERTY_VIEWS', 'VIEWS', 'mark',
+           'of', 'render_engine']
 
 #: What the glTF ``extras`` call them.
 VIEWS = 'octahedralViews'
 HEMI = 'octahedralHemi'
+
+#: What an impostor's views are rendered with, best first. EEVEE reads the
+#: model's own materials and is quick; it is ``BLENDER_EEVEE_NEXT`` in Blender
+#: 4.2 to 4.x and ``BLENDER_EEVEE`` again from 5.0. Workbench ignores the
+#: materials and is the last resort; Cycles is better than either and far
+#: slower than both for a picture this small.
+ENGINES = ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'BLENDER_WORKBENCH')
 
 #: What the Blender material carries, in Blender's own naming.
 PROPERTY_VIEWS = 'octahedral_views'
@@ -44,3 +52,12 @@ def of(holder: Any) -> dict | None:
     if views < 2:
         return None
     return {VIEWS: views, HEMI: bool(holder.get(PROPERTY_HEMI, True))}
+
+
+def render_engine(offered: Any) -> str:
+    """The first of :data:`ENGINES` the running Blender ``offered``."""
+    names = set(offered)
+    for engine in ENGINES:
+        if engine in names:
+            return engine
+    raise LookupError('Blender offers none of %s' % (', '.join(ENGINES),))

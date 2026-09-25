@@ -47,10 +47,6 @@ __all__ = [
     'impostor_object',
 ]
 
-#: What the views are rendered with. EEVEE reads the model's own materials and
-#: is quick; Workbench ignores them, and Cycles is better than either and far
-#: slower than both for a picture this small.
-DEFAULT_ENGINE = 'BLENDER_EEVEE_NEXT'
 
 #: How much room to leave around the model in its tile, as a multiple of its
 #: radius. A little, so a silhouette touching the tile's edge cannot bleed into
@@ -92,7 +88,7 @@ def bounding_sphere(obj: bpy.types.Object) -> tuple:
 
 def bake_atlas(obj: bpy.types.Object, path: str, grid: int = 8,
                image: int = 256, hemi: bool = True,
-               engine: str = DEFAULT_ENGINE, world_strength: float = 1.0,
+               engine: str | None = None, world_strength: float = 1.0,
                margin: float = DEFAULT_MARGIN,
                samples: int = 16) -> BakedImpostor:
     """Render ``grid`` x ``grid`` views of ``obj`` into one atlas at ``path``.
@@ -102,8 +98,12 @@ def bake_atlas(obj: bpy.types.Object, path: str, grid: int = 8,
 
     Everything but ``obj`` is hidden for the duration: an impostor is a picture
     of one model, and a neighbour leaning into the shot is baked into it for
-    good.
+    good. ``engine`` defaults to the best of :data:`impostorspec.ENGINES` this
+    Blender offers.
     """
+    if engine is None:
+        offered = bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items
+        engine = impostorspec.render_engine(item.identifier for item in offered)
     tile = octahedral.tile_size(image, grid)
     centre, radius = bounding_sphere(obj)
     scene = bpy.context.scene
