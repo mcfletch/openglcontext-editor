@@ -25,12 +25,15 @@ in one module and neither is optional.
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
 import numpy as np
-from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
+from OpenGLContext.scenegraph.vegetation.cover import (
+    COVER_MANIFEST,
+    CoverSpecies,
+    read_cover_manifest,
+)
 from OpenGLContext.scenegraph.vegetation.field import TreeSpecies
 
 __all__ = ['shipped_species', 'shipped_credits', 'species_directory',
@@ -78,9 +81,6 @@ def default_cover() -> CoverSpecies:
     return CoverSpecies(name='grass', clump='basic-clump.glb',
                         card='grass_clump_imp.png', density=1.6, height=0.5)
 
-#: What the baked set is written to, beside the models it names. Written by
-#: ``oglc-bake-plants``; see :mod:`OpenGLContext_editor.assets.plants`.
-COVER_MANIFEST = 'cover.json'
 
 #: What a world baked from :func:`shipped_trees` has to say about where its trees came
 #: from. CC-BY 4.0 requires the attribution to travel with the work.
@@ -151,9 +151,7 @@ def shipped_cover(directory: str | None = None) -> list[CoverSpecies]:
     where = directory or species_directory()
     manifest = os.path.join(where, COVER_MANIFEST)
     if os.path.exists(manifest):
-        with open(manifest, encoding='utf-8') as handle:
-            named = json.load(handle)['species']
-        found = [CoverSpecies.from_json(entry).beside(where) for entry in named]
+        found = read_cover_manifest(where)
     else:
         found = [default_cover().beside(where)]
     for one in found:
