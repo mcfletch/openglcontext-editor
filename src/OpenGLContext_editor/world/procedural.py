@@ -1180,7 +1180,8 @@ class ProceduralWorld:
             # over it, so the shoreline is where the land actually passes
             # through the surface.
             color_fn=terrain_colors, water_level=None,
-            relief=self.grain_drawn(), name='terrain')
+            relief=self.grain_drawn(), finest_error=self.detail_error(),
+            name='terrain')
 
     def bore_openings(self) -> Any:
         """Where a bore's mouth breaks the ground, or None if none does.

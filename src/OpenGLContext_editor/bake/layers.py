@@ -121,6 +121,13 @@ class HeightfieldLayer:
     height function than the error the streamer already allows -- which is what
     lets a world be collided against the function while it is drawn from the
     tiles.
+
+    ``finest_error`` is the error the finest tile's relief is held to. A bake
+    asks its leaves for an error of nought, since nothing finer follows them;
+    a tile asked for less than ``finest_error`` is given the relief at
+    ``finest_error``, which is the relief the landscape beside the tileset is
+    built with, so the tile drawn up close and the surface under the wheels
+    are one surface. None leaves the error as asked.
     """
 
     height_fn: HeightFn
@@ -132,6 +139,7 @@ class HeightfieldLayer:
     material: PBRMaterial | None = None
     holes: Holes | None = None
     relief: Relief | None = None
+    finest_error: float | None = None
     skirt: float = 2.0
     name: str = 'terrain'
 
@@ -182,8 +190,11 @@ class HeightfieldLayer:
                   else self.height_fn_at(spacing))
         if self.relief is None:
             return ground
+        held = float(error)
+        if self.finest_error is not None:
+            held = max(held, float(self.finest_error))
         grained: HeightFn = self.relief.over(ground, spacing=spacing,
-                                             error=float(error))
+                                             error=held)
         return grained
 
     def footprint_of(self, region: BoundingBox) -> BoundingBox | None:

@@ -318,13 +318,24 @@ added as the tree descends, and both are bounded by what the level can show:
   hold is cut before anything draws it. At a sample every two metres that
   leaves one swell of about half a metre across sixteen — modulation across a
   hillside rather than hummocks and ruts.
+
+  A band is drawn once a tile's samples are a quarter of its width apart or
+  closer, so the finest tile's spacing (`extent / 2**depth / (resolution - 1)`)
+  decides whether any appears. The shipped defaults — 4096 m, 33 samples a
+  tile, `depth = 4`, `field_resolution = 1025` — give an 8 m finest spacing and
+  keep only the 16 m band, which that spacing cannot draw: a default world has
+  no grain in its tiles. `depth = 6` draws the 16 m band; `depth = 7` with
+  `field_resolution = 4097` draws the 16 m and 8 m bands. The finest tile
+  carries the grain at the finest tile's error, the figures the landscape is
+  built with (`HeightfieldLayer.finest_error`).
 - **Loose stone.** `bake.stones.StoneLayer` strews knee-high rock over the
   hillsides and writes what a tile can show as placements of a handful of
   shapes — one node per shape, however many stones the tile holds. A stone
   appears once the tile's error is within `DETAIL` times its radius, so a
-  hillside fills in by size rather than switching on. `STONE_DENSITY`,
-  `STONE_RADIUS` and `STONE_SLOPE_LIMIT` on the world are the knobs, and
-  `MOST_PER_TILE` caps what one tile draws.
+  hillside fills in by size rather than switching on. How much stone there is,
+  how large and how steep the ground it lies on may be are the module
+  constants `STONE_DENSITY`, `STONE_RADIUS` and `STONE_SLOPE_LIMIT` in
+  `world.procedural`, and `MOST_PER_TILE` caps what one tile draws.
 
 **The cleared corridor takes everything.** A road is a strip of ground that was
 cleared to build it, and nothing a machine went through is still standing on it:

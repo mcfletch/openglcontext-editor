@@ -82,11 +82,43 @@ class TestTheGroundATiledWorldDraws:
         assert float(np.abs(drawn[:, 1] - smooth).max()) > 0.01
 
     def test_and_stands_no_further_off_than_the_tile_may_be_wrong_by(self) -> None:
+        """Held to the tile's error, and never less than the finest tile's,
+        which is the grain the landscape itself carries."""
         world = _world(ground='tiles')
         for error in (0.25, 1.0, 6.0):
             drawn = _drawn(world, side=32.0, error=error)
             smooth = world.height_fn()(drawn[:, 0], drawn[:, 2])
-            assert float(np.abs(drawn[:, 1] - smooth).max()) <= error + 1e-6
+            held = max(error, world.detail_error())
+            assert float(np.abs(drawn[:, 1] - smooth).max()) <= held + 1e-6
+
+
+class TestTheFinestTile:
+    """A bake gives its leaves an error of nought -- nothing finer follows --
+    and the leaf is the tile drawn up close, over the landscape a car is
+    driven on. It draws the grain that landscape carries."""
+
+    def test_a_leaf_draws_the_surface_under_it(self) -> None:
+        world = _world(ground='tiles')
+        leaf = world.extent / 2 ** world.depth
+        layer = world.terrain()
+        drawn = layer.content(_tile(leaf), 0.0)[0].mesh.positions[
+            :layer.resolution ** 2]
+        under = world.detailed(world.height_fn())(drawn[:, 0], drawn[:, 2])
+        smooth = world.height_fn()(drawn[:, 0], drawn[:, 2])
+        assert np.abs(under - smooth).max() > 0.1          # there is grain
+        assert np.allclose(drawn[:, 1], under, atol=1e-3)
+
+    def test_a_coarser_tile_keeps_its_own_error(self) -> None:
+        world = _world(ground='tiles')
+        layer = world.terrain()
+        error = world.detail_error() * 4.0
+        side = world.extent / 2 ** (world.depth - 2)
+        fn = layer.height_fn_for(_tile(side), error)
+        x = np.linspace(-20.0, 20.0, 9)
+        z = np.full_like(x, 3.0)
+        assert np.allclose(fn(x, z), world.grain_drawn().over(
+            world.height_fn(), spacing=layer.sample_spacing(_tile(side)),
+            error=error)(x, z))
 
 
 class TestWhatTheGrainIsKeptOutOf:
