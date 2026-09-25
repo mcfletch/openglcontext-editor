@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from OpenGLContext.loaders.tiles3d import foliage
@@ -46,6 +46,7 @@ from OpenGLContext_editor.bake.gantry import GantryLayer
 from OpenGLContext_editor.bake.layers import (
     HeightfieldLayer,
     HeightFn,
+    Holes,
     InstanceLayer,
     Layer,
     WaterLayer,
@@ -87,6 +88,11 @@ from OpenGLContext_editor.world.species import (
     shipped_species,
 )
 from OpenGLContext_editor.world.structures import Op, choose_structures
+
+if TYPE_CHECKING:
+    from OpenGLContext.loaders.tiles3d.scatter import Scatter
+
+    from OpenGLContext_editor.bake.stones import StoneLayer
 
 #: Candidate trees per square metre, before thinning. They go one to a cell of a
 #: jittered grid of ``1/sqrt(density)`` metres rather than at random, so the set
@@ -488,7 +494,7 @@ class ProceduralWorld:
     #: Whether a deck or a bore is built where the earthworks would be huge.
     structures: bool = True
     #: How the ground is carried: 'field' (one splat terrain) or 'tiles'.
-    ground: str = 'field'
+    ground: Literal['field', 'tiles'] = 'field'
     #: The grain in tiled ground: the hummocks and ruts a landscape has that a
     #: height function a kilometre wide does not carry
     #: (:class:`~OpenGLContext.scenegraph.terrain.Relief`). Each tile is meshed
@@ -699,7 +705,7 @@ class ProceduralWorld:
             keep=self._beside_the_road)
         return Scatter(placed.positions, placed.yaws, placed.scales)
 
-    def stones(self) -> Any:
+    def stones(self) -> Scatter:
         """The loose stone on the hillsides: everywhere but on the road.
 
         Seated on the landscape's own surface (:meth:`seated_on`) -- grain
@@ -721,7 +727,7 @@ class ProceduralWorld:
             keep=self._off_the_road)
         return Scatter(placed.positions, placed.yaws, placed.scales)
 
-    def seated_on(self) -> Any:
+    def seated_on(self) -> HeightFn:
         """The surface anything standing on the ground is placed on.
 
         The landscape's own grid, which is what the world is collided against
@@ -739,7 +745,7 @@ class ProceduralWorld:
                                               profile=STONE_PROFILE)
                 for index in range(STONE_SHAPES)}
 
-    def stone_layer(self) -> Any:
+    def stone_layer(self) -> StoneLayer | None:
         """The loose stone, or None for a world with none to strew.
 
         Each stone is bedded into the ground by a share of its own size, so it
@@ -1101,7 +1107,7 @@ class ProceduralWorld:
         held = self.grain.no_finer_than(self.field_spacing())
         return replace(held, where=self.grain_applies())
 
-    def grain_applies(self) -> Any:
+    def grain_applies(self) -> HeightFn | None:
         """How much grain each place gets, from 0 on the road to 1 clear of it.
 
         A road is built by *clearing and levelling* a strip of ground, so the
@@ -1184,7 +1190,7 @@ class ProceduralWorld:
             relief=self.grain_drawn(), finest_error=self.detail_error(),
             name='terrain')
 
-    def bore_openings(self) -> Any:
+    def bore_openings(self) -> Holes | None:
         """Where a bore's mouth breaks the ground, or None if none does.
 
         A hill a road runs inside is drawn as a hill, which at the portal puts

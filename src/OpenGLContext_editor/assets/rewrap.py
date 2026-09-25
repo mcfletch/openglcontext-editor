@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from opengl_decimate import certify, topology
 
 __all__ = [
@@ -80,10 +81,10 @@ class Unwrapped:
     normals, colours, weights -- follows the split.
     """
 
-    positions: Any
-    indices: Any
-    uv: Any
-    source: Any
+    positions: NDArray[np.float32]
+    indices: NDArray[np.uint32]
+    uv: NDArray[np.float32]
+    source: NDArray[np.int64]
     charts: int
 
 
@@ -97,17 +98,17 @@ class Projection:
     the same pair.
     """
 
-    spots: Any
-    read: Any
+    spots: NDArray[np.int64]
+    read: NDArray[np.float64]
     size: int
     #: Which face of the new mesh each texel belongs to and where in it, and the
     #: same for the triangle of the original it reads from. A map held in the
     #: surface's own frame -- a tangent-space normal map -- is turned from the
     #: one frame into the other with these; see :func:`sample_normals`.
-    into: Any = None
-    into_weights: Any = None
-    onto: Any = None
-    onto_weights: Any = None
+    into: NDArray[np.int64] | None = None
+    into_weights: NDArray[np.float64] | None = None
+    onto: NDArray[np.int64] | None = None
+    onto_weights: NDArray[np.float64] | None = None
 
 
 @dataclass(frozen=True)
@@ -120,16 +121,16 @@ class Frames:
     chart keeps its green channel meaning what it says.
     """
 
-    tangent: Any
-    normal: Any
-    handed: Any
+    tangent: NDArray[np.float64]
+    normal: NDArray[np.float64]
+    handed: NDArray[np.float64]
 
 
 #: How many candidate texels :func:`_rasterise` tests in one batch of faces.
 RASTER_BATCH = 1 << 21
 
 
-def unwrap(positions: Any, indices: Any, size: int = DEFAULT_SIZE) -> Unwrapped:
+def unwrap(positions: ArrayLike, indices: ArrayLike, size: int = DEFAULT_SIZE) -> Unwrapped:
     """Lay a mesh out in a fresh atlas of whole triangles.
 
     The surface is **welded first**. A mesh reduced from a scan carries a vertex
@@ -277,12 +278,12 @@ def _barycentric(pixels: Any, corners: Any) -> Any:
 
 def bake(
     laid: Unwrapped,
-    positions: Any,
-    indices: Any,
-    uv: Any,
-    image: Any,
+    positions: ArrayLike,
+    indices: ArrayLike,
+    uv: ArrayLike,
+    image: ArrayLike,
     size: int = DEFAULT_SIZE,
-) -> Any:
+) -> NDArray[Any]:
     """Fill a fresh atlas with what the original model shows at each texel.
 
     Every texel of ``laid``'s atlas stands for a place on the reduced surface.
@@ -300,9 +301,9 @@ def bake(
 
 def project(
     laid: Unwrapped,
-    positions: Any,
-    indices: Any,
-    uv: Any,
+    positions: ArrayLike,
+    indices: ArrayLike,
+    uv: ArrayLike,
     size: int = DEFAULT_SIZE,
 ) -> Projection:
     """Work out, once, where on the original each texel of the new atlas reads.
@@ -333,7 +334,8 @@ def project(
         )
     faces = np.asarray(indices).reshape(-1, 3)
     corners = np.asarray(positions, dtype='d')[faces]
-    triangle, landed = certify.nearest_triangle(at, np.asarray(positions, dtype='d'), indices)
+    triangle, landed = certify.nearest_triangle(
+        at, np.asarray(positions, dtype='d'), faces.reshape(-1))
     weights = _weights_on(corners[triangle], landed)
     return Projection(
         spots=spots,
@@ -341,12 +343,12 @@ def project(
         size=size,
         into=into,
         into_weights=within,
-        onto=triangle,
+        onto=np.asarray(triangle, dtype=np.int64),
         onto_weights=weights,
     )
 
 
-def sample(shot: Projection, image: Any) -> Any:
+def sample(shot: Projection, image: ArrayLike) -> NDArray[Any]:
     """One of the original's maps, laid out where the new mesh can find it."""
     image = np.asarray(image)
     channels = image.shape[2] if image.ndim > 2 else 1
@@ -361,10 +363,12 @@ def sample(shot: Projection, image: Any) -> Any:
         len(shot.spots), -1)
     painted = np.zeros((shot.size, shot.size), dtype=bool)
     painted[shot.spots[:, 1], shot.spots[:, 0]] = True
-    return _spread(canvas, painted, BLEED)
+    spread: NDArray[Any] = _spread(canvas, painted, BLEED)
+    return spread
 
 
-def frames(positions: Any, indices: Any, uv: Any, normals: Any) -> Frames:
+def frames(positions: ArrayLike, indices: ArrayLike, uv: ArrayLike,
+           normals: ArrayLike) -> Frames:
     """The tangent frames a renderer reconstructs for this mesh, per vertex.
 
     A normal map is decoded against the frame the *shader* builds, so a bake
@@ -418,8 +422,9 @@ def _frame_at(held: Frames, faces: Any, which: Any, weights: Any) -> Any:
 
 
 def sample_normals(
-    shot: Projection, image: Any, onto: Frames, into: Frames, indices: Any, laid_indices: Any
-) -> Any:
+    shot: Projection, image: ArrayLike, onto: Frames, into: Frames,
+    indices: ArrayLike, laid_indices: ArrayLike
+) -> NDArray[np.uint8]:
     """The original's normal map, re-expressed in the new mesh's own frame.
 
     A tangent-space normal map is not a picture of anything on its own: each
@@ -460,7 +465,8 @@ def sample_normals(
     canvas[shot.spots[:, 1], shot.spots[:, 0]] = np.clip(
         np.rint((turned + 1.0) * 127.5), 0, 255
     ).astype(np.uint8)
-    return _spread(canvas, painted, BLEED)
+    spread: NDArray[np.uint8] = _spread(canvas, painted, BLEED)
+    return spread
 
 
 def _filtered(image: Any, read: Any) -> Any:

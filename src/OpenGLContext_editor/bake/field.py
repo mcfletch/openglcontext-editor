@@ -24,7 +24,7 @@ import io
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import SceneNode
@@ -110,7 +110,7 @@ class FieldTerrainLayer:
     #: what is written here is read for the materials it is blended from, for
     #: the light baked into it, and as the surface the world is collided
     #: against, walked on and planted on, and the tiles carry what is drawn.
-    drawn: str = 'field'
+    drawn: Literal['field', 'tiles'] = 'field'
     name: str = 'terrain'
     _field: HeightField | None = dataclass_field(default=None, init=False,
                                                  repr=False)
