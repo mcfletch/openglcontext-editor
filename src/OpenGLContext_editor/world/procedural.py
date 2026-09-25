@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 from OpenGLContext.loaders.tiles3d import foliage
@@ -434,6 +434,19 @@ FIELD_GROUND_CREDITS = (
 )
 
 
+@dataclass(frozen=True)
+class WorldSetting:
+    """One parameter of :class:`ProceduralWorld` a recipe or a command line
+    may set: its field ``name``, the ``kind`` a value has to be, what it means
+    (``help``), and the values it may take where only some mean anything
+    (``choices``)."""
+
+    name: str
+    kind: type
+    help: str
+    choices: tuple[Any, ...] | None = None
+
+
 @dataclass
 class ProceduralWorld:
     """The knobs on the shipped example world.
@@ -467,6 +480,52 @@ class ProceduralWorld:
     tile tree instead, vertex-coloured, which is what a world too large to hold
     at once needs.
     """
+
+    #: The parameters a recipe or a command line may set, in the order they
+    #: are offered. Those taking a file or an object -- ``route``,
+    #: ``channels``, ``source`` -- are not among them.
+    SETTINGS: ClassVar[tuple[WorldSetting, ...]] = (
+        WorldSetting('extent', float, 'the world is this many metres across'),
+        WorldSetting('resolution', int, 'ground samples across each tile'),
+        WorldSetting('seed', int,
+                     'the world is the same every bake for a given seed'),
+        WorldSetting('ground', str, 'how the landscape is carried: one splat '
+                     'terrain beside the tileset, or meshed into the tiles',
+                     choices=('field', 'tiles')),
+        WorldSetting('forest', str, 'how the trees are carried: one table '
+                     'beside the tileset, or instanced into the tiles',
+                     choices=('field', 'tiles')),
+        WorldSetting('tree_density', float, 'trees per square metre'),
+        WorldSetting('tree_height', float,
+                     'how tall a full-grown tree is, in metres'),
+        WorldSetting('field_resolution', int,
+                     "samples across the field's height grid"),
+        WorldSetting('control_size', int,
+                     'pixels across the splat control map'),
+        WorldSetting('water_level', float,
+                     'where the water sits, in metres. Raise it to flood the '
+                     'valleys: the circuit goes onto causeways between '
+                     'islands, the forest and the boulders start above it, '
+                     'and the shore is painted round the new coast'),
+        WorldSetting('relief', float, 'how tall the hills are, against the '
+                     "shipped landscape's own; 0 is flat, higher is alpine"),
+        WorldSetting('maximum_bank', float,
+                     'how far the corners lean, as a fraction. 0 lays the '
+                     'circuit flat; the ceiling makes it an oval'),
+        WorldSetting('variety', float,
+                     'how unlike each other the corners and straights are, '
+                     '0 to 1. 0 is one figure for everything'),
+        WorldSetting('posted', int, 'the speed the circuit is signed at, in '
+                     'km/h; 0 leaves it unposted'),
+        WorldSetting('structures', bool, 'build viaducts and bores where the '
+                     'earthworks would be huge'),
+        WorldSetting('road', bool, 'lay a circuit on the landscape at all'),
+        WorldSetting('closed', bool, 'a lap rather than a point-to-point run, '
+                     'which is a hill climb with a start and a finish'),
+        WorldSetting('places', bool, 'give every bore, causeway, bridge and '
+                     'stretch of forest a zone: lit by an environment captured '
+                     'in it, and heard with its own birdsong, surf or echo'),
+    )
 
     extent: float = 4096.0
     resolution: int = 33
@@ -555,7 +614,7 @@ class ProceduralWorld:
     #: same share of the lap, the same earthwork, the same grade.
     ease: bool = False
     #: How the trees are carried: 'field' (a table and its species) or 'tiles'.
-    forest: str = 'field'
+    forest: Literal['field', 'tiles'] = 'field'
     #: Where the species' files are; None for the shipped ones.
     species_directory: str | None = None
     #: Whether the world carries zones for the places its road runs through --
