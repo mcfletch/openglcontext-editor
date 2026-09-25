@@ -137,6 +137,10 @@ select = [
     "UP",   # pyupgrade (f-strings, modern typing)
     "BLE",  # no blind except (broad catches must be justified)
     "S110", # no silent try/except/pass
+    "S112", # no silent try/except/continue
+    "TRY400",  # an error logged from an except block carries its traceback
+    "DTZ",  # datetimes carry a timezone
+    "S102", "S202", "S301", "S307", "S310",  # no exec, unchecked tar extraction, pickle, eval or unchecked URL scheme
     "PGH003", "PGH004",  # a type: ignore or noqa names the codes it silences
     "PLE0604", "PLE0605",  # __all__ is a list or tuple of strings
 ]
