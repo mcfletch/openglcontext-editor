@@ -608,8 +608,10 @@ A **portal is dug**. The cutting stops where a bore begins and the hillside
 takes over, so left alone the ground steps from the carriageway to the hill
 between one sample and the next — a face one sample thick with the arch cut out
 of it. The ground around each portal is held down to the top of the portal's
-face, with `PORTAL_SOIL` of ground over it, and rises from there at the same
-batter the rest of the cutting uses, out to `PORTAL_CUT`. An ordinary hillside
+face (the tunnel's `clearance` plus its `portal_border` above the road) and
+rises from there at the same batter the rest of the cutting uses, out to
+`PORTAL_CUT`. The height is measured from the portal's own bore, so a road
+that doubles back past its portal on another stretch does not move the cut. An ordinary hillside
 is met well inside that and nothing is cut past where it is met; a hill too
 steep to meet there is a hill rather than a doorway, and is left alone. The
 funnel only ever takes ground away, so the cutting the road arrives in is
@@ -702,6 +704,63 @@ it, and each is a rule worth following in a layer of your own:
   drops whole cells of a query in one pass rather than iterating over the
   hundreds of thousands a fine grid makes.
 
+## Places: zones, ambience and baked light
+
+`ProceduralWorld.places` (on by default; `glisteel-bake --no-places` turns it
+off) gives every bore, causeway, bridge and wooded stretch of the road a zone
+(`world.places.road_places`): an oriented box along the road, cut into pieces
+no longer than its kind's `chunk`, that fades out over its `blend` and outranks
+its neighbours by `priority`. A stretch of plain road is forest where there are
+`FOREST_TREES` or more trees within `FOREST_REACH` metres per hundred metres.
+
+What each kind holds is `bake.zones.PLACE_SETTINGS`: every place captures its
+environment from a point `EYE_HEIGHT` above the road inside it; a bore adds a
+long reverb, a causeway plays surf and a forest birdsong. The ambience is made
+by `omi_audio.synth` rather than recorded, written as `audio/<name>.wav`, and
+plays as a global `KHR_audio_emitter` emitter the zone names.
+`ZonesLayer` writes the zones as `zones.gltf` through the engine's glTF writer
+(`GLTFWriter.add_zone`), and the engine reads them
+(`OpenGLContext/docs/zones.rst`).
+
+Captured while the game runs, each zone's environment is six draws of the world
+per bounce. `bake.probes.bake_probes(directory)` captures them once after a
+bake, offscreen (EGL), through the engine's `bake_zone_lights`, and writes each
+as an `EXT_lights_image_based` light the zone names: prefiltered mips as RGBD
+PNG faces under `probes/` and the irradiance as spherical harmonics. A zone
+already baked has its light replaced by a second run. Where no offscreen
+context opens, the zones capture at run time instead. `glisteel-bake` runs it
+unless given `--no-probes`.
+
+## Ground cover from published plants
+
+`oglc-bake-plants` turns scanned plants from [Poly Haven](https://polyhaven.com/)
+(CC0) into the ground cover a world grows:
+
+```bash
+oglc-bake-plants --out cover-assets fern_02 shrub_04=0.15 grass_medium_01=2.4
+```
+
+Each argument is a Poly Haven asset, optionally with its density in plants per
+square metre. For each asset the command writes one `<slug>.glb` holding every
+plant in the file at two levels of detail (`--near`, `--far` triangle budgets)
+against one cutout texture, a billboard card per plant
+(`<slug>_<plant>_card.png`, rendered from the geometry, which needs a GL
+context; `--no-cards` skips them), a line in `CREDITS.txt`, and an entry per
+plant in `cover.json`. A second run into the same directory adds to
+`cover.json`; a plant of another asset with the same name is refused.
+`--canopy LEAST MOST` is the band of tree closure a plant grows under, 0 on
+open ground (the engine's `SplatTerrain.canopy_cover`); `--patchiness` and
+`--patch-metres` gather it into beds; `--per-asset N` keeps the fullest `N`
+plants of a file.
+
+Downloads are kept in a per-user cache (`OPENGLCONTEXT_POLYHAVEN` names another
+directory; `--downloads` does for one run), each file written whole, so nothing
+is fetched twice. Every URL the library answers with, and every redirect from
+it, is held to the hosts Poly Haven publishes from.
+
+A world reads the set through `world.species.shipped_cover(directory)`, which
+takes the directory's `cover.json`.
+
 ## Install for development
 
 The package is developed inside the
@@ -723,7 +782,7 @@ pytest
 | `src/OpenGLContext_editor/assets/` | turning published art into assets: Poly Haven fetching, plant baking, billboards, and the unwrap-and-rebake for reduced scans |
 | `src/OpenGLContext_editor/meshlod/` | levels of detail: one recorded reduction sliced into rungs, what each rung costs to look at, and the `MSFT_lod` glb they ship in |
 | `src/OpenGLContext_editor/blender/` | the Blender add-on: LOD chains from the Decimate modifier, `MSFT_lod` on glTF export, and the bust gallery it builds |
-| `src/OpenGLContext_editor/bin/` | `oglce-gallery`, which builds the demo world; and `oglc-bake`, which says the command is now `glisteel-bake` |
+| `src/OpenGLContext_editor/bin/` | `oglc-bake-plants`, which bakes published plants into ground cover; `oglce-gallery`, which builds the demo world; and `oglc-bake`, which says the command is now `glisteel-bake` |
 | `tools/` | authoring scripts run by hand: the level-of-detail quality sweep and the transition sheet |
 | `docs/` | [authoring levels of detail in Blender](docs/blender.md) |
 | `tests/` | the suite; `pytest` runs it |
@@ -753,6 +812,22 @@ carried on bridges, bores and causeways. That is what anything offering a
 world being chosen between. `--name` sets the name; without it a world is named
 after the directory it was baked into, so `--output ashdown-forest` gives
 *Ashdown Forest*.
+
+Beside it, depending on what the world holds:
+
+| File | Holds | Named in `tileset.json`'s `extras` by |
+|---|---|---|
+| the landscape's height image and control map | the ground a game collides against and the splat map it is blended from | `terrain`, whose `drawn` says whether the field (`field`) or the tiles (`tiles`) draw it |
+| `trees.npz` and `trees/` | the forest's table of trunks, and the species files it is drawn from | `vegetation` |
+| `stones.npz` | every loose stone, as the engine's props table | `stones`, with its `count` |
+| `zones.gltf` | the zones of the road's places | `zones` |
+| `audio/*.wav` | the ambience those zones play | `zones.gltf` |
+| `probes/*.png` | each zone's baked environment, as RGBD cube faces | `zones.gltf`, as `EXT_lights_image_based` lights |
+| `road-surface.png` | the carriageway's texture | the tiles that draw the road |
+
+The road itself travels in `extras.roads`: its centreline, cross-section,
+lean, structures, and the `bores` figures its tunnel mouths were cut with, so a
+game cuts its collider's mouths the same way.
 
 The format is the engine's — `OpenGLContext.loaders.tiles3d.manifest` — so
 anything that loads a baked world can read one without depending on this
