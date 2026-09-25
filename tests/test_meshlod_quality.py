@@ -250,3 +250,12 @@ class TestPopBreakdown:
 
     def test_an_empty_frame_breaks_down_to_nothing(self):
         assert quality.pop_breakdown(_image(0), _image(0)) == (0.0, 0.0)
+
+
+def test_a_level_report_is_built_with_its_reduction():
+    """A plain field: what a caller passes is what it reads back."""
+    report = quality.LevelReport(level=1, triangle_count=50, error=0.1,
+                                 pops=[], outlines=[], shadings=[],
+                                 safe_at=2.0, safe_at_outline=1.5,
+                                 reduction=0.25)
+    assert report.reduction == 0.25

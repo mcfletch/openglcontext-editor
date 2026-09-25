@@ -141,13 +141,8 @@ class LevelReport:
     #: Where the level would be safe if only its outline were judged -- the
     #: distance a normal map, or a less mirror-like material, would buy back.
     safe_at_outline: float
-
-    @property
-    def reduction(self) -> float:
-        """Triangles at this level as a share of level zero's."""
-        return self._share
-
-    _share: float = 1.0
+    #: Triangles at this level as a share of level zero's.
+    reduction: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -649,7 +644,7 @@ def measure_chain(
                 shadings=shadings,
                 safe_at=safe_distance(distances, pops, budget),
                 safe_at_outline=safe_distance(distances, outlines, budget),
-                _share=level.triangle_count / max(reference.triangle_count, 1),
+                reduction=level.triangle_count / max(reference.triangle_count, 1),
             )
         )
     return reports
