@@ -114,6 +114,61 @@ class TestACardIsShapedLikeThePlant:
             square, abs=0.05)
 
 
+class TestAPlantDeeperThanItIsTall:
+    """A spreading ground cover is wider in plan than it is tall. Seen from
+    the front, what stands in front of and behind the middle is still the
+    plant, and the card has to carry it."""
+
+    def _deep(self, tmp_path, depth):
+        """Two unit cards, one ``depth`` in front of the middle, one behind."""
+        from tests.test_assets_plants import _source
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        source = _source(tmp_path, nodes=[('leaf', (0, 0, 0))])
+        leaf = plants.flatten(source.gltf)[0]
+        count = len(leaf.positions)
+        both = plants.Variant(
+            name='spread',
+            positions=np.concatenate([leaf.positions + (0, 0, depth),
+                                      leaf.positions - (0, 0, depth)]),
+            normals=np.concatenate([leaf.normals, leaf.normals]),
+            uvs=np.concatenate([leaf.uvs, leaf.uvs]),
+            indices=np.concatenate([leaf.indices, leaf.indices + count]),
+            height=1.0)
+        out = tmp_path / 'assets'
+        species = plants.bake(source, str(out), variants=[both], card=False)
+        return str(out / species[0].clump), species[0], out
+
+    def test_what_stands_in_front_and_behind_is_drawn(self, tmp_path) -> None:
+        model, species, out = self._deep(tmp_path, 2.0)
+        target = str(out / 'spread_card.png')
+        bake_card(model, species.clumpMesh, None, target, size=64)
+        assert card_coverage(target) > 0.02
+
+    def test_depth_does_not_change_what_is_drawn(self, tmp_path) -> None:
+        """The front view of two cards is the same picture however far apart
+        they stand; only the card's width, which spans the plant's reach in
+        plan, grows with the depth."""
+        model, species, out = self._deep(tmp_path / 'near', 0.2)
+        near_width = bake_card(model, species.clumpMesh, None,
+                               str(out / 'card.png'), size=64)
+        near = card_coverage(str(out / 'card.png')) * near_width
+        model, species, out = self._deep(tmp_path / 'far', 2.0)
+        far_width = bake_card(model, species.clumpMesh, None,
+                              str(out / 'card.png'), size=64)
+        far = card_coverage(str(out / 'card.png')) * far_width
+        assert far_width > near_width
+        assert far == pytest.approx(near, rel=0.15)
+
+
+class TestATargetThatCannotBeDrawnInto:
+    def test_it_is_refused_before_anything_is_drawn(self, plant) -> None:
+        model, species, out = plant
+        target = out / 'empty_card.png'
+        with pytest.raises(RuntimeError, match='framebuffer'):
+            bake_card(model, species.clumpMesh, None, str(target), size=0)
+        assert not target.exists()
+
+
 class TestABakedPlantGetsItsCardMeasured:
     def test_the_species_carries_the_width_that_was_rendered(self,
                                                              tmp_path) -> None:

@@ -11,10 +11,14 @@ the geometry itself, rendered front-on into a texture.
 
     width = bake_card('fern_02.glb', 'fern_a', texture, 'fern_a_card.png')
 
-``width`` comes back because a card is as wide as the plant was: the billboard
-is drawn one unit tall and ``width`` units across. The texture is cut to that
-shape too, up to :data:`WIDEST`, so a spreading plant does not spend half its
-resolution being squeezed into a square and the other half on empty sky.
+``width`` comes back because a card is as wide as the plant reaches: the
+billboard turns to face the camera, so it is drawn one unit tall and ``width``
+units across, where ``width`` is twice the plant's horizontal radius over its
+height -- as wide as the plant looks from whichever side. The picture on it is
+the front view, looking along -z, with the whole depth of the plant inside the
+view volume. The texture is cut to the card's shape too, up to :data:`WIDEST`,
+so a spreading plant does not spend half its resolution being squeezed into a
+square and the other half on empty sky.
 
 Needs a GL context, which it opens and closes itself. This is a bake step; the
 baked ``.png`` is what ships.
@@ -96,6 +100,7 @@ def bake_card(model: str, mesh: int | str, texture: Any, out: str,
         GL_FLOAT,
         GL_FRAGMENT_SHADER,
         GL_FRAMEBUFFER,
+        GL_FRAMEBUFFER_COMPLETE,
         GL_LINEAR,
         GL_LINEAR_MIPMAP_LINEAR,
         GL_RENDERBUFFER,
@@ -120,6 +125,7 @@ def bake_card(model: str, mesh: int | str, texture: Any, out: str,
         glBindTexture,
         glBindVertexArray,
         glBufferData,
+        glCheckFramebufferStatus,
         glClear,
         glClearColor,
         glDisable,
@@ -156,7 +162,7 @@ def bake_card(model: str, mesh: int | str, texture: Any, out: str,
              else texture if not isinstance(texture, str)
              else Image.open(texture))
     image = image.convert('RGBA')
-    half_width = float(np.max(np.abs(points[:, [0, 2]]))) or 1.0
+    half_width = float(np.hypot(points[:, 0], points[:, 2]).max()) or 1.0
     height = float(points[:, 1].max()) or 1.0
     # The card is as wide as the plant, up to WIDEST; past that the plant is
     # squeezed, exactly as a square card always squeezed it.
@@ -180,6 +186,11 @@ def bake_card(model: str, mesh: int | str, texture: Any, out: str,
         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, wide, size)
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                                   GL_RENDERBUFFER, depth)
+        status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+        if status != GL_FRAMEBUFFER_COMPLETE:
+            raise RuntimeError(
+                "the %dx%d card framebuffer cannot be drawn into (status "
+                "0x%04x)" % (wide, size, int(status)))
         glViewport(0, 0, wide, size)
         # Clear to nothing at all: what no triangle covers is what the card's
         # alpha has to leave out, and that IS the silhouette.
@@ -188,10 +199,12 @@ def bake_card(model: str, mesh: int | str, texture: Any, out: str,
         glEnable(GL_DEPTH_TEST)
         glDisable(GL_CULL_FACE)          # leaves are drawn from either side
         glUseProgram(program)
-        # x in [-half, half] and y in [0, height] onto the card, looking -z.
+        # x in [-half, half] and y in [0, height] onto the card, looking -z,
+        # and z in [-half, half] into the depth range, which holds the whole
+        # plant because half_width is its horizontal radius.
         ortho = np.array([[1.0 / half_width, 0, 0, 0],
                           [0, 2.0 / height, 0, -1.0],
-                          [0, 0, -1.0, 0],
+                          [0, 0, -1.0 / half_width, 0],
                           [0, 0, 0, 1.0]], np.float32)
         glUniformMatrix4fv(glGetUniformLocation(program, 'uOrtho'), 1, GL_TRUE,
                            ortho)
