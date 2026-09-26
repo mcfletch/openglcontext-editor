@@ -31,7 +31,8 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-from OpenGLContext import atomicfiles
+from OpenGLContext import atomicfiles, windowsystem
+from OpenGLContext.context import Context
 from OpenGLContext.passes.zonebake import bake_zone_lights
 from OpenGLContext.scenegraph.basenodes import sceneGraph
 from OpenGLContext.scenegraph.imagebasedlight import encode_rgbd, sh_fit
@@ -71,11 +72,12 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
     if not os.path.exists(path) or not os.path.exists(
             os.path.join(directory, 'tileset.json')):
         return 0
-    try:
-        # EGL may be absent: the bake then says so and leaves capture to run time.
-        from OpenGLContext.eglcontext import EGLContext  # noqa: PLC0415 optional platform
-    except (ImportError, OSError) as error:   # pragma: no cover - no EGL here
-        log.warning('no offscreen context (%s); zones capture at run time', error)
+    # The platform's windowless window system may be absent: the bake then
+    # says so and leaves capture to run time.
+    unavailable = windowsystem.probe(windowsystem.offscreenName())
+    if unavailable is not None:   # pragma: no cover - no offscreen GL here
+        log.warning('no offscreen context (%s); zones capture at run time',
+                    unavailable)
         return 0
 
     terrain = TilesTerrain(os.path.join(directory, 'tileset.json'), workers=2)
@@ -88,7 +90,8 @@ def bake_probes(directory: str, document: str = 'zones.gltf',
 
     lighting = (scene or around)(terrain)
 
-    class Baker(EGLContext):
+    class Baker(Context):
+        windowSystemName = 'offscreen'
         renderer = 'pbr'
         profile = 'core'
 
