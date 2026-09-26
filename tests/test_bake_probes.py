@@ -94,3 +94,17 @@ def test_the_bake_leaves_the_environment_as_it_was(tmp_path, monkeypatch):
     probes.bake_probes(str(tmp_path))
     assert not {'OPENGLCONTEXT_RENDERER', 'OPENGLCONTEXT_PROFILE',
                 'OPENGLCONTEXT_IBL'} & set(os.environ)
+
+
+def test_a_machine_with_no_windowless_gl_leaves_the_zones_to_capture_at_run_time(
+        tmp_path, monkeypatch, caplog):
+    """The bake opens on whichever window system renders with no window here,
+    and where that one cannot be had it says so and writes nothing."""
+    path = _document(tmp_path)
+    (tmp_path / 'tileset.json').write_text('{}')
+    before = path.read_text()
+    monkeypatch.setattr(probes.windowsystem, 'offscreenName',
+                        lambda _platform=None: 'no-such-window-system')
+    assert probes.bake_probes(str(tmp_path)) == 0
+    assert 'no offscreen context' in caplog.text
+    assert path.read_text() == before
