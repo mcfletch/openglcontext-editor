@@ -199,6 +199,8 @@ class ZonesLayer:
         return document
 
     def _writer(self) -> GLTFWriter:
+        # Checked first, so a sound no zone was given is the message _played
+        # raises rather than a KeyError from the lookup below.
         self._played()
         writer = GLTFWriter(generator='OpenGLContext_editor zones')
         for record in self.zones:

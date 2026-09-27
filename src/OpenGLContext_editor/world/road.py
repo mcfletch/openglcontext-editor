@@ -1192,6 +1192,11 @@ def _portal_funnel(x: Any, z: Any, portals: Portals, face: float,
     Past ``reach`` from a portal the ground is left as it is: a hillside is met
     well inside that and nothing is cut at all beyond where it is met, and one
     steep enough not to be met there is a hillside rather than a doorway.
+
+    One pass per portal, each comparing the points within reach of it against
+    every point of its bore's centreline: the cost grows with the number of
+    portals times the points near each, which is small for a world's handful
+    of tunnels.
     """
     x, z = np.broadcast_arrays(np.asarray(x, dtype='d'),
                                np.asarray(z, dtype='d'))
