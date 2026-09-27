@@ -26,8 +26,7 @@ class TestTheTable:
         for setting in ProceduralWorld.SETTINGS:
             _field, hint = fields[setting.name]
             if setting.choices is not None:
-                assert set(setting.choices) == set(typing.get_args(hint)) or \
-                    all(isinstance(one, str) for one in setting.choices)
+                assert set(setting.choices) == set(typing.get_args(hint)), setting.name
             else:
                 assert hint is setting.kind, setting.name
 
