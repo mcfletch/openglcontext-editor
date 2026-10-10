@@ -5,12 +5,18 @@ these assert the two answers the first world needs: terrain meshed to the
 region's footprint, and instances that fall inside it thinned to suit the tile.
 """
 
+import json
+import struct
+
 import numpy as np
 import pytest
-from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode, write_glb
+from OpenGLContext.scenegraph import gaussiansplats
+from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.terrain import Relief
+from OpenGLContext.scenegraph.terrain.ground import GROUND_MATERIAL
 
 from OpenGLContext_editor.bake.assets import combined_mesh
 from OpenGLContext_editor.bake.bounds import BoundingBox
@@ -92,10 +98,23 @@ class TestAHeightfieldLayer:
         assert mesh.positions[:, 1].min() >= 5.0 - 1e-5
 
     def test_it_carries_the_material_it_was_given(self) -> None:
-        material = PBRMaterial(baseColor=(0.2, 0.3, 0.4))
+        material = PhysicalMaterial(baseColor=(0.2, 0.3, 0.4))
         layer = self._layer(material=material)
         mesh = layer.content(_footprint(0, 50, 0, 50), error=8.0)[0].mesh
-        assert mesh.material is material
+        assert mesh.appearance.material is material
+
+    def test_its_skirt_is_drawn_from_both_faces(self) -> None:
+        mesh = self._layer().content(_footprint(0, 50, 0, 50), error=8.0)[0].mesh
+        assert not mesh.solid
+
+    def test_a_written_tile_names_its_ground_material(self) -> None:
+        nodes = self._layer().content(_footprint(0, 50, 0, 50), error=8.0)
+        data = write_glb(nodes)
+        (length,) = struct.unpack('<I', data[12:16])
+        (material,) = json.loads(data[20:20 + length])['materials']
+        assert material['name'] == GROUND_MATERIAL
+        assert material['doubleSided'] is True
+        assert 'alphaMode' not in material
 
 
 class TestAHoleCutInTheGround:
@@ -334,6 +353,25 @@ class TestMeasuringAPlacedNode:
         box = node_bounds(SceneNode(mesh=[_prototype(), tall]))
         assert box.maximum[1] == pytest.approx(9.0)
 
+    def test_splats_are_measured_over_their_ellipsoids(self) -> None:
+        """A node's mesh may be Gaussian splats, which reach past their centres."""
+        splats = gaussiansplats.from_arrays(
+            positions=[(0.0, 0.0, 0.0), (4.0, 0.0, 0.0)],
+            rotations=[(0.0, 0.0, 0.0, 1.0)] * 2,
+            scales=[(0.5, 0.5, 0.5)] * 2, opacities=[1.0, 1.0],
+            harmonics=[[(1.0, 1.0, 1.0)] * 2])
+        box = node_bounds(SceneNode(mesh=splats))
+        assert box.minimum[0] < 0.0 and box.maximum[0] > 4.0
+        low, high = splats.splats().bounds()
+        assert np.allclose(box.minimum, low) and np.allclose(box.maximum, high)
+
+    def test_splats_beside_a_mesh_are_measured_with_it(self) -> None:
+        splats = gaussiansplats.from_arrays(
+            positions=[(0.0, 20.0, 0.0)], rotations=[(0.0, 0.0, 0.0, 1.0)],
+            scales=[(0.5, 0.5, 0.5)], opacities=[1.0], harmonics=[[(1.0, 1.0, 1.0)]])
+        box = node_bounds(SceneNode(mesh=[_prototype(), splats]))
+        assert box.maximum[1] > 20.0 and box.minimum[1] == pytest.approx(0.0)
+
     def test_rotated_instances_are_measured_at_their_widest(self) -> None:
         instances = InstanceSet(translations=np.zeros((2, 3), 'f'),
                                 rotations=np.tile([0, 0, 0, 1.0], (2, 1)),
@@ -357,7 +395,7 @@ class TestALadderRungOfSeveralMeshes:
     def _mesh(self, colour):
         return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
                        indices=np.array([0, 1, 2], np.uint32),
-                       material=PBRMaterial(baseColor=colour))
+                       appearance=Appearance(material=PhysicalMaterial(baseColor=colour)))
 
     def test_one_mesh_still_gives_one_node(self) -> None:
         found = self._placed(self._mesh((1.0, 0, 0))).content(self._region(), 1.0)
@@ -370,7 +408,7 @@ class TestALadderRungOfSeveralMeshes:
     def test_both_keep_their_own_material(self) -> None:
         rung = [self._mesh((1.0, 0, 0)), self._mesh((0, 1.0, 0))]
         found = self._placed(rung).content(self._region(), 1.0)
-        assert {tuple(round(float(v), 3) for v in node.mesh.material.baseColor)
+        assert {tuple(round(float(v), 3) for v in node.mesh.appearance.material.baseColor)
                 for node in found} == {(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)}
 
     def test_they_stand_in_the_same_places(self) -> None:
@@ -388,24 +426,25 @@ class TestALadderRungOfSeveralMeshes:
 class TestCombiningMeshesDoesNotLoseAMaterial:
     def _mesh(self, material):
         return PBRMesh(positions=np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 'f'),
-                       indices=np.array([0, 1, 2], np.uint32), material=material)
+                       indices=np.array([0, 1, 2], np.uint32),
+                       appearance=Appearance(material=material))
 
     def test_meshes_of_one_material_combine(self) -> None:
-        material = PBRMaterial(baseColor=(1.0, 0.0, 0.0))
+        material = PhysicalMaterial(baseColor=(1.0, 0.0, 0.0))
         combined = combined_mesh([self._mesh(material), self._mesh(material)])
-        assert combined.material is material
+        assert combined.appearance.material is material
 
     def test_meshes_of_different_materials_do_not(self) -> None:
         """Silently keeping the first one paints the whole prototype in it."""
 
         with pytest.raises(ValueError):
-            combined_mesh([self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),
-                           self._mesh(PBRMaterial(baseColor=(0.0, 1.0, 0.0)))])
+            combined_mesh([self._mesh(PhysicalMaterial(baseColor=(1.0, 0.0, 0.0))),
+                           self._mesh(PhysicalMaterial(baseColor=(0.0, 1.0, 0.0)))])
 
     def test_an_override_says_they_may(self) -> None:
-        wanted = PBRMaterial(baseColor=(0.0, 0.0, 1.0))
+        wanted = PhysicalMaterial(baseColor=(0.0, 0.0, 1.0))
         combined = combined_mesh(
-            [self._mesh(PBRMaterial(baseColor=(1.0, 0.0, 0.0))),
-             self._mesh(PBRMaterial(baseColor=(0.0, 1.0, 0.0)))],
+            [self._mesh(PhysicalMaterial(baseColor=(1.0, 0.0, 0.0))),
+             self._mesh(PhysicalMaterial(baseColor=(0.0, 1.0, 0.0)))],
             material=wanted)
-        assert combined.material is wanted
+        assert combined.appearance.material is wanted

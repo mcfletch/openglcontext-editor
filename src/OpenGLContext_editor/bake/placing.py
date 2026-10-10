@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 
 __all__ = ['about_the_vertical', 'about_the_road', 'placed',
@@ -61,11 +62,16 @@ def placed(mesh: PBRMesh, position: Any, yaw: float = 0.0,
     return PBRMesh(
         positions=(points + np.asarray(position, dtype='d')).astype('f'),
         normals=(np.asarray(mesh.normals, dtype='d') @ turn.T).astype('f'),
-        texcoords=mesh.texcoords, indices=mesh.indices, material=mesh.material)
+        texcoords=mesh.texcoords, indices=mesh.indices, solid=mesh.solid,
+        appearance=mesh.appearance)
 
 
 def gathered(meshes: Sequence[PBRMesh], material: Any) -> PBRMesh:
-    """Several placed meshes of one material as a single mesh."""
+    """Several placed meshes of one material as a single opaque mesh
+
+    Opaque as the engine's atlas meshes are: a plate's picture has
+    transparent corners, which lie outside the geometry cut to its outline.
+    """
     if not len(meshes):
         raise ValueError("nothing to gather: a mesh needs some geometry in it")
     positions, normals, texcoords, indices, offset = [], [], [], [], 0
@@ -79,4 +85,6 @@ def gathered(meshes: Sequence[PBRMesh], material: Any) -> PBRMesh:
         positions=np.concatenate(positions).astype('f'),
         normals=np.concatenate(normals).astype('f'),
         texcoords=np.concatenate(texcoords).astype('f'),
-        indices=np.concatenate(indices).astype(np.uint32), material=material)
+        indices=np.concatenate(indices).astype(np.uint32),
+        solid=all(mesh.solid for mesh in meshes),
+        appearance=Appearance(material=material, alphaMode='OPAQUE'))

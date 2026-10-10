@@ -33,8 +33,8 @@ from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 import numpy as np
-from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.loaders.gltf.writer import SceneNode
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.road import (
     RoadProfile,
     banked_sections,
@@ -57,6 +57,7 @@ from OpenGLContext.scenegraph.roadworks import (
     tunnel_lamps,
     tunnel_meshes,
 )
+from vrml.x3d import nodes as x3d
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.world.structures import Op
@@ -1276,7 +1277,7 @@ class RoadLayer:
     """
 
     path: RoadPath
-    material: PBRMaterial | None = None
+    material: PhysicalMaterial | None = None
     finest_spacing: float = FINEST_SPACING
     spacing_per_error: float = SPACING_PER_ERROR
     coarsest_spacing: float = COARSEST_SPACING
@@ -1301,10 +1302,10 @@ class RoadLayer:
     #: How the road's bores were cut out of the ground, written with the road
     #: so a game cuts its collider the same way; None writes the defaults.
     bores: BoreCut | None = None
-    structure_material: PBRMaterial | None = None
-    barrier: PBRMaterial | None = None
+    structure_material: PhysicalMaterial | None = None
+    barrier: PhysicalMaterial | None = None
     transition: float = TRANSITION_LENGTH
-    _material: PBRMaterial = field(init=False, repr=False)
+    _material: PhysicalMaterial = field(init=False, repr=False)
     _surface: Any = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
@@ -1323,7 +1324,7 @@ class RoadLayer:
                                      self.path.profile)
         self._material = tarmac_material(
             wetness=self.wetness, profile=self.path.profile,
-            image=ExternalImage(SURFACE_IMAGE, srgb=True))
+            image=x3d.ImageTexture(url=[SURFACE_IMAGE]))
 
     def metadata(self) -> dict[str, Any]:
         """The road itself, for the tileset's extras.

@@ -10,8 +10,9 @@ import math
 import numpy as np
 import pytest
 from OpenGLContext.loaders.gltf.writer import SceneNode, write_glb
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.transform import Transform
 
 from OpenGLContext_editor.bake.assets import _apply, _local_matrix, combined_mesh, meshes_from_gltf
@@ -21,6 +22,8 @@ def _triangle(**kwargs):
     kwargs.setdefault('positions', np.array([(0, 0, 0), (2, 0, 0), (0, 4, 0)], 'f'))
     kwargs.setdefault('normals', np.array([(0, 0, 1)] * 3, 'f'))
     kwargs.setdefault('indices', np.array([0, 1, 2], np.uint32))
+    if 'material' in kwargs:
+        kwargs['appearance'] = Appearance(material=kwargs.pop('material'))
     return PBRMesh(**kwargs)
 
 
@@ -31,9 +34,9 @@ class TestReadingADocument:
         assert np.allclose(meshes[0].positions, _triangle().positions, atol=1e-6)
 
     def test_its_material_comes_with_it(self) -> None:
-        mesh = _triangle(material=PBRMaterial(baseColor=(0.1, 0.7, 0.2)))
+        mesh = _triangle(material=PhysicalMaterial(baseColor=(0.1, 0.7, 0.2)))
         got = meshes_from_gltf(write_glb(mesh))[0]
-        assert np.allclose(got.material.baseColor, (0.1, 0.7, 0.2), atol=1e-6)
+        assert np.allclose(got.appearance.material.baseColor, (0.1, 0.7, 0.2), atol=1e-6)
 
     def test_several_meshes_all_come_back(self) -> None:
         document = write_glb([SceneNode(mesh=_triangle()),
@@ -102,15 +105,15 @@ class TestCombiningMeshes:
         assert merged.indices.tolist() == [0, 1, 2, 3, 4, 5]
 
     def test_one_shared_material_is_kept(self) -> None:
-        material = PBRMaterial(baseColor=(1, 0, 0))
+        material = PhysicalMaterial(baseColor=(1, 0, 0))
         merged = combined_mesh([_triangle(material=material),
                                 _triangle(material=material)])
-        assert merged.material is material
+        assert merged.appearance.material is material
 
     def test_the_material_can_be_overridden(self) -> None:
-        material = PBRMaterial(baseColor=(0, 1, 0))
+        material = PhysicalMaterial(baseColor=(0, 1, 0))
         merged = combined_mesh([_triangle(), _triangle()], material=material)
-        assert merged.material is material
+        assert merged.appearance.material is material
 
     def test_a_mesh_without_colours_gets_white_ones(self) -> None:
         """Beside one that has them. White is what multiplies a base colour by

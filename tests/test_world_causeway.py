@@ -7,7 +7,7 @@ it was found and the road rides a walled embankment its own width.
 """
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.road import RoadProfile
 from OpenGLContext.scenegraph.roadworks import CONCRETE_ALBEDO
 
@@ -108,7 +108,7 @@ class TestWhatTheWallIsMadeOf:
         for node in layer.content(BoundingBox((-200.0, -50.0, -50.0),
                                               (200.0, 100.0, 250.0)), 1.0):
             if node.name == '%s-wall' % (kind,):
-                return node.mesh.material
+                return node.mesh.appearance.material
         raise AssertionError('no %s wall was written' % (kind,))
 
     def test_the_wall_is_the_concrete_the_fill_is(self) -> None:
@@ -116,12 +116,12 @@ class TestWhatTheWallIsMadeOf:
             == pytest.approx(CONCRETE_ALBEDO, abs=1e-6)
 
     def test_a_caller_may_choose_its_own(self) -> None:
-        wanted = PBRMaterial(baseColor=(0.4, 0.1, 0.1))
+        wanted = PhysicalMaterial(baseColor=(0.4, 0.1, 0.1))
         assert self._named(structure_material=wanted) is wanted
 
     def test_and_the_barrier_material_is_left_for_a_railing(self) -> None:
         """Which is a deck's parapet, and not a causeway's wall."""
-        wanted = PBRMaterial(baseColor=(0.4, 0.1, 0.1))
+        wanted = PhysicalMaterial(baseColor=(0.4, 0.1, 0.1))
         assert self._named(barrier=wanted) is not wanted
 
 

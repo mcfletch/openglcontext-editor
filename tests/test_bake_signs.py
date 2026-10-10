@@ -163,7 +163,8 @@ class TestOneDrawForAllOfThem:
 
     def test_and_the_tile_names_it_rather_than_carrying_it(self) -> None:
         node = _layer().content(REGION, 1.0)[0]
-        assert node.mesh.material.texture('baseColor').uri == ATLAS_IMAGE
+        texture = node.mesh.appearance.material.texture('baseColor')
+        assert list(texture.url) == [ATLAS_IMAGE]
 
     def test_two_kinds_read_different_corners_of_it(self) -> None:
         both = SignLayer(placements=[

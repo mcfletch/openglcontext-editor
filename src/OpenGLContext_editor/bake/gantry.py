@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
+from OpenGLContext.loaders.gltf.writer import SceneNode
 from OpenGLContext.scenegraph.gantry import (
     GantryProfile,
     gantry_atlas,
@@ -33,6 +33,7 @@ from OpenGLContext.scenegraph.gantry import (
     start_line_mesh,
 )
 from OpenGLContext.scenegraph.props import Prop
+from vrml.x3d import nodes as x3d
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.placing import gathered, placed
@@ -72,7 +73,7 @@ class GantryLayer:
     _mesh: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        material = gantry_material(image=ExternalImage(ATLAS_IMAGE, srgb=True),
+        material = gantry_material(image=x3d.ImageTexture(url=[ATLAS_IMAGE]),
                                    cell=self.cell_pixels)
         cells = gantry_atlas(self.cell_pixels)[1]
         one = self.placement

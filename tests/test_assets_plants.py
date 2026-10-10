@@ -228,6 +228,18 @@ class TestWhatTheBakeWrites:
         assert len(document['meshes']) == 4        # two variants, two rungs each
         assert len(document['images']) == 1
 
+    def test_the_plant_is_a_cutout_seen_from_both_faces(self, tmp_path) -> None:
+        _source_, out, species = self._baked(tmp_path)
+        with open(out / species[0].clump, 'rb') as handle:
+            handle.seek(12)
+            length, _kind = struct.unpack('<II', handle.read(8))
+            document = json.loads(handle.read(length))
+        (material,) = document['materials']
+        assert material['alphaMode'] == 'MASK'
+        assert material['alphaCutoff'] == pytest.approx(plants.ALPHA_CUTOFF)
+        assert material['doubleSided'] is True
+        assert document['images'][0]['mimeType'] == 'image/png'
+
     def test_each_variant_names_its_own_two_rungs(self, tmp_path) -> None:
         _source_, _out, species = self._baked(tmp_path)
         assert species[0].clumpMesh == 'fern_a'

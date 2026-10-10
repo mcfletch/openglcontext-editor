@@ -226,8 +226,8 @@ class TestTheRoadAsALayer:
     def test_every_tile_gets_the_same_road_material(self) -> None:
         layer = self._layer()
         region = BoundingBox((-50, -50, -300), (50, 50, -100))
-        first = layer.content(region, error=0.0)[0].mesh.material
-        second = layer.content(region, error=8.0)[0].mesh.material
+        first = layer.content(region, error=0.0)[0].mesh.appearance.material
+        second = layer.content(region, error=8.0)[0].mesh.appearance.material
         assert first is second
 
     def test_a_road_entering_a_tile_twice_is_written_twice(self) -> None:
@@ -249,7 +249,7 @@ class TestTheRoadAsALayer:
         wet = tarmac_material(wetness=0.8)
         region = BoundingBox((-50, -50, -300), (50, 50, -100))
         node = self._layer(material=wet).content(region, error=0.0)[0]
-        assert node.mesh.material is wet
+        assert node.mesh.appearance.material is wet
 
 
 class TestACircuit:

@@ -52,8 +52,9 @@ from OpenGLContext.loaders.gltf.writer import (
     GLTFWriter,
     SceneNode,
 )
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.vegetation.cover import CoverSpecies
 from PIL import Image
 
@@ -298,12 +299,13 @@ def bake(source: PlantSource, directory: str,
 
     # One image object for every rung of every variant: the writer keys its
     # image table on identity, so sharing the object is what stops a megabyte
-    # of texture being written once per mesh.
-    material = PBRMaterial(alphaMode='MASK', alphaCutoff=ALPHA_CUTOFF,
-                           doubleSided=True, metallic=0.0, roughness=0.9,
-                           textures={'baseColor': EncodedImage(
-                               encoded.getvalue(), mime_type='image/png',
-                               srgb=True)})
+    # of texture being written once per mesh. The cutout is the appearance's
+    # alpha mode, and the leaves are seen from both faces, so no mesh is solid.
+    appearance = Appearance(
+        alphaMode='MASK', alphaCutoff=ALPHA_CUTOFF,
+        material=PhysicalMaterial(
+            metallic=0.0, roughness=0.9,
+            baseTexture=EncodedImage(encoded.getvalue(), mime_type='image/png')))
 
     writer = GLTFWriter(generator='OpenGLContext-editor plant bake')
     species: list[CoverSpecies] = []
@@ -316,7 +318,7 @@ def bake(source: PlantSource, directory: str,
                            normals=attributes['NORMAL'],
                            texcoords=attributes['TEXCOORD_0'],
                            indices=np.asarray(indices, 'u4').reshape(-1),
-                           material=material)
+                           solid=False, appearance=appearance)
             writer.add_mesh(mesh, name=name)
             writer.add_node(SceneNode(name=name, mesh=mesh))
         species.append(CoverSpecies(

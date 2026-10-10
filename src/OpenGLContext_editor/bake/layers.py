@@ -30,8 +30,10 @@ from typing import Any, Protocol, runtime_checkable
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import InstanceSet, SceneNode
 from OpenGLContext.loaders.tiles3d.procedural import terrain_patch
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.appearance import Appearance
+from OpenGLContext.scenegraph.gaussiansplats import GaussianSplats
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.terrain import Relief
 from OpenGLContext.scenegraph.terrain.ground import GROUND_MATERIAL
 from OpenGLContext.scenegraph.terrain.holes import cut
@@ -136,7 +138,7 @@ class HeightfieldLayer:
     height_fn_at: Callable[[float], HeightFn] | None = None
     color_fn: ColorFn | None = None
     water_level: float | None = None
-    material: PBRMaterial | None = None
+    material: PhysicalMaterial | None = None
     holes: Holes | None = None
     relief: Relief | None = None
     finest_error: float | None = None
@@ -170,8 +172,11 @@ class HeightfieldLayer:
             if opened is None:
                 return []
             positions, normals, colors, indices = opened
+        # Not solid: a tile's skirt is seen from both faces.
         mesh = PBRMesh(positions=positions, normals=normals, colors=colors,
-                       indices=indices, material=self.material or _ground_material())
+                       indices=indices, solid=False,
+                       appearance=Appearance(
+                           material=self.material or _ground_material()))
         return [SceneNode(mesh=mesh, name='%s_%d' % (self.name, self.resolution))]
 
     def sample_spacing(self, footprint: BoundingBox) -> float:
@@ -244,20 +249,21 @@ def _opened(positions: np.ndarray, normals: np.ndarray, colors: np.ndarray,
             renumbered.reshape(-1).astype(np.uint32))
 
 
-def _ground_material() -> PBRMaterial:
-    """The material a tile's ground carries: vertex-coloured, two-sided.
+def _ground_material() -> PhysicalMaterial:
+    """The material a tile's ground carries: vertex-coloured, and named.
 
-    Two-sided because a tile's skirt is seen from both faces. Vertex-coloured
-    because that is what any renderer makes of it, and **named**, because the
-    engine's own makes more: a primitive whose material is called ``ground`` is
-    drawn with the world's ground shading -- the detail materials blended per
-    pixel from the control map beside the tileset, and the light baked into the
-    landscape (:mod:`OpenGLContext.scenegraph.terrain.ground`). The colours stay
-    on it either way, so a viewer that has never heard of that convention still
-    draws a landscape rather than a white one.
+    Vertex-coloured because that is what any renderer makes of it, and
+    **named**, because the engine's own makes more: a primitive whose material
+    is called ``ground`` is drawn with the world's ground shading -- the detail
+    materials blended per pixel from the control map beside the tileset, and
+    the light baked into the landscape
+    (:mod:`OpenGLContext.scenegraph.terrain.ground`). The colours stay on it
+    either way, so a viewer that has never heard of that convention still
+    draws a landscape rather than a white one. The mesh that wears it is not
+    solid, since a tile's skirt is seen from both faces.
     """
-    return PBRMaterial(baseColor=(1.0, 1.0, 1.0), metallic=0.0, roughness=1.0,
-                       doubleSided=True, DEF=GROUND_MATERIAL)
+    return PhysicalMaterial(baseColor=(1.0, 1.0, 1.0), metallic=0.0, roughness=1.0,
+                            DEF=GROUND_MATERIAL)
 
 
 # --- open water ---------------------------------------------------------------
@@ -291,7 +297,7 @@ class WaterLayer:
     #: few hundred metres, which aliases the wave away and leaves a flat plate.
     resolution: int | None = None
     probe: int = 17
-    material: PBRMaterial | None = None
+    material: PhysicalMaterial | None = None
     #: How the surface moves. Open water with nowhere to go is a lake: still
     #: water is a mirror, and a mirror that size with nothing over it but a pale
     #: sky is a white plate lying in the landscape.
@@ -450,6 +456,20 @@ def _overlaps(a: BoundingBox, b: BoundingBox) -> bool:
     return bool(np.all(a.minimum <= b.maximum) and np.all(a.maximum >= b.minimum))
 
 
+def _primitive_bounds(primitive: PBRMesh | GaussianSplats) -> BoundingBox | None:
+    """One primitive's bounds in its node's frame, or None where it is empty
+
+    A mesh is measured over its vertices, and Gaussian splats over each
+    splat's 3-sigma ellipsoid, which is what the engine draws of them.
+    """
+    if isinstance(primitive, GaussianSplats):
+        extent = primitive.splats().bounds()
+        return None if extent is None else BoundingBox(*extent)
+    if primitive.positions is None:
+        return None
+    return BoundingBox.of_points(primitive.positions)
+
+
 def node_bounds(node: SceneNode) -> BoundingBox | None:
     """A scene node's world bounds, instances included.
 
@@ -460,10 +480,9 @@ def node_bounds(node: SceneNode) -> BoundingBox | None:
     of, and a tile whose content escapes its bounding volume is culled while it
     is still on screen.
     """
-    meshes = ([node.mesh] if isinstance(node.mesh, PBRMesh)
-              else list(node.mesh or ()))
-    box = BoundingBox.joined(BoundingBox.of_points(mesh.positions)
-                             for mesh in meshes if mesh.positions is not None)
+    primitives = ([node.mesh] if isinstance(node.mesh, (PBRMesh, GaussianSplats))
+                  else list(node.mesh or ()))
+    box = BoundingBox.joined(_primitive_bounds(one) for one in primitives)
     if box is None:
         return None
     if node.instances is not None:

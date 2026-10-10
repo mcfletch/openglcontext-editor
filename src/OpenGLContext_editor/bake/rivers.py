@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 from OpenGLContext.loaders.gltf.writer import SceneNode
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
 from OpenGLContext.scenegraph.water import (
     FLOWING,
     WaterStyle,
@@ -71,7 +71,7 @@ class RiverLayer:
     channels: Sequence[Any] = field(default_factory=list)
     ground: HeightFn | None = None
     style: WaterStyle = FLOWING
-    material: PBRMaterial | None = None
+    material: PhysicalMaterial | None = None
     name: str = 'river'
     #: Whether the card moves the surface. A baked world is streamed and
     #: redrawn every frame, so it should; a caller wanting a still picture of

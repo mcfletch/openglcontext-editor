@@ -112,8 +112,8 @@ class TestThePictureItReads:
 
     def test_the_tile_names_the_file_rather_than_carrying_it(self) -> None:
         mesh = _layer().content(EVERYWHERE, error=1.0)[0].mesh
-        texture = mesh.material.textures['baseColor']
-        assert texture.uri == ATLAS_IMAGE
+        texture = mesh.appearance.material.textures['baseColor']
+        assert list(texture.url) == [ATLAS_IMAGE]
 
 
 class TestWhatAGameIsToldAboutIt:

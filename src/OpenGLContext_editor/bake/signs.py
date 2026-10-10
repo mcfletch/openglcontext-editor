@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from OpenGLContext.loaders.gltf.writer import ExternalImage, SceneNode
+from OpenGLContext.loaders.gltf.writer import SceneNode
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.roadsigns import (
     SignFace,
@@ -32,6 +32,7 @@ from OpenGLContext.scenegraph.roadsigns import (
     sign_atlas,
     sign_mesh,
 )
+from vrml.x3d import nodes as x3d
 
 from OpenGLContext_editor.bake.bounds import BoundingBox
 from OpenGLContext_editor.bake.placing import gathered, placed
@@ -74,7 +75,7 @@ class SignLayer:
     def __post_init__(self) -> None:
         faces = self.faces()
         self._material = atlas_material(
-            image=ExternalImage(ATLAS_IMAGE, srgb=True), faces=faces,
+            image=x3d.ImageTexture(url=[ATLAS_IMAGE]), faces=faces,
             cell=self.plate_pixels)
         cells = sign_atlas(faces, self.plate_pixels)[1] if faces else {}
         self._prototypes = {

@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 from OpenGLContext.loaders import gltf
+from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 
 __all__ = ['meshes_from_gltf', 'combined_mesh']
@@ -54,11 +55,15 @@ def combined_mesh(meshes: list[PBRMesh], material: Any = None) -> PBRMesh:
     one -- on their material, unless ``material`` says which the result takes.
     A tree's bark and its alpha-masked needles are two materials and stay two
     meshes; combining them would paint the needles in bark.
+
+    The result wears the first mesh's appearance, which carries the alpha mode
+    with the material, or a new appearance of ``material``. It is solid only
+    where every mesh is.
     """
     if not meshes:
         raise ValueError("no meshes to combine")
     if material is None:
-        wearing = {id(mesh.material) for mesh in meshes}
+        wearing = {id(_material(mesh)) for mesh in meshes}
         if len(wearing) > 1:
             raise ValueError(
                 "%d meshes of %d different materials cannot be combined into "
@@ -85,7 +90,14 @@ def combined_mesh(meshes: list[PBRMesh], material: Any = None) -> PBRMesh:
         texcoords=_gathered(drawn, 'texcoords', _or_zeros, 2),
         colors=_gathered(drawn, 'colors', _or_ones),
         indices=np.concatenate(indices),
-        material=material if material is not None else meshes[0].material)
+        solid=all(mesh.solid for mesh in meshes),
+        appearance=(Appearance(material=material) if material is not None
+                    else meshes[0].appearance))
+
+
+def _material(mesh: PBRMesh) -> Any:
+    """The material of a mesh's appearance, or None for a mesh with none"""
+    return getattr(mesh.appearance, 'material', None)
 
 
 def _gathered(drawn: list[tuple[PBRMesh, np.ndarray]], attribute: str,
@@ -152,7 +164,7 @@ def _transformed(mesh: PBRMesh, matrix: np.ndarray) -> PBRMesh:
     return PBRMesh(positions=positions, normals=normals, tangents=tangents,
                    texcoords=mesh.texcoords, texcoords1=mesh.texcoords1,
                    colors=mesh.colors, indices=mesh.indices,
-                   material=mesh.material, draw_mode=mesh.draw_mode,
+                   appearance=mesh.appearance, draw_mode=mesh.draw_mode,
                    solid=mesh.solid)
 
 

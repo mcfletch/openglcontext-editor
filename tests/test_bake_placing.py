@@ -1,12 +1,13 @@
 """Standing a prototype somewhere, and writing several of them as one mesh."""
 import numpy as np
 import pytest
-from OpenGLContext.scenegraph.pbrmaterial import PBRMaterial
+from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
+from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial, appearance_alpha
 
 from OpenGLContext_editor.bake.placing import about_the_vertical, gathered, placed
 
-MATERIAL = PBRMaterial(baseColor=(1.0, 1.0, 1.0))
+MATERIAL = PhysicalMaterial(baseColor=(1.0, 1.0, 1.0))
 
 
 def _flag():
@@ -16,7 +17,7 @@ def _flag():
                    normals=np.tile(np.array([0.0, 0.0, 1.0], 'f'), (3, 1)),
                    texcoords=np.zeros((3, 2), 'f'),
                    indices=np.array([0, 1, 2], dtype=np.uint32),
-                   material=MATERIAL)
+                   appearance=Appearance(material=MATERIAL))
 
 
 class TestTurning:
@@ -49,6 +50,13 @@ class TestPlacing:
         prototype = _flag()
         assert placed(prototype, (1.0, 0.0, 0.0)).texcoords is prototype.texcoords
 
+    def test_it_keeps_its_appearance_and_its_sides(self) -> None:
+        prototype = _flag()
+        prototype.solid = False
+        stood = placed(prototype, (1.0, 0.0, 0.0))
+        assert stood.appearance is prototype.appearance
+        assert not stood.solid
+
 
 class TestGathering:
     def test_all_of_them_are_in_it(self) -> None:
@@ -67,7 +75,11 @@ class TestGathering:
 
     def test_it_wears_the_one_material(self) -> None:
         assert gathered([placed(_flag(), (0.0, 0.0, 0.0))],
-                        MATERIAL).material is MATERIAL
+                        MATERIAL).appearance.material is MATERIAL
+
+    def test_it_is_opaque(self) -> None:
+        one = gathered([placed(_flag(), (0.0, 0.0, 0.0))], MATERIAL)
+        assert appearance_alpha(one.appearance)[0] == 'OPAQUE'
 
     def test_gathering_nothing_is_an_error(self) -> None:
         with pytest.raises(ValueError):
