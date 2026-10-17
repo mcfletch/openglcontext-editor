@@ -331,6 +331,15 @@ added as the tree descends, and both are bounded by what the level can show:
   `field_resolution = 4097` draws the 16 m and 8 m bands. The finest tile
   carries the grain at the finest tile's error, the figures the landscape is
   built with (`HeightfieldLayer.finest_error`).
+- **Bare rock.** Where the hillside is steeper than `procedural.ROCK_SLOPE`
+  (0.78 to 1.05, rise over run) the tiles carry it as rock
+  (`OpenGLContext.scenegraph.terrain.RockRelief`): a slab with flat faces
+  scraped into it and a step at every edge, as high as `ProceduralWorld.rock`
+  metres (0.7; 0 leaves the hillside smooth). It is added beside the grain, off
+  the strip a road was built on, and only where the ground is `tiles`. A face
+  smaller than three samples across is left out of a coarse tile, so the finest
+  tiles carry the faces and the coarse ones the slab; at the default spacing the
+  faces are not drawn.
 - **Loose stone.** `bake.stones.StoneLayer` strews knee-high rock over the
   hillsides and writes what a tile can show as placements of a handful of
   shapes — one node per shape, however many stones the tile holds. A stone

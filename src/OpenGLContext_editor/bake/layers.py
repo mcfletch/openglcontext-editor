@@ -34,7 +34,7 @@ from OpenGLContext.scenegraph.appearance import Appearance
 from OpenGLContext.scenegraph.gaussiansplats import GaussianSplats
 from OpenGLContext.scenegraph.pbrmesh import PBRMesh
 from OpenGLContext.scenegraph.physicalmaterial import PhysicalMaterial
-from OpenGLContext.scenegraph.terrain import Relief
+from OpenGLContext.scenegraph.terrain import Relief, Reliefs
 from OpenGLContext.scenegraph.terrain.ground import GROUND_MATERIAL
 from OpenGLContext.scenegraph.terrain.holes import cut
 from OpenGLContext.scenegraph.water import LAKE, mesh_across, water_surface
@@ -140,7 +140,7 @@ class HeightfieldLayer:
     water_level: float | None = None
     material: PhysicalMaterial | None = None
     holes: Holes | None = None
-    relief: Relief | None = None
+    relief: Relief | Reliefs | None = None
     finest_error: float | None = None
     skirt: float = 2.0
     name: str = 'terrain'

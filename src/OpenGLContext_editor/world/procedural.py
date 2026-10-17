@@ -38,7 +38,7 @@ from OpenGLContext.scenegraph.roadworks import (
     BoreCut,
     TunnelProfile,
 )
-from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, LayerRule, Relief
+from OpenGLContext.scenegraph.terrain import GROUND_RELIEF, LayerRule, Relief, Reliefs, RockRelief
 from OpenGLContext.scenegraph.terrain.splat import SplatTerrain
 
 from OpenGLContext_editor.bake.assets import combined_mesh, meshes_from_gltf
@@ -264,6 +264,13 @@ MOST_CLEARING_BEYOND = 6.0
 #: whose new lane runs into the trees.
 CLIMBING_LANE = 3.6
 
+#: How steep a hillside is, as rise over run, where it begins to be bare rock and where it is
+#: whole rock, and how high that rock stands. Steeper than a tree or a stone will stay on.
+ROCK_SLOPE = (0.78, 1.05)
+#: Metres either side of a point the slope is measured over.
+ROCK_SLOPE_EPS = 3.0
+ROCK_HEIGHT = 0.7
+
 #: Boulders per square metre, before anything is filtered out, and how big they
 #: are. Sparse: a rock is a thing a driver notices, and a landscape strewn with
 #: them evenly is a quarry rather than a hillside.
@@ -323,7 +330,7 @@ STONE_SETTLE = 0.2
 #: vertices, and at knee height twenty faces is a stone while eighty is eighty
 #: faces nobody counts. A tile carrying fifty of them pays the difference
 #: fifty times.
-STONE_PROFILE = RockProfile(facets=0, roughness=0.4, settled=0.4)
+STONE_PROFILE = RockProfile(facets=0, roughness=0.4, settled=0.4, scrapes=3)
 
 #: Where a boulder may lie: outside the strip cleared for the road by its own
 #: size and this much more, and no further out than this from it. The near
@@ -514,6 +521,9 @@ class ProceduralWorld:
                      'and the shore is painted round the new coast'),
         WorldSetting('relief', float, 'how tall the hills are, against the '
                      "shipped landscape's own; 0 is flat, higher is alpine"),
+        WorldSetting('rock', float, 'how high bare rock stands above the ground, in '
+                     'metres, where the hillside is steep enough to be rock; 0 '
+                     'leaves the ground smooth there'),
         WorldSetting('maximum_bank', float,
                      'how far the corners lean, as a fraction. 0 lays the '
                      'circuit flat; the ceiling makes it an oval'),
@@ -600,6 +610,12 @@ class ProceduralWorld:
     #: How tall the hills are, against the shipped landscape's own relief.
     #: Ignored when a ``source`` is given, which carries its own.
     relief: float = RELIEF
+    #: How high bare rock stands above the ground, in metres. Where the hillside is
+    #: steeper than :data:`ROCK_SLOPE` the tiles carry it as rock: a slab with flat
+    #: faces scraped into it and a step at every edge
+    #: (:class:`~OpenGLContext.scenegraph.terrain.RockRelief`), meshed as finely as
+    #: the tile's samples allow. Only in tiled ground. 0 leaves the hillside smooth.
+    rock: float = ROCK_HEIGHT
     #: Where the ground comes from: a base and the edits made to it. None for
     #: the shipped landscape at this world's ``relief``, which is what a world
     #: nobody has authored has.
@@ -632,6 +648,7 @@ class ProceduralWorld:
     _terrain: Layer | None = field(default=None, init=False, repr=False)
     _landscape: FieldTerrainLayer | None = field(default=None, init=False,
                                                  repr=False)
+    _rock_where: Any = field(default=None, init=False, repr=False, compare=False)
     _scatter: Any = field(default=None, init=False, repr=False)
     _character: Any = field(default=None, init=False, repr=False)
     _start_line: StartFinish | None = field(default=None, init=False,
@@ -1149,7 +1166,7 @@ class ProceduralWorld:
         return root_error_for(self.extent, self.resolution) \
             / float(1 << max(int(self.depth), 0))
 
-    def grain_drawn(self) -> Relief | None:
+    def grain_drawn(self) -> Relief | Reliefs | None:
         """The grain the tiles carry, held to what the landscape can hold too.
 
         None for a world with no grain and for one that draws its own field,
@@ -1165,7 +1182,34 @@ class ProceduralWorld:
         if self.grain is None or self.ground != 'tiles':
             return None
         held = self.grain.no_finer_than(self.field_spacing())
-        return replace(held, where=self.grain_applies())
+        grain = replace(held, where=self.grain_applies())
+        if self.rock <= 0.0:
+            return grain
+        return Reliefs((grain, RockRelief(where=self.rock_applies(), height=self.rock,
+                                          seed=self.seed)))
+
+    def rock_applies(self) -> HeightFn:
+        """How rocky each place is, from 0 to 1: the steepness of the landscape, off the road.
+
+        Measured on the landscape's own height function a few metres either side, so it is
+        the hillside that is rock and not the grain on it. The strip a road was built on
+        keeps none, as it keeps no grain (:meth:`grain_applies`).
+        """
+        if self._rock_where is not None:
+            return self._rock_where
+        ground = self.height_fn()
+        clear = self.grain_applies()
+        eps = ROCK_SLOPE_EPS
+        begins, whole = ROCK_SLOPE
+
+        def applies(x: Any, z: Any) -> Any:
+            x, z = np.asarray(x, dtype='d'), np.asarray(z, dtype='d')
+            rise_x = (np.asarray(ground(x + eps, z)) - np.asarray(ground(x - eps, z))) / (2 * eps)
+            rise_z = (np.asarray(ground(x, z + eps)) - np.asarray(ground(x, z - eps))) / (2 * eps)
+            steep = np.clip((np.hypot(rise_x, rise_z) - begins) / (whole - begins), 0.0, 1.0)
+            return steep if clear is None else steep * np.asarray(clear(x, z))
+        self._rock_where = applies
+        return applies
 
     def grain_applies(self) -> HeightFn | None:
         """How much grain each place gets, from 0 on the road to 1 clear of it.
