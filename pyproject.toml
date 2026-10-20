@@ -47,7 +47,7 @@ dependencies = [
     # pre-release is named because an installer skips one it was not asked for.
     #
     # `gltf` is the loader and writer a bake reads and writes tilesets through.
-    "OpenGLContext[gltf]>=3.0.0a5",
+    "OpenGLContext[gltf]>=3.0.0a7",
     "numpy>=2.0",
     # The reducer `meshlod` builds a chain with, and the weld and
     # point-to-triangle projection a bake is built on. A core dependency
